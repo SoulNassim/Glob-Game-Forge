@@ -93,7 +93,8 @@ function aim(camera, size, angle, ortho) {
 }
 
 // Interactive viewer inside `container`. Returns controls for clips and stills.
-export async function createViewer(container, url) {
+// `autoRotate` turns the model slowly until the user grabs it; `grid: false` hides the floor grid.
+export async function createViewer(container, url, { autoRotate = false, grid: showGrid = true } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -101,6 +102,7 @@ export async function createViewer(container, url) {
   const scene = new THREE.Scene();
   lights(scene);
   const grid = new THREE.GridHelper(10, 20, 0x3f3f46, 0x27272a);
+  grid.visible = showGrid;
   scene.add(grid);
   const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 1000);
   const { object, clips } = await loadModel(url);
@@ -111,6 +113,9 @@ export async function createViewer(container, url) {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.copy(target);
   controls.enableDamping = true;
+  controls.autoRotate = autoRotate;
+  controls.autoRotateSpeed = 1.2;
+  controls.addEventListener("start", () => { controls.autoRotate = false; });
   const mixer = new THREE.AnimationMixer(object);
   let action = null;
   const clock = new THREE.Clock();
@@ -147,7 +152,7 @@ export async function createViewer(container, url) {
       grid.visible = false;
       renderer.render(scene, camera);
       const data = renderer.domElement.toDataURL("image/png");
-      grid.visible = true;
+      grid.visible = showGrid;
       return data;
     },
     dispose() {

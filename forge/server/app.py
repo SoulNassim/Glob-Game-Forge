@@ -1694,6 +1694,20 @@ async def api_studio_update_asset(payload: dict[str, Any], project: str = "defau
     return result
 
 
+@app.delete("/api/studio/output")
+async def api_studio_remove_output(path: str, output: str, project: str = "default") -> dict[str, Any]:
+    result = _overview_call(asset_studio.remove_output, _ws_dir(project), path, output)
+    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    return result
+
+
+@app.post("/api/studio/output/restore")
+async def api_studio_restore_outputs(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    restored = _overview_call(asset_studio.restore_outputs, _ws_dir(project), list(payload.get("moves") or []))
+    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    return {"restored": restored}
+
+
 @app.post("/api/studio/preview")
 async def api_studio_preview(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     try:

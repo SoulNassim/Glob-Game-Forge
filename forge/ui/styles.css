@@ -1231,3 +1231,44 @@ select option:disabled { color: var(--faint); }
 .ub-dot.bad { background: var(--bad); box-shadow: none; }
 .ub-pct { font: 12px var(--mono); color: var(--muted); }
 .set-row > .update-actions { flex: none; flex-direction: row; gap: 8px; }
+
+/* Full-screen scenes cross-fade into each other (see showScene / hideScene in app.js) */
+.scene-over { z-index: 40 !important; }
+.scene-out { animation: scene-out .3s ease forwards !important; pointer-events: none; }
+@keyframes scene-out { to { opacity: 0; } }
+
+/* Asset hero: the newest 3D model fills the slot when there is no winner image */
+.winner-box.hero-3d { position: relative; background: radial-gradient(ellipse at 50% 85%, rgba(56, 189, 248, .10), transparent 60%), var(--panel-2); cursor: grab; }
+.winner-box.hero-3d:active { cursor: grabbing; }
+.hero-3d .hero-poster { position: absolute; inset: 0; object-fit: contain; transition: opacity .5s ease; }
+.hero-3d .hero-stage { position: absolute; inset: 0; opacity: 0; transition: opacity .6s ease; }
+.hero-3d .hero-stage canvas { width: 100%; height: 100%; display: block; }
+.hero-3d.live .hero-stage { opacity: 1; }
+.hero-3d.live .hero-poster { opacity: 0; }
+.hero-3d .hero-badge { z-index: 1; pointer-events: none; }
+.hero-3d .hero-open { position: absolute; top: 10px; right: 10px; z-index: 1; display: inline-flex; align-items: center; gap: 6px; opacity: 0; transition: opacity .15s; }
+.hero-3d .hero-open svg { width: 14px; height: 14px; }
+.hero-3d:hover .hero-open, .hero-3d .hero-open:focus-visible { opacity: 1; }
+
+/* Delete an output: × on the card, Undo in the toast */
+.out { position: relative; }
+.out-del, .chip-del { display: grid; place-items: center; padding: 0; border: 1px solid var(--line-strong); color: var(--muted); cursor: pointer; line-height: 1; }
+.out-del { position: absolute; top: 8px; right: 8px; z-index: 2; width: 26px; height: 26px; border-radius: 50%; background: rgba(9, 9, 11, .78); backdrop-filter: blur(6px); font-size: 17px; opacity: 0; transform: scale(.85); transition: opacity .15s, transform .15s, color .15s, border-color .15s; }
+.out:hover .out-del, .out-del:focus-visible { opacity: 1; transform: none; }
+.out-del:hover, .chip-del:hover { color: #fda4af; border-color: #fb7185; }
+@media (hover: none) { .out-del { opacity: 1; transform: none; } }
+.out.leaving, .file-chip-wrap.leaving { opacity: .35; transform: scale(.97); pointer-events: none; transition: opacity .2s, transform .2s; }
+.file-chip-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.chip-del { width: 22px; height: 22px; border-radius: 6px; background: var(--panel-2); font-size: 14px; }
+.toast.has-action { display: flex; align-items: center; gap: 14px; }
+.toast-act { border: 0; background: none; padding: 0; color: var(--sakura); font-weight: 600; cursor: pointer; }
+.toast-act:hover { text-decoration: underline; }
+
+/* Copy prompt + images on the generation sheet */
+.copy-req { display: inline-flex; align-items: center; gap: 7px; }
+.copy-req svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.hero-3d .hero-open svg { fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+/* Prompt autosave tick */
+label[for=assetPrompt]::after { content: " · saved"; color: #86efac; opacity: 0; transition: opacity .3s; }
+label[for=assetPrompt].saved::after { opacity: 1; }

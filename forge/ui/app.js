@@ -67,13 +67,19 @@ function humanize(name) {
 }
 
 let toastTimer;
-function toast(message, isError = false) {
+// `action` adds one button to the toast, e.g. { label: "Undo", run() {…} }, and keeps it up a little longer.
+function toast(message, isError = false, action = null) {
   const el = $("#toast");
   el.textContent = message;
-  el.className = `toast${isError ? " error" : ""}`;
+  el.className = `toast${isError ? " error" : ""}${action ? " has-action" : ""}`;
+  if (action) {
+    const btn = Object.assign(document.createElement("button"), { type: "button", className: "toast-act", textContent: action.label });
+    btn.addEventListener("click", () => { el.hidden = true; action.run(); }, { once: true });
+    el.append(btn);
+  }
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
+  toastTimer = setTimeout(() => { el.hidden = true; }, action ? 7000 : 3500);
 }
 
 function storeGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
@@ -235,7 +241,7 @@ function timeAgo(seconds) {
 }
 
 async function openProjects() {
-  $("#projectsView").hidden = false;
+  showScene($("#projectsView"));
   $("#closeProjectsBtn").hidden = !state.project;
   $("#projectGrid").innerHTML = `<div class="pv-loading">Loading projects…</div>`;
   try { state.cards = (await api("/api/projects/cards")).projects; } catch (err) { toast(err.message, true); state.cards = []; }
@@ -245,7 +251,38 @@ async function openProjects() {
   }).catch(() => {});
 }
 
-function closeProjects() { $("#projectsView").hidden = true; }
+function closeProjects() { hideScene($("#projectsView")); }
+
+// ---------- full-screen scenes ----------
+// Projects, settings, setup, new project and import each cover the app. Going from one to the next
+// cross-fades: the old scene stays up under the new one until it has faded in, so the app never shows
+// through. A scene is only taken down after a short buffer, in case the next one opens right after.
+const SCENE_BUFFER = 140;
+const SCENE_FADE = 520;
+const sceneCovers = () => [...document.querySelectorAll("#projectsView, #settingsView, .onboard")];
+
+function showScene(el) {
+  const behind = sceneCovers().some((s) => s !== el && !s.hidden);
+  clearTimeout(el._sceneTimer);
+  delete el.dataset.leaving;
+  el.classList.remove("scene-out");
+  if (!el.hidden) return;
+  el.classList.toggle("scene-over", behind);
+  el.hidden = false;
+  el._sceneTimer = setTimeout(() => el.classList.remove("scene-over"), SCENE_FADE);
+}
+
+function hideScene(el) {
+  if (el.hidden || el.dataset.leaving) return;
+  el.dataset.leaving = "1";
+  el._sceneTimer = setTimeout(() => {
+    const next = sceneCovers().some((s) => s !== el && !s.hidden && !s.dataset.leaving);
+    const done = () => { el.hidden = true; el.classList.remove("scene-out", "scene-over"); delete el.dataset.leaving; };
+    if (next) { el._sceneTimer = setTimeout(done, SCENE_FADE); return; } // the next scene fades in over this one
+    el.classList.add("scene-out");
+    el._sceneTimer = setTimeout(done, 320);
+  }, SCENE_BUFFER);
+}
 
 function renderProjectGrid() {
   const query = $("#projectSearch").value.trim().toLowerCase();
@@ -301,7 +338,7 @@ const LOOKS = ["Low-poly", "Stylized hand-painted", "Realistic PBR", "Toon / cel
 function startOnboarding() {
   closeProjects();
   state.ob = { step: 0, name: "", pitch: "", genres: [], looks: [], dimension: "3D", rules: "" };
-  $("#onboarding").hidden = false;
+  showScene($("#onboarding"));
   $("#onboarding").classList.remove("forging");
   spawnPetals();
   renderOnboarding();
@@ -322,7 +359,7 @@ function renderOnboarding() {
   const steps = [
     () => `<div class="ob-step intro"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">Glob</p><h1>Every world starts<br>with a <em>spark</em>.</h1>
       <p class="ob-sub">Answer three quick questions and the agent builds your project: sections, pages, first assets and a style bible.</p>
-      <button class="ob-next" data-ob-next>Begin</button></div>`,
+      <div class="ob-nav"><button class="ob-next" data-ob-next>Begin</button><button class="ob-back" data-imp-open title="Import a Godot, Unity or Unreal project">Import a game</button></div></div>`,
     () => `<div class="ob-step"><p class="ob-kicker">1 / 3 · Name</p><h1>What's it called?</h1>
       <input id="obName" class="ob-input" maxlength="60" placeholder="The Hollow Below" value="${esc(ob.name)}" autofocus>
       <button class="ob-next" data-ob-next>Continue</button></div>`,
@@ -359,8 +396,8 @@ async function skipOnboarding() {
   syncOnboarding();
   try {
     const project = await createProject(state.ob.name);
-    $("#onboarding").hidden = true;
-    await switchProject(project);
+    await switchProject(project); // load behind the scene, so the app is ready when it fades out
+    hideScene($("#onboarding"));
     toast(`Created ${humanize(project)}: a blank workspace`);
   } catch (err) { toast(err.message, true); }
 }
@@ -413,8 +450,8 @@ async function forgeWorld() {
 }
 
 async function finishOnboarding() {
-  $("#onboarding").hidden = true;
   await switchProject(state.project);
+  hideScene($("#onboarding"));
 }
 
 async function switchProject(name) {
@@ -799,14 +836,14 @@ function autoGrow() {
 async function settingsDialog(tab) {
   toggleModelPop(false);
   state.settings = { tab: tab || state.settings?.tab || "models", adding: null };
-  $("#settingsView").hidden = false;
+  showScene($("#settingsView"));
   await renderSettings();
 }
 
 function closeSettings() {
-  $("#settingsView").hidden = true;
+  hideScene($("#settingsView"));
   // "Connect a provider…" in first-run setup comes back to the setup afterwards.
-  if (state.setupReturn && state.setup) { state.setupReturn = false; $("#setup").hidden = false; renderSetup(); }
+  if (state.setupReturn && state.setup) { state.setupReturn = false; showScene($("#setup")); renderSetup(); }
 }
 
 const KEY_PROVIDERS = [
@@ -1237,6 +1274,37 @@ async function readPage(path) {
 }
 
 async function renderView() {
+  await renderViewBody();
+  mountHero();
+}
+
+// The live 3D hero on an asset page. Its canvas survives re-renders of the same asset, so the
+// model is loaded once and keeps turning instead of reloading on every workspace change.
+let hero = null;
+
+async function mountHero() {
+  const slot = $("#content [data-hero-model]");
+  const path = slot?.dataset.heroModel;
+  if (hero && hero.path !== path) { hero.view?.dispose(); hero.host.remove(); hero = null; }
+  if (!slot) return;
+  if (hero) {
+    slot.querySelector(".hero-stage").replaceWith(hero.host);
+    if (hero.view) slot.classList.add("live");
+    return;
+  }
+  const h = hero = { path, host: Object.assign(document.createElement("div"), { className: "hero-stage" }), view: null };
+  slot.querySelector(".hero-stage").replaceWith(h.host);
+  try {
+    const viewer = await viewerModule();
+    const view = await viewer.createViewer(h.host, fileUrl(path), { autoRotate: true, grid: false });
+    if (hero !== h) { view.dispose(); return; }
+    h.view = view;
+    if (view.clips.length) view.play(0);
+    h.host.closest("[data-hero-model]")?.classList.add("live");
+  } catch { /* the poster image stays */ }
+}
+
+async function renderViewBody() {
   const ov = state.overview;
   if (!ov) return;
   if (state.view.type === "doc" && /(^|\/)README\.md$/i.test(state.view.path) && dirOf(state.view.path)) state.view = { type: "folder", path: dirOf(state.view.path) };
@@ -1446,6 +1514,7 @@ const ICON = {
   eye: `<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>`,
   upload: `<path d="M12 20V9M7 13l5-5 5 5M5 4h14"/>`,
   box: `<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/>`,
+  copy: `<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.2"/><path d="M15.5 8.5V6.2A2.2 2.2 0 0 0 13.3 4H6.2A2.2 2.2 0 0 0 4 6.2v7.1a2.2 2.2 0 0 0 2.2 2.2h2.3"/>`,
   film: `<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M8 4.5v15M16 4.5v15M3.5 9h4.5M3.5 15h4.5M16 9h4.5M16 15h4.5"/>`,
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
@@ -1453,12 +1522,14 @@ const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]
 // Image outputs that can become the winner and be worked on further.
 const WORK_KINDS = new Set(["candidates", "variants", "edits"]);
 
+const removeBtn = (path) => `<button type="button" class="out-del" data-remove-output="${esc(path)}" title="Move to trash (Undo right after)" aria-label="Delete">×</button>`;
+
 function modelCard(o, kind) {
   const glb = /\.glb$/i.test(o.path);
   const badge = { "3d": ["cube", "3D"], rig: ["bones", "Rigged"], animations: ["film", "Animation"] }[kind] || ["cube", "3D"];
   const ext = o.path.split(".").pop().toUpperCase();
   const formats = Object.entries(o.formats || { [ext.toLowerCase()]: o.path });
-  return `<div class="out model"><button type="button" class="out-img" data-view-model="${esc(o.path)}" title="Open in the 3D viewer">${o.thumb ? `<img src="${esc(fileUrl(o.thumb))}" alt="">` : `<div class="no-thumb">${icon("cube")}<span>${esc(ext)} model</span></div>`}<span class="out-badge mesh">${icon(badge[0])}${badge[1]} · ${esc(ext)}</span></button>
+  return `<div class="out model">${removeBtn(o.path)}<button type="button" class="out-img" data-view-model="${esc(o.path)}" title="Open in the 3D viewer">${o.thumb ? `<img src="${esc(fileUrl(o.thumb))}" alt="">` : `<div class="no-thumb">${icon("cube")}<span>${esc(ext)} model</span></div>`}<span class="out-badge mesh">${icon(badge[0])}${badge[1]} · ${esc(ext)}</span></button>
     <div class="out-bar"><button class="act" data-view-model="${esc(o.path)}">${icon("eye")}View</button>
     ${kind === "3d" && glb ? `<button class="act" data-action="rig" data-source="${esc(o.path)}">${icon("bones")}Rig</button>` : kind === "rig" && glb ? `<button class="act" data-action="animate">${icon("play")}Animate</button>` : `<button class="act" data-sprites="${esc(o.path)}">${icon("grid")}Sprites</button>`}
     <div class="fmt-links">${icon("download")}${formats.map(([fmt, path]) => `<a href="${esc(fileUrl(path))}" download>${esc(fmt.toUpperCase())}</a>`).join("")}</div></div></div>`;
@@ -1471,18 +1542,18 @@ function outputGrid(all, winner, kind = "candidates") {
   const items = all.filter((o) => o.type !== "file");
   const chips = files.length ? `<div class="file-chips">${files.map((o) => {
     const name = o.path.split("/").pop();
-    return `<a class="file-chip" href="${esc(fileUrl(o.path))}" download title="Download ${esc(name)}">${icon(kind === "animations" ? "film" : "download")}<span>${esc(name)}</span></a>`;
+    return `<span class="file-chip-wrap"><a class="file-chip" href="${esc(fileUrl(o.path))}" download title="Download ${esc(name)}">${icon(kind === "animations" ? "film" : "download")}<span>${esc(name)}</span></a><button type="button" class="chip-del" data-remove-output="${esc(o.path)}" title="Move to trash" aria-label="Delete ${esc(name)}">×</button></span>`;
   }).join("")}</div>` : "";
   return (items.length ? "" : chips) + (items.length ? `<div class="out-grid">${items.map((o) => {
     if (o.type === "model") return modelCard(o, kind);
     const isWinner = o.path === winner;
     const img = `<a class="out-img" href="${esc(fileUrl(o.path))}" target="_blank" rel="noopener"><img src="${esc(fileUrl(o.path))}" alt="" loading="lazy">${isWinner ? `<span class="out-badge win">${icon("star")}Winner</span>` : ""}</a>`;
     if (!WORK_KINDS.has(kind)) {
-      return `<div class="out${kind === "icons" || kind === "sprites" ? " checker" : ""}">${img}<div class="out-bar">
+      return `<div class="out${kind === "icons" || kind === "sprites" ? " checker" : ""}">${removeBtn(o.path)}${img}<div class="out-bar">
         ${kind === "parts" || kind === "views" ? `<button class="act" data-icons="${esc(o.path)}">${icon("grid")}Icons</button><button class="act" data-winner="${esc(o.path)}">${icon("star")}Winner</button>` : ""}
         <a class="act wide" href="${esc(fileUrl(o.path))}" download>${icon("download")}Download</a></div></div>`;
     }
-    return `<div class="out${isWinner ? " winner" : ""}">${img}
+    return `<div class="out${isWinner ? " winner" : ""}">${removeBtn(o.path)}${img}
       <div class="out-bar">${isWinner ? "" : `<button class="act wide hero-act" data-winner="${esc(o.path)}">${icon("star")}Pick winner</button>`}
       <button class="act" data-action="variant" data-source="${esc(o.path)}">${icon("variant")}Variant</button>
       <button class="act" data-action="edit" data-source="${esc(o.path)}">${icon("edit")}Edit</button>
@@ -1503,13 +1574,19 @@ function renderAssetPage(a) {
   const groups = {};
   for (const p of a.pillars) (groups[p.source] ||= []).push(p);
   const o = a.outputs;
+  // With no winner image, the newest model fills the hero slot: animated first, then rigged, then plain 3D.
+  const heroModel = ["animations", "rig", "3d"].flatMap((k) => o[k] || []).find((m) => m.type === "model");
   return `
     <div class="kicker">Asset / ${esc(a.path)}</div>
     <div class="asset-head"><h1 class="title">${esc(title)}</h1><span class="kind-tag">${esc(a.kind)}</span></div>
     ${problemJobs(a.path).map((j) => `<div class="job-banner bad"><span class="bad-dot">!</span><span class="grow">${esc(ACTION_LABEL[j.action] || j.action)} ${j.status === "interrupted" ? "was interrupted" : "failed"}: ${esc(j.error || "no details")}</span><button type="button" class="mini" data-action="${esc(j.action)}">Try again</button><button type="button" class="mini" data-dismiss-job="${esc(j.id)}">Dismiss</button></div>`).join("")}
     ${jobs.length ? `<div class="job-banner"><span class="spinner"></span>${jobs.map((j) => esc(ACTION_LABEL[j.action] || j.action)).join(", ")} running… results appear here automatically.</div>` : ""}
     <div class="asset-top">
-      <div class="winner-box drop-zone" data-drop-winner title="Drop an image here to use it as the winner">${a.winner ? `<img src="${esc(fileUrl(a.winner))}" alt="Winner"><span class="drop-hint">Drop an image to replace</span>` : `<div class="no-thumb big"><p class="drop-copy"><span class="drop-icon">⇣</span>No winner yet.<br>Generate 2D candidates, <b>drop an image here</b><br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
+      <div class="winner-box drop-zone${heroModel && !a.winner ? " hero-3d" : ""}" data-drop-winner${heroModel && !a.winner ? ` data-hero-model="${esc(heroModel.path)}"` : ""} title="Drop an image here to use it as the winner">${a.winner ? `<img src="${esc(fileUrl(a.winner))}" alt="Winner"><span class="drop-hint">Drop an image to replace</span>` : heroModel ? `
+        ${heroModel.thumb ? `<img class="hero-poster" src="${esc(fileUrl(heroModel.thumb))}" alt="">` : ""}<div class="hero-stage"></div>
+        <span class="out-badge mesh hero-badge">${icon("cube")}3D · drag to turn</span>
+        <button type="button" class="mini hero-open" data-view-model="${esc(heroModel.path)}">${icon("eye")}Open viewer</button>
+        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy"><span class="drop-icon">⇣</span>No winner yet.<br>Generate 2D candidates, <b>drop or paste an image here</b><br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
       <div class="asset-side">
         <label class="field-label" for="assetPrompt">Prompt: what this ${esc(a.kind)} looks like</label>
         <textarea id="assetPrompt" class="prompt-box" rows="6" data-asset="${esc(a.path)}">${esc(a.prompt)}</textarea>
@@ -1624,6 +1701,7 @@ function renderPreview() {
         ${is3d ? "" : `<label class="inline">Images <select id="pvCount">${[1, 2, 3, 4].map((n) => `<option ${n === p.count ? "selected" : ""}>${n}</option>`).join("")}</select></label>`}
         <span class="cost">${on} image${on === 1 ? "" : "s"} attached${cost}</span>
         <span class="grow"></span>
+        ${is3d ? "" : `<button type="button" class="ghost copy-req" data-copy-request title="Copy this prompt and the ticked images, to paste into ChatGPT, Gemini or another tool yourself (no API cost)">${icon("copy")}Copy prompt + images</button>`}
         <button type="button" class="ghost" data-close>Cancel</button><button type="button" class="run-btn" data-run>${icon(theme.icon)}${esc(ACTION_LABEL[p.action])}</button>
       </footer>
     </div>`);
@@ -2233,6 +2311,104 @@ async function saveSprites() {
   } catch (err) { toast(err.message, true); }
 }
 
+// Outputs go to the workspace's .trash/ (models with every format and their preview), with Undo in the toast.
+async function removeOutput(path, card) {
+  const asset = state.view.path;
+  card?.classList.add("leaving");
+  try {
+    const res = await api(`/api/studio/output?path=${encodeURIComponent(asset)}&output=${encodeURIComponent(path)}`, { method: "DELETE" });
+    toast(`Moved ${path.split("/").pop()} to trash`, false, {
+      label: "Undo",
+      async run() {
+        try {
+          await api("/api/studio/output/restore", { method: "POST", body: { moves: res.removed } });
+          if (res.was_winner) await api("/api/studio/asset", { method: "PATCH", body: { path: asset, fields: { winner: path } } });
+          toast("Restored");
+          renderView();
+        } catch (err) { toast(err.message, true); }
+      },
+    });
+    renderView();
+  } catch (err) { card?.classList.remove("leaving"); toast(err.message, true); }
+}
+
+// Copy the exact prompt and the ticked reference images, to paste into a chat app or image tool by hand
+// instead of paying for an API run. Text, HTML (prompt + images) and one PNG sheet of the images go on the
+// clipboard together, so the target app picks what it understands.
+async function copyRequest(btn) {
+  syncPreviewFields();
+  const p = state.preview;
+  const refs = p.references.filter((r) => r.on);
+  const text = p.prompt.trim();
+  const label = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = "Copying…";
+  // The ClipboardItem is made right away with promises for its parts: browsers (Safari above all) only allow
+  // the write during the click itself, and the images are still loading at that point.
+  const loaded = Promise.all(refs.map((r) => loadImage(fileUrl(r.path)).catch(() => null))).then((list) => list.filter(Boolean));
+  const html = loaded.then((images) => new Blob([`<p>${esc(text).replace(/\n/g, "<br>")}</p>${images.map((img) => `<img src="${imageDataUrl(img, 1024)}">`).join("")}`], { type: "text/html" }));
+  const item = { "text/plain": new Blob([text], { type: "text/plain" }) };
+  if (refs.length) {
+    item["text/html"] = html;
+    item["image/png"] = loaded.then((images) => (images.length ? imageSheet(images) : Promise.reject(new Error("The images could not be loaded."))));
+  }
+  try {
+    let count = 0;
+    try {
+      await navigator.clipboard.write([new ClipboardItem(item)]);
+      count = (await loaded).length;
+    } catch {
+      await navigator.clipboard.writeText(text); // some browsers take only plain text
+    }
+    toast(count ? `Copied the prompt and ${count} image${count === 1 ? "" : "s"}` : refs.length ? "Copied the prompt only: this browser would not take the images" : "Copied the prompt");
+  } catch (err) { toast(`Could not copy: ${err.message}`, true); }
+  btn.disabled = false;
+  btn.innerHTML = label;
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Could not load ${src}`));
+    img.src = src;
+  });
+}
+
+function imageDataUrl(img, max) {
+  const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = Object.assign(document.createElement("canvas"), { width: Math.round(img.naturalWidth * scale), height: Math.round(img.naturalHeight * scale) });
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+}
+
+// Every reference side by side in one PNG, since the clipboard holds a single image.
+function imageSheet(images) {
+  const toBlob = (canvas) => new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (images.length === 1) {
+    const img = images[0];
+    const scale = Math.min(1, 1536 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = Object.assign(document.createElement("canvas"), { width: Math.round(img.naturalWidth * scale), height: Math.round(img.naturalHeight * scale) });
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    return toBlob(canvas);
+  }
+  const cell = 768;
+  const gap = 16;
+  const cols = Math.min(images.length, 3);
+  const rows = Math.ceil(images.length / cols);
+  const canvas = Object.assign(document.createElement("canvas"), { width: cols * cell + (cols - 1) * gap, height: rows * cell + (rows - 1) * gap });
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  images.forEach((img, i) => {
+    const scale = Math.min(cell / img.naturalWidth, cell / img.naturalHeight);
+    const w = img.naturalWidth * scale;
+    const h = img.naturalHeight * scale;
+    ctx.drawImage(img, (i % cols) * (cell + gap) + (cell - w) / 2, Math.floor(i / cols) * (cell + gap) + (cell - h) / 2, w, h);
+  });
+  return toBlob(canvas);
+}
+
 async function saveViewerThumb() {
   const v = state.viewer;
   try {
@@ -2243,8 +2419,10 @@ async function saveViewerThumb() {
 }
 
 document.addEventListener("click", (event) => {
-  const t = event.target.closest("[data-dismiss-job],[data-view-model],[data-sprites],[data-split],[data-split-body],[data-body-parts],[data-split-remove],[data-split-auto],[data-split-run],[data-icons],[data-export],[data-add-model],[data-anim],[data-viewer-thumb],[data-sprite-render],[data-sprite-save]");
+  const t = event.target.closest("[data-remove-output],[data-copy-request],[data-dismiss-job],[data-view-model],[data-sprites],[data-split],[data-split-body],[data-body-parts],[data-split-remove],[data-split-auto],[data-split-run],[data-icons],[data-export],[data-add-model],[data-anim],[data-viewer-thumb],[data-sprite-render],[data-sprite-save]");
   if (!t || t.disabled) return;
+  if (t.dataset.removeOutput) { event.preventDefault(); event.stopPropagation(); return removeOutput(t.dataset.removeOutput, t.closest(".out, .file-chip-wrap")); }
+  if (t.dataset.copyRequest !== undefined) return copyRequest(t);
   if (t.dataset.dismissJob) { storeSet("forge.dismissedJobs", JSON.stringify([...dismissedJobs(), t.dataset.dismissJob].slice(-100))); return renderView(); }
   if (t.dataset.viewModel) return viewModel(t.dataset.viewModel);
   if (t.dataset.sprites) return viewModel(t.dataset.sprites, true);
@@ -2592,13 +2770,14 @@ async function answerAccess(path, allow, write) {
 
 function openImport(folder = "") {
   closeProjects();
+  hideScene($("#onboarding"));
   state.imp = { step: "pick", folder, preview: null, target: "new", name: "", describe: state.models.some((m) => m.ready), log: [], phase: "", result: null };
-  $("#importView").hidden = false;
+  showScene($("#importView"));
   renderImport();
   if (folder) scanImport();
 }
 
-function closeImport() { $("#importView").hidden = true; state.imp = null; }
+function closeImport() { hideScene($("#importView")); state.imp = null; }
 
 function unitStats(u) {
   return [
@@ -2828,14 +3007,14 @@ const SETUP_STEPS = 6;
 
 async function openSetup() {
   state.setup = { step: 0 };
-  $("#setup").hidden = false;
+  showScene($("#setup"));
   const petals = $("#setup .petals");
   if (!petals.childElementCount) petals.innerHTML = $("#onboarding .petals").innerHTML || Array.from({ length: 18 }, () => `<i style="--x:${Math.random() * 100}%;--d:${8 + Math.random() * 10}s;--delay:${-Math.random() * 18}s;--s:${0.5 + Math.random() * 0.9};--r:${Math.random() * 360}deg;--sway:${20 + Math.random() * 60}px"></i>`).join("");
   await renderSetup();
 }
 
 async function closeSetup(done = true) {
-  $("#setup").hidden = true;
+  hideScene($("#setup"));
   state.setup = null;
   if (done) await api("/api/config", { method: "PUT", body: { onboarded: true } }).catch(() => {});
 }
@@ -2961,14 +3140,15 @@ document.addEventListener("click", async (event) => {
     return renderSetup();
   }
   if (d.setupSettings) {
-    $("#setup").hidden = true;
+    hideScene($("#setup"));
     state.setupReturn = true;
     return settingsDialog(d.setupSettings);
   }
   if (d.setupFinish) {
+    // Open the next scene first so it fades in over setup.
+    if (d.setupFinish === "import") openImport();
+    if (d.setupFinish === "new") startOnboarding();
     await closeSetup();
-    if (d.setupFinish === "import") return openImport();
-    if (d.setupFinish === "new") return startOnboarding();
   }
 });
 
@@ -2976,6 +3156,38 @@ document.addEventListener("change", async (event) => {
   const select = event.target.closest?.("[data-grant-mode]");
   if (!select) return;
   try { await grantFolder(select.dataset.grantMode, select.value === "write"); toast(select.value === "write" ? "Glob may now read and write there" : "Read only"); } catch (err) { toast(err.message, true); }
+});
+
+// Asset page shortcuts: Ctrl/⌘+Enter in the prompt opens Generate 2D, and on a generation sheet it runs it.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+  if (event.target.id === "assetPrompt") { event.preventDefault(); openPreview("candidates"); }
+  else if ($("#dialog").open && state.preview && $("#dialog [data-run]")) { event.preventDefault(); runPreview(); }
+});
+
+// The prompt saves itself while typing, so leaving the page never loses an edit.
+let promptTimer;
+document.addEventListener("input", (event) => {
+  if (event.target.id !== "assetPrompt") return;
+  clearTimeout(promptTimer);
+  promptTimer = setTimeout(async () => {
+    try {
+      await saveAssetPrompt();
+      const label = $("label[for=assetPrompt]");
+      label?.classList.add("saved");
+      setTimeout(() => label?.classList.remove("saved"), 1400);
+    } catch (err) { toast(err.message, true); }
+  }, 700);
+});
+
+// An image pasted on an asset page (e.g. one made by hand from "Copy prompt + images") becomes a candidate and the winner.
+document.addEventListener("paste", (event) => {
+  if (state.view?.type !== "doc" || !$("#content [data-drop-winner]") || $("#dialog").open) return;
+  if (event.target.closest?.("input, textarea, [contenteditable]")) return;
+  const files = [...(event.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+  if (!files.length) return;
+  event.preventDefault();
+  addCandidateImages(files);
 });
 
 document.addEventListener("keydown", (event) => {

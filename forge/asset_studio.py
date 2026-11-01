@@ -26,7 +26,7 @@ from typing import Any
 from forge.blueprint_contract import serialize_frontmatter, split_frontmatter
 from forge.config import load_config
 from forge.models import AssetType
-from forge.overview import IMAGE_SUFFIXES, MODEL_SUFFIXES, FOLDER_PAGES, resolve_rel
+from forge.overview import IMAGE_SUFFIXES, MODEL_SUFFIXES, FOLDER_PAGES, TRASH_DIR, move_to_trash, resolve_rel
 from forge.prompt_sanitize import finalize_generation_prompt
 from forge.providers.base import ProviderCapability
 from forge.providers.elevenlabs_image import resolve_image_provider
@@ -276,6 +276,49 @@ def update_asset(ws_dir: Path, rel: str, fields: dict[str, Any]) -> dict[str, An
             meta[key] = value
     path.write_text(serialize_frontmatter(meta, body), encoding="utf-8")
     return describe_asset(ws_dir, rel)
+
+
+def remove_output(ws_dir: Path, rel: str, output: str) -> dict[str, Any]:
+    """Move one output of an asset to `.trash/`: an image, or a model with all its formats and thumbnail."""
+    path, meta, body = read_asset(ws_dir, rel)
+    target = resolve_rel(ws_dir, output)
+    base = output_dir(path).resolve()
+    if target.parent.parent != base or target.parent.name not in OUTPUT_KINDS or not target.is_file():
+        raise FileNotFoundError(f"'{output}' is not an output of this asset.")
+    if target.suffix.lower() in MODEL_SUFFIXES or target.suffix.lower() in EXTRA_MODEL_SUFFIXES:
+        siblings = [p for p in target.parent.iterdir() if p.is_file() and p.stem in (target.stem, f"{target.stem}_thumb")
+                    and (p.suffix.lower() in MODEL_SUFFIXES or p.suffix.lower() in EXTRA_MODEL_SUFFIXES or p.stem.endswith("_thumb"))]
+    else:
+        siblings = [target]
+    removed = []
+    for file in siblings:
+        original = _ws_rel(ws_dir, file)
+        moved = move_to_trash(ws_dir, file)
+        if moved:
+            removed.append({"from": original, "trash": moved})
+    was_winner = bool(meta.get("winner")) and resolve_rel(ws_dir, str(meta["winner"])) == target
+    if was_winner:
+        meta.pop("winner", None)
+        path.write_text(serialize_frontmatter(meta, body), encoding="utf-8")
+    result = describe_asset(ws_dir, rel)
+    result["removed"] = removed
+    result["was_winner"] = was_winner
+    return result
+
+
+def restore_outputs(ws_dir: Path, moves: list[dict[str, Any]]) -> list[str]:
+    """Undo `remove_output`: move files from `.trash/` back where they were, never over an existing file."""
+    trash = (ws_dir / TRASH_DIR).resolve()
+    restored = []
+    for move in moves:
+        source = resolve_rel(ws_dir, str(move.get("trash") or ""))
+        target = resolve_rel(ws_dir, str(move.get("from") or ""))
+        if source.parent != trash or not source.is_file() or target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)
+        restored.append(_ws_rel(ws_dir, target))
+    return restored
 
 
 # ---------- building the request ----------

@@ -1960,3 +1960,34 @@ async def test_make_3d_settings_and_final_vault_export(tmp_path: Path, monkeypat
     assert (folder / "units" / "wolf" / "wolf.glb").is_file()
     with pytest.raises(FileNotFoundError):
         vault.export_zip(ws_dir, project, ["units/rat.md"])
+
+
+def test_asset_studio_remove_output_trashes_and_restores(tmp_path: Path) -> None:
+    from forge import asset_studio
+
+    actions = ForgeActionLayer(root_dir=tmp_path)
+    ws_dir = actions.get_workspace("remove_probe").ws_dir
+    asset_rel = "units/wolf.md"
+    (ws_dir / "units" / "wolf" / "candidates").mkdir(parents=True)
+    (ws_dir / "units" / "wolf" / "3d").mkdir(parents=True)
+    image = ws_dir / "units" / "wolf" / "candidates" / "a.png"
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(image, format="PNG")
+    for name in ("wolf.glb", "wolf.fbx", "wolf_thumb.png", "other.glb"):
+        (ws_dir / "units" / "wolf" / "3d" / name).write_bytes(b"x")
+    (ws_dir / asset_rel).write_text("---\nkind: creature\nwinner: units/wolf/candidates/a.png\n---\n# Wolf\n", encoding="utf-8")
+
+    # A model goes to the trash with every format and its thumbnail, but not other models.
+    result = asset_studio.remove_output(ws_dir, asset_rel, "units/wolf/3d/wolf.glb")
+    assert sorted(m["from"] for m in result["removed"]) == ["units/wolf/3d/wolf.fbx", "units/wolf/3d/wolf.glb", "units/wolf/3d/wolf_thumb.png"]
+    assert [m["path"] for m in result["outputs"]["3d"]] == ["units/wolf/3d/other.glb"]
+    assert all((ws_dir / m["trash"]).is_file() for m in result["removed"])
+
+    # Removing the winner clears it; restoring puts the files back.
+    result = asset_studio.remove_output(ws_dir, asset_rel, "units/wolf/candidates/a.png")
+    assert result["was_winner"] and result["winner"] == "" and not image.exists()
+    assert asset_studio.restore_outputs(ws_dir, result["removed"]) == ["units/wolf/candidates/a.png"]
+    assert image.is_file()
+
+    # Only the asset's own outputs can be removed.
+    with pytest.raises(FileNotFoundError):
+        asset_studio.remove_output(ws_dir, asset_rel, asset_rel)
