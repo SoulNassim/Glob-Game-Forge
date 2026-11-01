@@ -1,0 +1,52 @@
+id: variant
+name: Variant
+icon: "✨"
+description: Generate identity-locked sibling variations using playful preset chips (Colors, Outfit, Material, Era, Mood, Species, Rarity tiers, Seasons, Damage states, Surprise me).
+category: core
+requires_parent: true
+budget:
+  max_run_usd: 1.50
+questions:
+  - id: chips
+    prompt: "How should it change?"
+    type: chip_multiselect
+    default: ["Rarity tiers"]
+    options:
+      - "Colors"
+      - "Outfit"
+      - "Material"
+      - "Era"
+      - "Mood"
+      - "Species or creature type"
+      - "Rarity tiers"
+      - "Seasons"
+      - "Damage states"
+      - "Surprise me"
+  - id: prompt
+    prompt: "Extra direction (optional)"
+    type: text
+    default: ""
+  - id: count
+    prompt: "How many variants?"
+    type: stepper
+    default: 4
+    min: 1
+    max: 8
+steps:
+  - id: expand_variants
+    action: generate_variants
+    provider: gemini
+    capability: image_edit
+    loop:
+      repeat: "{{ inputs.count }}"
+      parallel: true
+      concurrency: 4
+      repeat_until: critic_passes
+      max_iterations: 2
+    params:
+      identity_lock: true
+      chips: "{{ inputs.chips }}"
+      prompt: "{{ inputs.prompt }}"
+  - id: qc_variants
+    action: qc_check
+    depends_on: ["expand_variants"]

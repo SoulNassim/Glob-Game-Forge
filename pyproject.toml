@@ -1,0 +1,44 @@
+[project]
+name = "forge-assets"
+version = "1.0.0"
+description = "Glob: a local, agent-friendly game-asset forge (prompts to consistent 2D art and 3D models)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "websockets>=13.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0.2",
+    "pillow>=10.4.0",
+    "python-multipart>=0.0.12",
+    "anthropic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+desktop = [
+    "pywebview>=5.0",
+]
+
+[project.scripts]
+forge = "forge.cli:main"
+forge-mcp = "forge.mcp.server:main"
+glob = "forge.cli:main"
+glob-desktop = "forge.desktop:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["forge"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

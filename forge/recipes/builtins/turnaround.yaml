@@ -1,0 +1,31 @@
+id: turnaround
+name: Turnaround
+icon: "🔄"
+description: Generate orthographic Front, Side, and Back views with locked identity, ready to feed Multi-Image 3D.
+category: 3d
+requires_parent: true
+budget:
+  max_run_usd: 0.50
+questions:
+  - id: prompt
+    prompt: "Additional turnaround notes (optional)"
+    type: text
+    default: "Clean orthographic front, side, and back character turnaround sheet"
+  - id: auto_make_3d
+    prompt: "Chain directly into Multi-Image Make 3D?"
+    type: boolean
+    default: false
+steps:
+  - id: render_turnaround
+    action: generate_turnaround
+    provider: gemini
+    capability: image_edit
+    params:
+      render_mode: turnaround
+      prompt: "{{ inputs.prompt }}"
+  - id: optional_3d
+    action: image_to_3d
+    provider: meshy
+    capability: multi_image_to_3d
+    when: "{{ inputs.auto_make_3d == true }}"
+    depends_on: ["render_turnaround"]

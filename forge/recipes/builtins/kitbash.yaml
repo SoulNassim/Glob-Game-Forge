@@ -1,0 +1,29 @@
+id: kitbash
+name: Kitbash
+icon: "🛠️"
+description: Combine two or more parent assets (e.g. Character + Weapon, Creature + Armor) into a unified design.
+category: core
+requires_parent: true
+multi_parent: true
+budget:
+  max_run_usd: 0.50
+questions:
+  - id: secondary_asset_id
+    prompt: "Select second asset to combine with"
+    type: asset_picker
+    default: ""
+  - id: prompt
+    prompt: "How should they combine?"
+    type: text
+    default: "Equip the subject with the secondary item seamlessly in matching style"
+steps:
+  - id: fuse_assets
+    action: kitbash_fuse
+    provider: gemini
+    capability: multi_reference_image
+    params:
+      secondary_asset_id: "{{ inputs.secondary_asset_id }}"
+      prompt: "{{ inputs.prompt }}"
+  - id: qc_kitbash
+    action: qc_check
+    depends_on: ["fuse_assets"]

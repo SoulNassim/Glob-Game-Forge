@@ -1,0 +1,38 @@
+id: extract_part
+name: Extract Part
+icon: "🧩"
+description: Isolate a specific piece (e.g. 'pull out the helmet'), reconstruct occluded areas onto a clean background, and optionally convert to 3D.
+category: core
+requires_parent: true
+budget:
+  max_run_usd: 0.75
+questions:
+  - id: part_description
+    prompt: "Which part should we extract?"
+    type: text
+    default: "winged helmet"
+  - id: click_coords
+    prompt: "Click region (x, y normalized)"
+    type: coords
+    default: ""
+  - id: send_to_3d
+    prompt: "Also run Make 3D on the extracted part?"
+    type: boolean
+    default: false
+steps:
+  - id: isolate_part
+    action: extract_part
+    provider: gemini
+    capability: image_edit
+    loop:
+      repeat_until: critic_passes
+      max_iterations: 2
+    params:
+      part_description: "{{ inputs.part_description }}"
+      click_coords: "{{ inputs.click_coords }}"
+  - id: part_to_3d
+    action: image_to_3d
+    provider: meshy
+    capability: image_to_3d
+    when: "{{ inputs.send_to_3d == true }}"
+    depends_on: ["isolate_part"]

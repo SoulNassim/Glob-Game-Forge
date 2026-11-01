@@ -1,0 +1,27 @@
+id: sprite_sheet
+name: Sprite Sheet
+icon: "🎞️"
+description: Generate a 4-frame 2D animation strip (idle/walk cycle) with consistent character proportions and transparent background.
+category: 2d
+requires_parent: false
+budget:
+  max_run_usd: 0.40
+questions:
+  - id: animation_type
+    prompt: "Animation cycle"
+    type: select
+    default: "walk_cycle"
+    options: ["walk_cycle", "idle_bob", "attack_swing", "cast_spell"]
+  - id: prompt
+    prompt: "Subject or motion notes"
+    type: text
+    default: "4-frame side/isometric animation strip"
+steps:
+  - id: render_spritesheet
+    action: generate_sprite_sheet
+    provider: gemini
+    capability: image_edit
+    params:
+      render_mode: sprite_sheet
+      animation_type: "{{ inputs.animation_type }}"
+      prompt: "{{ inputs.prompt }}"

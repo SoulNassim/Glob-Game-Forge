@@ -1,0 +1,27 @@
+[gd_scene load_steps=5 format=3 uid="uid://dungeonhub001"]
+
+[ext_resource type="Script" path="res://scripts/player_controller.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://assets/models/iron_sword.glb" id="2_sword"]
+[ext_resource type="PackedScene" path="res://assets/models/arcane_lantern.glb" id="3_lantern"]
+[ext_resource type="Texture2D" path="res://assets/icons/placeholder_icon.png" id="4_placeholder"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_hero"]
+radius = 0.42
+height = 1.8
+
+[node name="DungeonHub" type="Node3D"]
+
+[node name="IsoCamera" type="Camera3D" parent="."]
+projection = 1
+size = 14.0
+
+[node name="PlayerHero" type="CharacterBody3D" parent="."]
+script = ExtResource("1_script")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PlayerHero"]
+shape = SubResource("CapsuleShape3D_hero")
+
+[node name="EquippedSword" parent="PlayerHero" instance=ExtResource("2_sword")]
+
+[node name="HubLantern1" parent="." instance=ExtResource("3_lantern")]
+[node name="HubLantern2" parent="." instance=ExtResource("3_lantern")]

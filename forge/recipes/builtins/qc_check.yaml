@@ -1,0 +1,18 @@
+id: qc_check
+name: QC Check
+icon: "✅"
+description: Run automated quality checks (transparent background, single subject, polycount budget, scale bounds, naming convention) and optionally auto-retry failures.
+category: utility
+requires_parent: true
+budget:
+  max_run_usd: 0.25
+questions:
+  - id: auto_retry_on_fail
+    prompt: "Auto-retry generation if QC fails?"
+    type: boolean
+    default: true
+steps:
+  - id: inspect_asset
+    action: qc_check
+    params:
+      auto_retry_on_fail: "{{ inputs.auto_retry_on_fail }}"

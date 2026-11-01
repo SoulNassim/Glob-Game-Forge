@@ -1,0 +1,30 @@
+[
+  {
+    "id": "iron_sword",
+    "name": "Aethelgard Iron Broadsword",
+    "category": "item",
+    "description": "Standard-issue broadsword with brass clockwork crossguard and emerald pommel gem.",
+    "damage": 24,
+    "rarity": "common",
+    "model": "res://assets/models/iron_sword.glb",
+    "icon": "res://assets/icons/iron_sword_icon.png"
+  },
+  {
+    "id": "sunfire_elixir",
+    "name": "Sunfire Alchemical Elixir",
+    "category": "item",
+    "description": "Glowing golden potion in a faceted crystal flask that restores health and grants fire ward.",
+    "heal": 120,
+    "rarity": "rare",
+    "model": "res://assets/models/sunfire_elixir.glb"
+  },
+  {
+    "id": "clockwork_golem",
+    "name": "Runic Clockwork Sentinel",
+    "category": "enemy",
+    "description": "Ancient bronze automaton powered by an exposed spinning arcane crystal core.",
+    "hp": 450,
+    "armor": 35,
+    "model": "res://assets/models/clockwork_golem.glb"
+  }
+]

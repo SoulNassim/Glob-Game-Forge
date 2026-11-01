@@ -1,0 +1,30 @@
+id: edit_image
+name: Edit image
+icon: "✎"
+description: Scalpel edit of one image. Sends only the source image, the instruction, and a keep-everything-else-identical sentence — no style, packs, pillars, or pose injection.
+category: core
+requires_parent: true
+budget:
+  max_run_usd: 0.50
+questions:
+  - id: instruction
+    prompt: "What exactly should change?"
+    type: text
+    default: ""
+  - id: count
+    prompt: "How many versions?"
+    type: stepper
+    default: 1
+    min: 1
+    max: 4
+steps:
+  - id: scalpel_edit
+    action: edit_image
+    provider: gemini
+    capability: image_edit
+    loop:
+      repeat: "{{ inputs.count }}"
+      parallel: true
+      concurrency: 4
+    params:
+      instruction: "{{ inputs.instruction }}"

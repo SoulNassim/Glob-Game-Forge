@@ -1,0 +1,22 @@
+id: tileable_texture
+name: Tileable Texture
+icon: "🧱"
+description: Generate a seamless, repeatable surface texture map matching the Project Bible palette.
+category: 2d
+requires_parent: false
+budget:
+  max_run_usd: 0.40
+questions:
+  - id: prompt
+    prompt: "Surface material description"
+    type: text
+    default: "Hand-painted mossy dungeon flagstones with glowing rune cracks"
+steps:
+  - id: render_texture
+    action: generate_texture
+    provider: gemini
+    capability: text_to_image
+    params:
+      render_mode: tileable_texture
+      transparent: false
+      prompt: "{{ inputs.prompt }}"

@@ -1,0 +1,73 @@
+# Builds the desktop installers and attaches them to a GitHub release.
+# Push a tag like v1.0.0 (or run it by hand) and the website's download buttons
+# (releases/latest/download/...) pick the files up.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: Glob-Setup-Windows.exe
+          - os: macos-latest
+            asset: Glob-macOS.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build app with PyInstaller
+        run: uv run --extra desktop --with pyinstaller python scripts/build_desktop.py
+
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          ref="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] && echo "version=$ref" >> "$GITHUB_OUTPUT" || echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+
+      - name: Windows installer (Inno Setup)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe" "/DAppVersion=${{ steps.v.outputs.version }}" packaging\windows\glob.iss
+
+      - name: macOS disk image
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dmg && cp -R dist/Glob.app dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname Glob -srcfolder dmg -ov -format UDZO dist/Glob-macOS.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true

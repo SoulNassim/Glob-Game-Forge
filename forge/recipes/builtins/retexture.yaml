@@ -1,0 +1,20 @@
+id: retexture
+name: Retexture / Palette
+icon: "🎨"
+description: Swap surface materials or color palette on an existing 2D or 3D asset while preserving geometry.
+category: core
+requires_parent: true
+budget:
+  max_run_usd: 0.50
+questions:
+  - id: prompt
+    prompt: "New material or palette direction"
+    type: text
+    default: "Gilded celestial bronze with glowing turquoise runes"
+steps:
+  - id: apply_retexture
+    action: retexture_asset
+    provider: gemini
+    capability: image_edit
+    params:
+      prompt: "{{ inputs.prompt }}"

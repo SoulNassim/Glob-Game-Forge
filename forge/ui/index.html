@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Glob</title>
+  <link rel="icon" href="/ui/glob-face.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&display=swap" />
+  <link rel="stylesheet" href="/ui/styles.css" />
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <nav class="mobile-switch" aria-label="Switch panel">
+    <button type="button" data-show="chat" class="active">Chat</button>
+    <button type="button" data-show="workspace">Project</button>
+  </nav>
+
+  <div class="shell" data-active="chat">
+    <!-- Left: chat agent -->
+    <section class="panel chat" aria-label="Chat with Glob">
+      <header class="panel-head chat-head">
+        <button class="glob-brand" type="button" id="brandBtn" title="All projects">
+          <img class="glob-mark" src="/ui/glob.svg" alt="">
+          <span class="glob-word">Glob<small>game asset forge</small></span>
+        </button>
+        <div class="project-picker">
+          <button id="projectsBtn" class="project-btn" type="button" title="All projects"><span id="projectName">Project</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg></button>
+          <button id="newProjectBtn" class="icon-btn" type="button" title="New project" aria-label="New project">+</button>
+          <button class="icon-btn chat-toggle" type="button" data-toggle-chat title="Hide chat" aria-label="Hide chat"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></svg></button>
+        </div>
+      </header>
+
+      <div class="tabs" id="sessionTabs" role="tablist" aria-label="Chats"></div>
+      <div class="new-tab-pop" id="newTabPop" hidden></div>
+
+      <div class="messages" id="messages" aria-live="polite"></div>
+
+      <form class="composer" id="composer">
+        <div class="composer-card">
+          <div class="attachments" id="attachments"></div>
+          <textarea id="input" rows="1" placeholder="Ask Glob to build, change or generate anything…"></textarea>
+          <div class="composer-row">
+            <label class="tool-btn" title="Attach image" aria-label="Attach image">
+              <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7" /></svg>
+            </label>
+            <div class="model-pill-wrap">
+              <button type="button" class="model-pill" id="modelPill" aria-haspopup="listbox"><span class="dot" id="statusDot"></span><span id="modelPillLabel">Connecting…</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
+              <div class="model-pop" id="modelPop" hidden></div>
+            </div>
+            <span class="cli-pill" id="cliPill" hidden></span>
+            <span class="grow"></span>
+            <button id="stopBtn" class="stop-btn" type="button" title="Stop" aria-label="Stop" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
+            <button id="sendBtn" class="send-btn" type="submit" title="Send (Enter)" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+          </div>
+        </div>
+        <div class="composer-hint" id="contextMeter">Enter to send · Shift+Enter for a new line</div>
+      </form>
+    </section>
+
+    <!-- Right: project overview -->
+    <section class="panel workspace" aria-label="Project overview">
+      <header class="panel-head">
+        <div class="head-left">
+          <button class="icon-btn chat-toggle chat-show" type="button" data-toggle-chat title="Show chat" aria-label="Show chat"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></svg></button>
+          <button id="backBtn" class="back-btn" type="button" title="Back" aria-label="Back" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>Back</span>
+          </button>
+          <nav class="crumbs" id="crumbs"></nav>
+        </div>
+        <div class="head-actions">
+          <button id="refreshBtn" class="icon-btn" type="button" title="Refresh" aria-label="Refresh">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" /></svg>
+          </button>
+          <button id="settingsBtn" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M4.2 6.5l2.6 1.5M17.2 16l2.6 1.5M2.5 12h3M18.5 12h3M4.2 17.5 6.8 16M17.2 8l2.6-1.5" /></svg>
+          </button>
+        </div>
+      </header>
+      <div class="workspace-body">
+        <aside class="sections" id="sections" aria-label="Sections"></aside>
+        <main class="content" id="content"></main>
+      </div>
+    </section>
+  </div>
+
+  <!-- All projects -->
+  <section class="projects-view" id="projectsView" hidden aria-label="Projects">
+    <header class="pv-top">
+      <div class="glob-brand static"><img class="glob-mark" src="/ui/glob-forge.svg" alt=""><span class="glob-word">Glob<small>game asset forge</small></span></div>
+      <button class="icon-btn" type="button" id="closeProjectsBtn" title="Back to project" aria-label="Back to project">✕</button>
+    </header>
+    <div class="pv-main">
+      <div class="pv-head">
+        <h1>Projects</h1>
+        <div class="pv-tools">
+          <input id="projectSearch" type="search" placeholder="Search…" aria-label="Search projects">
+          <select id="projectSort" aria-label="Sort"><option value="updated">Last modified</option><option value="name">Name</option></select>
+          <button class="primary" type="button" data-new-project>New project</button>
+        </div>
+      </div>
+      <div class="pv-grid" id="projectGrid"></div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section class="settings-view" id="settingsView" hidden aria-label="Settings"></section>
+
+  <!-- New project onboarding -->
+  <section class="onboard" id="onboarding" hidden aria-label="New project">
+    <div class="petals" aria-hidden="true"></div>
+    <button class="ob-skip" type="button" data-ob-skip>Skip · start blank</button>
+    <div class="ob-stage" id="obStage"></div>
+  </section>
+
+  <dialog id="dialog"></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script type="module" src="/ui/app.js"></script>
+</body>
+</html>

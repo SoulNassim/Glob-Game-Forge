@@ -1,0 +1,40 @@
+id: make_3d
+name: Make 3D
+icon: "🧊"
+description: Convert a 2D asset (or multi-view turnaround) into a game-ready 3D GLB/OBJ mesh via Meshy.
+category: 3d
+requires_parent: true
+budget:
+  max_run_usd: 1.00
+questions:
+  - id: mode
+    prompt: "Input mode"
+    type: select
+    default: "single"
+    options: ["single", "multi_image"]
+  - id: ai_model
+    prompt: "Meshy 3D Model"
+    type: select
+    default: "meshy-7.1"
+    options: ["meshy-7.1", "meshy-t2.5", "meshy-6", "meshy-6-lite"]
+  - id: should_texture
+    prompt: "Generate PBR Textures?"
+    type: boolean
+    default: true
+  - id: target_polycount
+    prompt: "Target Polycount"
+    type: number
+    default: 12000
+steps:
+  - id: meshy_generate
+    action: image_to_3d
+    provider: meshy
+    capability: image_to_3d
+    params:
+      mode: "{{ inputs.mode }}"
+      ai_model: "{{ inputs.ai_model }}"
+      should_texture: "{{ inputs.should_texture }}"
+      target_polycount: "{{ inputs.target_polycount }}"
+  - id: qc_mesh
+    action: qc_check
+    depends_on: ["meshy_generate"]

@@ -1,0 +1,31 @@
+.agent-out/
+node_modules/
+dist/
+.venv/
+.pytest_cache/
+.playwright-mcp/
+__pycache__/
+*.py[cod]
+.env
+desktop-current.png
+forge-current-8420.png
+projects/*/exports/
+projects/*/logs/
+projects/*/inbox_watch/
+.DS_Store
+.forge-local.log
+# Over GitHub's 100 MB file limit (OBJ copy of a model that is also kept as GLB)
+projects/Fear_and_Hunger_3D/assets/ast_2cbb762b09.obj
+
+# Your game projects live here and stay on your machine (keys never go in them, but art and DBs are large)
+projects/
+
+# Local tool state
+.gemini/
+.claude/settings.local.json
+.claude/launch.json
+*.log
+
+# Full-resolution promo master (the site uses docs/landing/glob-promo.mp4)
+docs/promo/
+build/

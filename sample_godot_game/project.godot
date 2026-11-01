@@ -1,0 +1,26 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+
+config_version=5
+
+[application]
+
+config/name="Chronicles of Aethelgard"
+run/main_scene="res://scenes/dungeon_hub.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+config/icon="res://assets/icons/placeholder_icon.png"
+
+[autoload]
+
+GameState="*res://scripts/game_state.gd"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"

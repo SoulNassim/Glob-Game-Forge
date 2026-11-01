@@ -1,0 +1,50 @@
+id: batch_from_list
+name: Batch from List
+icon: "📦"
+description: Paste N asset names or descriptions and generate N consistent assets under the Project Bible and Hard Budget Guard.
+category: batch
+requires_parent: false
+budget:
+  max_run_usd: 2.50
+questions:
+  - id: items
+    prompt: "Paste one item name or description per line"
+    type: multiline_list
+    default:
+      - "Crimson Healing Potion in round crystal flask"
+      - "Mana Starlight Elixir in spiral glass vial"
+      - "Ironbark Shield Elixir in oak-bound bottle"
+      - "Phoenix Ember Tonic with glowing feather stopper"
+  - id: asset_kind
+    prompt: "Output format for each item"
+    type: select
+    default: "image"
+    options: ["image", "icon", "3d_prop"]
+  - id: then_3d_top_n
+    prompt: "Automatically convert top N Critic-scored items to 3D?"
+    type: number
+    default: 0
+steps:
+  - id: batch_generate
+    action: generate_batch_item
+    provider: gemini
+    capability: text_to_image
+    loop:
+      for_each: "{{ inputs.items }}"
+      parallel: true
+      concurrency: 4
+      repeat_until: critic_passes
+      max_iterations: 2
+    params:
+      asset_kind: "{{ inputs.asset_kind }}"
+  - id: qc_batch
+    action: qc_check
+    depends_on: ["batch_generate"]
+  - id: promote_best_to_3d
+    action: top_n_to_3d
+    provider: meshy
+    capability: image_to_3d
+    when: "{{ inputs.then_3d_top_n > 0 }}"
+    depends_on: ["qc_batch"]
+    params:
+      top_n: "{{ inputs.then_3d_top_n }}"
