@@ -85,14 +85,26 @@ def _mcp_config() -> str:
     return json.dumps({"mcpServers": {"glob": {"command": sys.executable, "args": ["-m", "forge.cli", "--mcp"]}}})
 
 
-def build_command(cli_id: str, prompt: str, resume: str, allow_edits: bool, model: str = "", effort: str = "") -> tuple[list[str], str | None]:
-    """The argv for one turn and the text to feed on stdin (None when the prompt is an argument)."""
+def _granted_dirs() -> list[str]:
+    from forge import access
+
+    return [g["path"] for g in access.list_grants() if g["exists"]]
+
+
+def build_command(cli_id: str, prompt: str, resume: str, allow_edits: bool, model: str = "", effort: str = "", extra_dirs: list[str] | None = None) -> tuple[list[str], str | None]:
+    """The argv for one turn and the text to feed on stdin (None when the prompt is an argument).
+
+    `extra_dirs` are folders the user granted in Glob (Settings → Storage & access); CLIs that support it
+    may read them too."""
     spec = CLIS[cli_id]
+    dirs = list(extra_dirs or [])
     exe = shutil.which(spec["bin"]) or spec["bin"]
     effort = effort if effort in CLI_EFFORTS.get(cli_id, []) else ""
     if cli_id == "claude":
         cmd = [exe, "-p", "--output-format", "stream-json", "--verbose", "--append-system-prompt", WORKSPACE_NOTE, "--mcp-config", _mcp_config()]
         cmd += (["--model", model] if model else []) + (["--effort", effort] if effort else [])
+        for folder in dirs:
+            cmd += ["--add-dir", folder]
         if allow_edits:
             cmd += ["--permission-mode", "acceptEdits"]
         if resume:
@@ -103,6 +115,8 @@ def build_command(cli_id: str, prompt: str, resume: str, allow_edits: bool, mode
         cmd += (["-m", model] if model else []) + (["-c", f"model_reasoning_effort={effort}"] if effort else [])
         if allow_edits:
             cmd += ["--sandbox", "workspace-write"]
+        for folder in dirs:
+            cmd += ["--add-dir", folder]
         return cmd + ["-"], prompt
     if cli_id == "opencode":
         cmd = [exe, "run", "--format", "json"] + (["--model", model] if model else [])
@@ -112,6 +126,8 @@ def build_command(cli_id: str, prompt: str, resume: str, allow_edits: bool, mode
             cmd += ["--session", resume]
         return cmd + [prompt], None
     cmd = [exe, "--output-format", "stream-json"] + (["-m", model] if model else [])
+    if dirs:
+        cmd += ["--include-directories", ",".join(dirs)]
     if allow_edits:
         cmd += ["--approval-mode", "auto_edit"]
     if resume:
@@ -202,7 +218,7 @@ async def run_turn(
         raise ValueError(f"Unknown coding agent '{cli_id}'.")
     if not shutil.which(CLIS[cli_id]["bin"]):
         raise RuntimeError(f"{CLIS[cli_id]['label']} is not installed. Install it in Settings → Coding agents.")
-    cmd, stdin_text = build_command(cli_id, prompt, resume, allow_edits, model, effort)
+    cmd, stdin_text = build_command(cli_id, prompt, resume, allow_edits, model, effort, _granted_dirs())
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     stderr_tail: list[str] = []

@@ -34,10 +34,20 @@ def get_config_dir() -> Path:
     return p
 
 
+def configured_projects_dir() -> str:
+    """The projects folder chosen in Settings (config.json), or "" when none was chosen."""
+    try:
+        data = json.loads((get_config_dir() / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    value = data.get("projects_dir") if isinstance(data, dict) else ""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def get_projects_root() -> Path:
-    custom = os.environ.get("FORGE_PROJECTS_DIR")
+    custom = os.environ.get("FORGE_PROJECTS_DIR") or configured_projects_dir()
     if custom:
-        p = Path(custom)
+        p = Path(custom).expanduser()
     else:
         p = Path.cwd() / "projects"
     p.mkdir(parents=True, exist_ok=True)
@@ -106,6 +116,15 @@ class ForgeConfig(BaseModel):
     godot_project_path: str = ""
     unity_project_path: str = ""
     unreal_project_path: str = ""
+
+    # Look for a new Glob release on start (Settings → Storage & access → Updates).
+    auto_update_check: bool = True
+    # First-run setup wizard has been completed or skipped.
+    onboarded: bool = False
+    # Folders outside the projects folder that Glob's agent may use: [{"path": "...", "write": false}].
+    access_folders: list[dict[str, Any]] = Field(default_factory=list)
+    # Where projects live; "" = ./projects (or ~/Glob/projects for the desktop app).
+    projects_dir: str = ""
 
     demo_mode: bool = False  # Only True when NO live keys are configured or explicitly forced
     host: str = "127.0.0.1"

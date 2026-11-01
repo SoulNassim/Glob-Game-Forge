@@ -8,15 +8,17 @@ session that starts from that handoff.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import shutil
 import re
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from forge.models import new_id
-from forge import asset_studio
+from forge import access, asset_studio, game_import
 from forge.agent import cli_agents
 from forge.config import load_config
 from forge.overview import FRONT_PAGES, HIDDEN_NAMES, move_to_trash
@@ -28,6 +30,7 @@ ATTACHMENTS_DIR = Path("inbox") / "attachments"
 HANDOFFS_DIR = Path("inbox") / "handoffs"
 MAX_TOOL_ROUNDS = 8
 MAX_FILE_CHARS = 8000
+MAX_COPY_BYTES = 2 * 1024 * 1024 * 1024
 EFFORTS = {"low", "medium", "high", "max"}
 _SESSION_ID_RE = re.compile(r"^chat_[a-z0-9]+$")
 
@@ -72,6 +75,21 @@ Tools (paths relative to the workspace):
       Splitting an image into parts, icons, sprite sheets, 3D preview and Godot/Unity/Unreal export are
       buttons under "Game tools" on the asset page; point the user there for those.
 - {{"tool": "pick_winner", "path": "02-characters/knight.md", "file": "02-characters/knight/candidates/knight-1.png"}}
+
+Folders elsewhere on the user's computer (their game project, an art folder): you can reach only folders the
+user granted, listed under "Granted folders" in the context. Use ABSOLUTE paths for those with list, read and
+copy_in. When the user mentions a folder that is not granted, call request_access right away (the user gets
+Allow / Deny buttons in the chat and you continue once they answer). Never tell the user you cannot access
+their computer, and never ask them to copy files by hand: ask for access instead.
+- {{"tool": "request_access", "path": "D:\\Games\\MyGame", "reason": "to import your characters", "write": false}}
+- {{"tool": "import_game", "path": "D:\\Games\\MyGame"}}  imports a Godot, Unity or Unreal project (or any asset
+      folder): characters with their models, animations, textures and variants, weapons and items with their stats
+      from the game data, kits, skies, textures and design docs. Files are copied into numbered sections; existing
+      sections and assets with the same names are merged (the real model lands in the asset you sketched).
+      Items the game defines without any art are added with `status: needs art`. Needs read access first.
+- {{"tool": "copy_in", "from": "D:\\Games\\MyGame\\art\\elia.png", "to": "02-characters/elia/candidates"}}
+      copies a file or folder from a granted folder into the workspace.
+With write access the write tool also takes an absolute path inside that folder (for engine files).
 
 Assets: an asset is a .md whose header (YAML front matter) has `kind:` (one of the kinds listed below)
 and `prompt:` (a clear visual description of the subject only: silhouette, materials,
@@ -133,6 +151,11 @@ def _now() -> float:
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(value or "chat").lower()).strip("-")[:40] or "chat"
+
+
+def _is_absolute(path: str) -> bool:
+    """C:\\Games, D:/Games, /home/me/games or ~/games: a path on the computer rather than in the workspace."""
+    return bool(re.match(r"^(?:[A-Za-z]:[\\/]|/|~[\\/])", path))
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
@@ -268,6 +291,41 @@ class WorkspaceAgent:
             raise ValueError(f"'{rel}' is outside the workspace.")
         return target
 
+    def _outside(self, project: str, raw: Any, need_write: bool = False) -> Path | None:
+        """An absolute path outside the workspace, checked against the user's grants; None for workspace paths."""
+        text = str(raw or "").strip()
+        if not text or not _is_absolute(text):
+            return None
+        head = text.lstrip("/").split("/")[0]
+        if text.startswith("/") and head and (self._ws(project) / head).exists():
+            return None  # "/02-characters/elia.md" means the workspace
+        try:
+            if Path(text).resolve().is_relative_to(self._ws(project).resolve()):
+                return None
+        except OSError:
+            pass
+        return access.check(text, need_write=need_write)
+
+    def _outside_tool(self, tool: str, target: Path, call: dict[str, Any]) -> dict[str, Any]:
+        if tool == "list":
+            if not target.is_dir():
+                raise FileNotFoundError(f"No folder '{target}'.")
+            names = sorted(f"{p.name}/" if p.is_dir() else p.name for p in target.iterdir() if not p.name.startswith(".") and not access.is_secret(p))
+            return {"tool": tool, "path": str(target), "result": "\n".join(names[:300]), "summary": f"Listed {target}"}
+        if tool == "read":
+            if not target.is_file():
+                raise FileNotFoundError(f"No file '{target}'.")
+            if target.stat().st_size > 2_000_000:
+                raise ValueError("That file is too large to read; use copy_in or import_game.")
+            text = target.read_text(encoding="utf-8", errors="ignore")
+            return {"tool": tool, "path": str(target), "result": text[:MAX_FILE_CHARS], "summary": f"Read {target}"}
+        target.parent.mkdir(parents=True, exist_ok=True)
+        content = str(call.get("content") or "")
+        if tool == "append" and target.is_file():
+            content = f"{target.read_text(encoding='utf-8', errors='ignore').rstrip()}\n\n{content.strip()}\n"
+        target.write_text(content, encoding="utf-8")
+        return {"tool": tool, "path": str(target), "summary": f"Wrote {target}", "changed": True}
+
     def _find_item(self, project: str, ref: str):
         items = self.actions.get_pipeline(project).list_pipeline_items()
         key = str(ref or "").strip().lower()
@@ -280,6 +338,43 @@ class WorkspaceAgent:
         tool = str(call.get("tool") or "")
         ws = self._ws(project).resolve()
         rel = lambda path: path.resolve().relative_to(ws).as_posix()  # noqa: E731
+        outside = self._outside(project, call.get("path"), need_write=tool in ("write", "append")) if tool in ("list", "read", "write", "append") else None
+        if outside is not None:
+            return self._outside_tool(tool, outside, call)
+        if tool == "request_access":
+            raw = str(call.get("path") or "").strip()
+            if not raw or not _is_absolute(raw):
+                raise ValueError("request_access needs an absolute folder path.")
+            folder = Path(raw)
+            folder = folder.parent if folder.is_file() else folder
+            want_write = bool(call.get("write"))
+            if access.granted_path(str(folder), need_write=want_write):
+                return {"tool": tool, "path": str(folder), "summary": f"Already allowed: {folder}", "result": "Access is already granted; go ahead."}
+            request = {"path": str(folder), "reason": str(call.get("reason") or "")[:200], "write": want_write, "exists": folder.is_dir()}
+            return {"tool": tool, "path": str(folder), "summary": f"Asked for access to {folder}", "access_request": request,
+                    "result": "Waiting for the user to allow access. Stop here and tell them what you will do once allowed."}
+        if tool == "import_game":
+            folder = access.check(str(call.get("path") or ""))
+            result = game_import.import_game(folder, self._ws(project), title=str(call.get("title") or "") or None)
+            counts = result["summary"]["counts"]
+            sections = ", ".join(sorted(result["sections"].values()))
+            return {"tool": tool, "path": str(folder), "changed": True,
+                    "summary": f"Imported {result['copied']} files from {folder.name}: {counts['characters']} characters, {counts['models']} models, {counts['animations']} animations",
+                    "result": f"Sections: {sections}\nAssets written: {len(result['assets'])}\nNeeds art: {counts['needs_art']}"}
+        if tool == "copy_in":
+            source = access.check(str(call.get("from") or ""))
+            dest_dir = self._resolve(project, call.get("to") or "")
+            if source.is_dir():
+                size = sum(p.stat().st_size for p in source.rglob("*") if p.is_file())
+                if size > MAX_COPY_BYTES:
+                    raise ValueError("That folder is over 2 GB; use import_game or pick a smaller folder.")
+                target = dest_dir / source.name
+                shutil.copytree(source, target, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".*", "*.import", "*.uid", "*.meta"))
+            else:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                target = dest_dir / source.name
+                shutil.copy2(source, target)
+            return {"tool": tool, "path": rel(target), "summary": f"Copied {source.name} → {rel(target)}", "changed": True}
         if tool == "list":
             target = self._resolve(project, call.get("path") or "")
             if not target.is_dir():
@@ -352,6 +447,9 @@ class WorkspaceAgent:
         if front:
             parts.append(f"## {front.name} (front page excerpt)\n{front.read_text(encoding='utf-8', errors='ignore')[:2500]}")
         parts.append("## Workspace tree\n" + (self._tree(ws) or "(empty — nothing has been created yet)"))
+        parts.append(f"## Workspace folder on disk\n{ws.resolve()}")
+        grants = access.list_grants()
+        parts.append("## Granted folders\n" + ("\n".join(f"- {g['path']} ({'read & write' if g['write'] else 'read'})" for g in grants) or "(none yet: use request_access)"))
         if page:
             parts.append(f"## User is viewing\n{json.dumps(page)[:600]}")
         if session.get("handoff_from"):
@@ -518,18 +616,24 @@ class WorkspaceAgent:
             reply_text = str(data.get("reply") or "").strip()
             calls = [call for call in data.get("actions") or [] if isinstance(call, dict)]
             needs_results = False
+            waiting = False
             for call in calls[:20]:
                 try:
-                    outcome = self.run_tool(project, call)
+                    if call.get("tool") in ("import_game", "copy_in"):
+                        outcome = await asyncio.to_thread(self.run_tool, project, call)
+                    else:
+                        outcome = self.run_tool(project, call)
                     outcome["ok"] = True
                 except Exception as exc:  # noqa: BLE001 — report tool errors back to the model and user
                     outcome = {"tool": call.get("tool"), "path": call.get("path") or call.get("id"), "ok": False, "summary": f"{call.get('tool')} failed: {exc}"}
                 result_text = outcome.pop("result", None)
                 performed.append(outcome)
                 tool_log.append(f"{json.dumps(call)[:300]}\n→ {result_text if result_text is not None else outcome['summary']}"[: MAX_FILE_CHARS + 400])
-                if call.get("tool") in ("list", "read") and outcome.get("ok"):
+                if call.get("tool") in ("list", "read", "import_game") and outcome.get("ok"):
                     needs_results = True
-            if data.get("done", True) is not False and not (needs_results and not reply_text):
+                if outcome.get("access_request"):
+                    waiting = True
+            if waiting or (data.get("done", True) is not False and not (needs_results and not reply_text)):
                 break
         session = self.get_session(project, session_id)
         session["messages"].append({"role": "agent", "text": reply_text or "Done.", "actions": performed, "model": used_model, "at": _now()})

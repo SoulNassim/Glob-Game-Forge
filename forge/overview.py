@@ -181,6 +181,14 @@ def _asset_meta(path: Path) -> dict[str, Any] | None:
                 if images:
                     thumb = images[0]
                     break
+    if not thumb:
+        # Imported or generated 3D models get a rendered preview next to them.
+        for sub in ("3d", "rig"):
+            folder = outputs / sub
+            previews = sorted(folder.glob("*_thumb.png")) if folder.is_dir() else []
+            if previews:
+                thumb = previews[0]
+                break
     return {"kind": kind, "thumb": thumb}
 
 
@@ -299,18 +307,27 @@ def project_card(ws_dir: Path, project: str) -> dict[str, Any]:
     if page:
         card.update(read_markdown_meta(page))
     images: list[tuple[float, Path]] = []
+    previews: list[tuple[float, str]] = []
     for path in ws_dir.rglob("*"):
         parts = path.relative_to(ws_dir).parts
         if not path.is_file() or not all(_visible(Path(part)) for part in parts):
             continue
         mtime = path.stat().st_mtime
         card["updated"] = max(card["updated"], mtime)
-        if path.suffix.lower() in IMAGE_SUFFIXES and PILLAR_DIR not in parts:
+        if path.suffix.lower() in IMAGE_SUFFIXES and PILLAR_DIR not in parts and "textures" not in parts:
             images.append((mtime, path))
-        elif path.suffix.lower() == ".md" and _asset_meta(path):
+        elif path.suffix.lower() == ".md" and (asset := _asset_meta(path)):
             card["assets"] += 1
+            # An asset's own picture (winner or model preview) says more than any texture or reference image.
+            thumb = asset["thumb"]
+            if isinstance(thumb, Path) and thumb.is_file():
+                previews.append((thumb.stat().st_mtime, thumb.relative_to(ws_dir).as_posix()))
+            elif isinstance(thumb, str) and thumb and (ws_dir / thumb).is_file():
+                previews.append(((ws_dir / thumb).stat().st_mtime, thumb))
     card["sections"] = sum(1 for c in ws_dir.iterdir() if c.is_dir() and _visible(c) and c.name != PILLAR_DIR)
-    card["images"] = [p.relative_to(ws_dir).as_posix() for _, p in sorted(images, key=lambda t: t[0], reverse=True)[:3]]
+    chosen = [rel for _, rel in sorted(previews, key=lambda t: t[0], reverse=True)]
+    chosen += [p.relative_to(ws_dir).as_posix() for _, p in sorted(images, key=lambda t: t[0], reverse=True)]
+    card["images"] = list(dict.fromkeys(chosen))[:3]
     return card
 
 

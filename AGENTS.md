@@ -71,5 +71,6 @@ Forge exposes 26 tools over stdio (`uv run forge --mcp`) and HTTP JSON-RPC (`POS
 - **Workspace Docs & Requirements**: `read_workspace_doc`, `write_workspace_doc`, `list_asset_requirements`, `add_asset_requirement`, `fulfill_asset_requirements`, `post_agent_handoff`
 - **Asset & Lineage DAG**: `list_assets`, `get_asset`, `rate_asset`, `undo_action`
 - **Generation Verbs & Recipes**: `run_verb`, `run_recipe`, `create_recipe`, `run_agent_brief`
+- **Import a Game**: `import_game` copies a Godot/Unity/Unreal project's characters, models, animations, textures, variants, kits and docs into the project (the user must grant the folder in Settings → Storage & access; `preview: true` only lists what it would import)
 - **Game Scan & Engine Write-Back**: `scan_game_project`, `get_game_profile`, `update_game_profile`, `list_asset_wishlist`, `find_placeholders`, `propose_assets_for`, `writeback_preview`, `writeback_apply`
 - **Bible & Export**: `get_project_bible`, `update_project_bible`, `list_style_packs`, `queue_status`, `get_budget`, `export`

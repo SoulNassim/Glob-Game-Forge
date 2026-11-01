@@ -49,6 +49,8 @@ Making the game is fun. Making the art is usually chaos:
 | Windows 10/11 | [**Glob-Setup-Windows.exe**](https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe) |
 | macOS (Apple silicon) | [**Glob-macOS.dmg**](https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg) |
 
+Glob checks for new releases when it starts and shows **Update now**: the Windows and macOS apps download the new version, install it and restart by themselves, and terminal installs update with `uv`. Turn the check off in Settings → Storage & access → Updates.
+
 The apps aren’t code-signed yet: on first launch, Windows may show SmartScreen (*More info → Run anyway*) and macOS wants *right-click → Open*.
 
 **Or install from the terminal** (installs [uv](https://docs.astral.sh/uv/) if needed, then Glob):
@@ -73,13 +75,33 @@ cd Glob-Game-Forge
 uv run forge
 ```
 
-Glob opens at <http://127.0.0.1:8420>. Then:
+Glob opens at <http://127.0.0.1:8420>. On first launch a short setup walks you through it (all steps optional, and **Settings → Storage & access → Run first-time setup again** brings it back):
 
-1. **Connect a brain:** Settings (gear icon) → AI models. Pick a provider or import your VS Code models.
-2. **Connect image and 3D:** Settings → Image & 3D. Paste a Gemini, Meshy and/or ElevenLabs key.
-3. **Make a project:** press **+** next to the project name and follow the onboarding.
+1. **Brain:** connect a chat model (any provider, or import your VS Code models).
+2. **Coding agents:** install or log in to Claude Code, Codex, OpenCode or Gemini CLI.
+3. **Image & 3D:** paste a Gemini, Meshy and/or ElevenLabs key.
+4. **Folders:** see where projects are saved and give Glob your game folders.
 
-No keys yet? Glob runs in **Demo Mode**, so you can try everything for free.
+Then start a new project, or **import the game you already have**. No keys yet? Glob runs in **Demo Mode**, so you can try everything for free.
+
+## Import your game
+
+**Projects → Import game** (or just tell Glob in the chat where your game is) takes a **Godot, Unity or Unreal** project, or any folder of game art, and lays it out as a project:
+
+- **Characters** found in the game's own data (e.g. Godot `PlayableCharacter` resources) and folders, each with its 3D models, animation clips, textures and texture variants.
+- **Weapons, items and enemies** with their stats from the game data. Things the game defines but has no art for yet come in marked *needs art*.
+- **Kits** (a modular dungeon set becomes piece families), **skies, texture packs, concept art, audio** and **design docs**.
+- Previews of every model are rendered, and Glob can look at each picture and write its prompt, so you can make variants or new art in the same style right away.
+
+Files are copied into the project; your game folder is never changed. Importing into an existing project merges into its sections and into assets with the same name, so a character you sketched earlier gets the real model.
+
+## Where your projects live
+
+**Settings → Storage & access** shows the projects folder (change it there) and each project's folder on disk, with buttons to open them.
+
+- **Export / import:** export a project as a `.zip` (download icon on its card, or in Settings) and import it on another computer with **Projects → Import .zip** or by dropping the file on the projects page.
+- **Folder access:** Glob only sees its projects folder until you allow more. Grant a folder in Settings, during setup, or with **Allow** when Glob asks in the chat; choose read or read & write. Coding agents get granted folders as extra working directories. Keys, `.env` and key files are always off-limits.
+- **Images in the chat:** drag them onto the chat, paste them, or use the paperclip.
 
 ## Desktop app
 
@@ -147,7 +169,7 @@ Glob fulfills it, ticks it `[x]` and records the asset ID and SHA-256 receipt in
 | Read/write shared project docs | `read_workspace_doc`, `write_workspace_doc` |
 | Plan and track assets | `list_asset_requirements`, `add_asset_requirement`, `fulfill_asset_requirements` |
 | Leave a durable handoff | `post_agent_handoff` |
-| Inspect an existing game | `scan_game_project`, `get_game_profile`, `list_asset_wishlist`, `find_placeholders`, `propose_assets_for` |
+| Inspect or import an existing game | `import_game`, `scan_game_project`, `get_game_profile`, `list_asset_wishlist`, `find_placeholders`, `propose_assets_for` |
 | Write into the engine project | `writeback_preview`, `writeback_apply` |
 | Produce and export assets | `list_assets`, `get_asset`, `run_verb`, `run_recipe`, `get_budget`, `queue_status`, `export` |
 
@@ -170,6 +192,7 @@ Glob is a local tool with no login, so it is built to stay local:
 - It listens on **127.0.0.1** only. Binding elsewhere (`--host`) prints a warning, because anyone who can reach the port can use your keys and agents.
 - Every API and WebSocket request must come from Glob itself: requests from other websites (CSRF) and DNS-rebinding hosts are refused. MCP clients and scripts without a browser origin still work.
 - API keys and OAuth tokens live in `~/.forge/` (owner-only permissions on macOS/Linux), are masked in every API response, and never go into a project folder or export.
+- The agent reaches folders outside the projects folder only after you grant them; grants and the projects folder can't be changed through `PUT /api/config`, and `~/.forge`, `.env` and key files stay unreadable even inside a granted folder.
 - Server-level settings (`host`, `port`, `allowed_proxy_hosts`) cannot be changed over HTTP.
 - The asset proxy only fetches from an allow-list of provider hosts.
 
@@ -189,6 +212,8 @@ uv run forge --no-browser           # don't open a browser tab
 | `forge/agent/` | Glob’s chat agent, model endpoints and coding-agent tabs |
 | `forge/providers/` | Gemini, Meshy and ElevenLabs clients |
 | `forge/mcp/` | MCP server (stdio and HTTP) |
+| `forge/game_import.py` | Importing Godot / Unity / Unreal projects into a workspace |
+| `forge/access.py` | Folders outside the projects folder that the user granted |
 | `forge/ui/` | The web UI (plain HTML/CSS/JS) |
 | `docs/` | Website (`docs/index.html`) and screenshots |
 | `sample_godot_game/` | A tiny Godot project for trying engine write-back |

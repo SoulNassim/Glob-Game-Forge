@@ -50,8 +50,11 @@ def main(port: int | None = None) -> None:
 
     port = _free_port(port or 8420)
     os.environ["FORGE_BIND_HOST"] = "127.0.0.1"
-    # Installed app (not a repo checkout with its own projects/): keep projects in the home folder.
-    if not os.environ.get("FORGE_PROJECTS_DIR") and not (Path.cwd() / "projects").is_dir():
+    from forge.config import configured_projects_dir
+
+    # Installed app (not a repo checkout with its own projects/): keep projects in the home folder,
+    # unless a projects folder was chosen in Settings.
+    if not os.environ.get("FORGE_PROJECTS_DIR") and not configured_projects_dir() and not (Path.cwd() / "projects").is_dir():
         os.environ["FORGE_PROJECTS_DIR"] = str(Path.home() / "Glob" / "projects")
     url = f"http://127.0.0.1:{port}"
     server = uvicorn.Server(uvicorn.Config("forge.server.app:app", host="127.0.0.1", port=port, log_level="warning"))

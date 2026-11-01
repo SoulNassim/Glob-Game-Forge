@@ -34,7 +34,9 @@ from forge.providers.elevenlabs_image import resolve_image_provider
 PILLAR_DIR = "pillars"
 REF_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_REFERENCES = 8
-OUTPUT_KINDS = ("candidates", "variants", "edits", "views", "3d", "rig", "animations", "parts", "icons", "sprites")
+OUTPUT_KINDS = ("candidates", "variants", "edits", "views", "3d", "rig", "animations", "textures", "parts", "icons", "sprites")
+# Imported engine files the browser can't preview (Godot .res clips, .blend, .anim) are still listed.
+LISTED_FILE_SUFFIXES = {".res", ".tres", ".anim", ".blend", ".dae", ".tga", ".exr", ".psd"}
 ACTIONS = ("candidates", "variant", "edit", "views", "make_3d", "rig", "animate")
 ACTION_FOLDER = {"candidates": "candidates", "variant": "variants", "edit": "edits", "views": "views", "make_3d": "3d", "rig": "rig", "animate": "animations"}
 # Turnaround views generated from the winner; "{view}" is filled in per image.
@@ -223,7 +225,11 @@ def list_outputs(ws_dir: Path, asset_path: Path) -> dict[str, list[dict[str, Any
             if file.stem.endswith("_thumb"):
                 continue
             if suffix in IMAGE_SUFFIXES:
+                if kind in ("3d", "rig", "animations"):
+                    continue  # textures a model file points at, kept next to it
                 outputs[kind].append({"path": _ws_rel(ws_dir, file), "type": "image"})
+            elif suffix in LISTED_FILE_SUFFIXES:
+                outputs[kind].append({"path": _ws_rel(ws_dir, file), "type": "file"})
             elif suffix in MODEL_SUFFIXES or suffix in EXTRA_MODEL_SUFFIXES:
                 # One card per model: the GLB (or first file), with every other export format alongside.
                 entry = models.get(file.stem)

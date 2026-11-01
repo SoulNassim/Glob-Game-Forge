@@ -188,6 +188,25 @@ MCP_TOOLS_SCHEMA: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "import_game",
+        "description": (
+            "Import a Godot, Unity or Unreal project (or any folder of game art) into a Glob project: characters with "
+            "their 3D models, animation clips, textures and variants, weapons and items with stats from the game data, "
+            "kits, skies, textures and design docs, laid out as sections and asset pages. Files are copied; the game "
+            "folder is not changed. Existing sections and same-named assets are merged. The user must have granted "
+            "Glob access to the folder (Settings > Storage & access); set preview=true to only list what would be imported."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "game_path": {"type": "string"},
+                "preview": {"type": "boolean", "default": False},
+                "project": {"type": "string", "default": "default"},
+            },
+            "required": ["game_path"],
+        },
+    },
+    {
         "name": "get_game_profile",
         "description": "Retrieve the scanned Game Profile (including evidence, confidence levels, catalog, and wishlist).",
         "inputSchema": {
@@ -458,6 +477,17 @@ class ForgeMCPDispatcher:
                 lock_into_bible=bool(args.get("lock_into_bible", False)),
                 project=proj,
             )
+        if name == "import_game":
+            import asyncio
+
+            from forge import access, game_import
+
+            folder = access.check(str(args.get("game_path") or ""))
+            if args.get("preview"):
+                return await asyncio.to_thread(game_import.preview, folder)
+            ws_dir = self.actions.get_workspace(proj).ws_dir
+            result = await asyncio.to_thread(game_import.import_game, folder, ws_dir)
+            return {"project": proj, "summary": result["summary"], "copied": result["copied"], "assets": result["assets"], "sections": result["sections"]}
         if name == "get_game_profile":
             return self.actions.get_game_profile(project=proj)
         if name == "update_game_profile":

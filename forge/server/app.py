@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from forge import asset_studio, game_tools, overview as project_overview, vault
+from forge import access, asset_studio, game_import, game_tools, overview as project_overview, updater, vault
 from forge.agent.action_layer import ForgeActionLayer
 from forge.agent.autonomous import execute_agent_brief
 from forge.agent import cli_agents
@@ -32,7 +32,7 @@ from forge.agent.llm import call_agent_model, list_agent_models
 from forge.agent.workspace_agent import WorkspaceAgent
 from forge.server.security import LocalOnlyGuard
 from forge.server.terminal import allowed_origin, resolve_terminal_command, run_terminal
-from forge.config import get_projects_root, load_config, save_config
+from forge.config import get_config_dir, get_projects_root, load_config, save_config
 from forge.mcp.server import ForgeMCPDispatcher, MCP_TOOLS_SCHEMA
 from forge.models import JobStatus
 from forge.providers.auth_manager import (
@@ -54,6 +54,7 @@ from forge.storage.project_catalog import (
     set_default_project,
 )
 from forge.storage.project_store import list_all_projects, sanitize_project_name
+from forge.storage import workspace_archive
 from forge.stylepacks.builtins import VARIANT_CHIP_PRESETS, save_custom_style_pack
 from forge.models import StylePack
 from forge.watcher.folder_watcher import WatchFolderService
@@ -144,7 +145,7 @@ app = FastAPI(
 app.add_middleware(LocalOnlyGuard, bind_host=os.environ.get("FORGE_BIND_HOST") or load_config().host)
 
 # Server-level settings that the HTTP API may not change (edit ~/.forge/config.json or use CLI flags).
-LOCKED_CONFIG_KEYS = {"host", "port", "allowed_proxy_hosts"}
+LOCKED_CONFIG_KEYS = {"host", "port", "allowed_proxy_hosts", "access_folders", "projects_dir"}
 
 
 # --- Request Payloads ---
@@ -1050,20 +1051,29 @@ async def api_steer_world(payload: dict[str, Any], project: str = "default") -> 
     )
 
 
-def _choose_local_game_folder() -> str:
+def _native_dialog(kind: str, title: str, **options: Any) -> str:
+    """A native folder/open/save dialog on the user's own screen (Glob only listens on 127.0.0.1)."""
     try:
         import tkinter as tk
         from tkinter import filedialog
     except ImportError as exc:
-        raise RuntimeError("The local folder picker is unavailable. Enter the folder path manually.") from exc
+        raise RuntimeError("The local file picker is unavailable. Enter the path manually.") from exc
 
     root = tk.Tk()
     try:
         root.withdraw()
         root.attributes("-topmost", True)
-        return filedialog.askdirectory(parent=root, title="Choose a game folder", mustexist=True)
+        if kind == "folder":
+            return filedialog.askdirectory(parent=root, title=title, mustexist=True) or ""
+        if kind == "save":
+            return filedialog.asksaveasfilename(parent=root, title=title, **options) or ""
+        return filedialog.askopenfilename(parent=root, title=title, **options) or ""
     finally:
         root.destroy()
+
+
+def _choose_local_game_folder() -> str:
+    return _native_dialog("folder", "Choose a game folder")
 
 
 @app.post("/api/system/choose-game-folder")
@@ -1086,6 +1096,274 @@ async def api_import_game_folder(payload: dict[str, Any]) -> dict[str, Any]:
         return await actions.import_existing_game(folder_path, project_name=project_name)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# --- Updates from GitHub releases ---
+
+@app.get("/api/update")
+async def api_update_check(force: bool = False) -> dict[str, Any]:
+    return await updater.check(force)
+
+
+@app.post("/api/update/install")
+async def api_update_install() -> dict[str, Any]:
+    if updater.state["status"] not in ("downloading", "installing"):
+        asyncio.create_task(updater.install())
+        await asyncio.sleep(0)  # let the download start before answering
+    return dict(updater.state)
+
+
+@app.get("/api/update/state")
+async def api_update_state() -> dict[str, Any]:
+    return dict(updater.state)
+
+
+@app.post("/api/system/choose-folder")
+async def api_choose_folder(payload: dict[str, Any]) -> dict[str, str]:
+    try:
+        folder = await asyncio.to_thread(_native_dialog, "folder", str(payload.get("title") or "Choose a folder"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="The folder picker could not open. Paste the folder path instead.") from exc
+    return {"folder_path": folder}
+
+
+# --- Folder access: what Glob's agent may read (and write) outside the projects folder ---
+
+@app.get("/api/access")
+async def api_access_list() -> dict[str, Any]:
+    return {"grants": access.list_grants()}
+
+
+@app.post("/api/access")
+async def api_access_grant(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {"grants": access.grant(str(payload.get("path") or ""), bool(payload.get("write")))}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/access")
+async def api_access_revoke(payload: dict[str, Any]) -> dict[str, Any]:
+    return {"grants": access.revoke(str(payload.get("path") or ""))}
+
+
+# --- Importing a game project (Godot, Unity, Unreal or any folder) ---
+
+import_jobs: dict[str, dict[str, Any]] = {}
+
+
+@app.post("/api/import/analyze")
+async def api_import_analyze(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(game_import.preview, str(payload.get("folder") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/import/start")
+async def api_import_start(payload: dict[str, Any]) -> dict[str, Any]:
+    folder = str(payload.get("folder") or "").strip()
+    if not folder or not Path(folder).expanduser().is_dir():
+        raise HTTPException(status_code=400, detail="Choose a game folder first.")
+    project = str(payload.get("project") or "").strip()
+    if not project:
+        name = sanitize_project_name(str(payload.get("name") or Path(folder).name).strip() or "imported_game")
+        base, root, index = name, actions.root_dir or get_projects_root(), 2
+        while (root / name).exists():
+            name, index = f"{base}-{index}", index + 1
+        project = name
+    try:
+        ws_dir = _ws_dir(project)
+        # Choosing the folder in Glob's own import screen is the user's consent to read it.
+        access.grant(folder, write=bool(access.granted_path(str(Path(folder).expanduser().resolve()), need_write=True)))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    job = {"id": f"imp_{int(time.time() * 1000)}", "project": project, "folder": folder, "status": "running", "log": [], "result": None, "error": ""}
+    import_jobs[job["id"]] = job
+    title = str(payload.get("title") or "").strip() or None
+
+    async def run() -> None:
+        try:
+            result = await asyncio.to_thread(game_import.import_game, folder, ws_dir, title=title, progress=job["log"].append)
+            job["result"] = {key: result[key] for key in ("summary", "copied", "bytes", "sections")} | {"assets": len(result["assets"])}
+            job["status"] = "done"
+        except Exception as exc:  # noqa: BLE001 — shown in the import screen
+            job["status"], job["error"] = "failed", str(exc)
+        await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+
+    asyncio.create_task(run())
+    return job
+
+
+@app.get("/api/import/jobs/{job_id}")
+async def api_import_job(job_id: str) -> dict[str, Any]:
+    job = import_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such import.")
+    return job
+
+
+@app.get("/api/import/models")
+async def api_import_models(project: str = "default") -> dict[str, Any]:
+    """Imported 3D models without a preview yet; the browser renders and uploads one for each."""
+    ws = _ws_dir(project)
+    models = []
+    for folder in ws.rglob("3d"):
+        if not folder.is_dir() or any(part.startswith(".") for part in folder.relative_to(ws).parts):
+            continue
+        for path in sorted(folder.iterdir()):
+            if path.suffix.lower() in (".glb", ".fbx", ".obj") and not path.with_name(f"{path.stem}_thumb.png").exists() and path.stat().st_size < 60_000_000:
+                models.append(path.relative_to(ws).as_posix())
+    return {"models": models[:400]}
+
+
+@app.post("/api/import/describe")
+async def api_import_describe(project: str = "default") -> dict[str, Any]:
+    described = await game_import.describe_assets(_ws_dir(project), _agent_model_call)
+    if described:
+        await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    return {"described": described}
+
+
+# --- Where projects live, and moving projects between computers ---
+
+def _open_in_file_manager(path: Path) -> None:
+    import subprocess
+    import sys as _sys
+
+    if _sys.platform == "win32":
+        os.startfile(str(path))  # noqa: S606 — a folder Glob itself chose
+    elif _sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+
+
+@app.get("/api/storage")
+async def api_storage(project: str = "default") -> dict[str, Any]:
+    root = (actions.root_dir or get_projects_root()).resolve()
+    return {
+        "projects_dir": str(root),
+        "workspace_dir": str(_ws_dir(project).resolve()) if project else "",
+        "config_dir": str(get_config_dir().resolve()),
+        "env_override": bool(os.environ.get("FORGE_PROJECTS_DIR")) and not load_config().projects_dir,
+    }
+
+
+@app.post("/api/storage/open")
+async def api_storage_open(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    target = str(payload.get("target") or "workspace")
+    sub = str(payload.get("path") or "")
+    if target == "projects":
+        path = (actions.root_dir or get_projects_root()).resolve()
+    elif target == "grant":
+        path = access.check(sub) if sub else None
+    else:
+        path = project_overview.resolve_rel(_ws_dir(project), sub) if sub else _ws_dir(project).resolve()
+    if path is None or not path.exists():
+        raise HTTPException(status_code=404, detail="That folder does not exist.")
+    try:
+        _open_in_file_manager(path if path.is_dir() else path.parent)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Could not open the file manager: {exc}") from exc
+    return {"opened": str(path)}
+
+
+@app.post("/api/storage/location")
+async def api_storage_location(payload: dict[str, Any]) -> dict[str, Any]:
+    raw = str(payload.get("path") or "").strip()
+    if raw:
+        target = Path(raw).expanduser()
+        if not target.is_absolute():
+            raise HTTPException(status_code=400, detail="Use a full folder path.")
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"Can't use that folder: {exc}") from exc
+        raw = str(target.resolve())
+    save_config({"projects_dir": raw})
+    if os.environ.get("FORGE_PROJECTS_DIR"):
+        if raw:
+            os.environ["FORGE_PROJECTS_DIR"] = raw
+        else:
+            os.environ.pop("FORGE_PROJECTS_DIR", None)
+    actions._stores.clear()
+    actions._executors.clear()
+    return {"projects_dir": str(get_projects_root().resolve()), **get_project_catalog(actions.root_dir)}
+
+
+def _project_dir(project: str) -> Path:
+    root = (actions.root_dir or get_projects_root()).resolve()
+    target = (root / project).resolve()
+    if sanitize_project_name(project) != project or target.parent != root or not target.is_dir():
+        raise HTTPException(status_code=404, detail=f"Project '{project}' was not found.")
+    return target
+
+
+@app.post("/api/projects/{project}/export")
+async def api_export_project(project: str, payload: dict[str, Any]) -> dict[str, Any]:
+    source = _project_dir(project)
+    dest = str(payload.get("dest") or "").strip()
+    if not dest:
+        try:
+            dest = await asyncio.to_thread(
+                _native_dialog, "save", "Export project", initialfile=f"{project}.glob.zip",
+                defaultextension=".zip", filetypes=[("Glob project", "*.zip")],
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="The save dialog could not open.") from exc
+        if not dest:
+            return {"cancelled": True}
+    target = Path(dest).expanduser()
+    if not target.is_absolute():
+        raise HTTPException(status_code=400, detail="Use a full file path.")
+    result = await asyncio.to_thread(workspace_archive.export_project, source, target)
+    return result
+
+
+@app.get("/api/projects/{project}/export.zip")
+async def api_download_project(project: str) -> FileResponse:
+    import tempfile
+
+    source = _project_dir(project)
+    target = Path(tempfile.gettempdir()) / f"{project}.glob.zip"
+    await asyncio.to_thread(workspace_archive.export_project, source, target)
+    return FileResponse(target, media_type="application/zip", filename=f"{project}.glob.zip")
+
+
+@app.post("/api/projects/import-archive")
+async def api_import_archive(file: UploadFile | None = File(None), path: str = Form(""), name: str = Form("")) -> dict[str, Any]:
+    import tempfile
+
+    root = (actions.root_dir or get_projects_root()).resolve()
+    temporary: Path | None = None
+    try:
+        if file is not None:
+            handle, raw = tempfile.mkstemp(suffix=".zip")
+            os.close(handle)
+            temporary = Path(raw)
+            with open(temporary, "wb") as sink:
+                while chunk := await file.read(8 * 1024 * 1024):
+                    sink.write(chunk)
+            archive = temporary
+        else:
+            if not path:
+                try:
+                    path = await asyncio.to_thread(_native_dialog, "open", "Import a Glob project", filetypes=[("Glob project", "*.zip")])
+                except Exception as exc:
+                    raise HTTPException(status_code=503, detail="The file picker could not open.") from exc
+                if not path:
+                    return {"cancelled": True}
+            archive = Path(path).expanduser()
+        project = await asyncio.to_thread(workspace_archive.import_archive, archive, root, name or (Path(file.filename).stem.removesuffix(".glob") if file and file.filename else ""))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # zipfile.BadZipFile and friends
+        raise HTTPException(status_code=400, detail=f"Not a Glob project archive: {exc}") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return {"project": project, **get_project_catalog(actions.root_dir)}
 
 
 @app.post("/api/pipeline/item/{item_id}/move")

@@ -100,10 +100,13 @@
         <div class="pv-tools">
           <input id="projectSearch" type="search" placeholder="Search…" aria-label="Search projects">
           <select id="projectSort" aria-label="Sort"><option value="updated">Last modified</option><option value="name">Name</option></select>
+          <button class="ghost" type="button" data-st-import-zip title="Import a project exported from Glob">Import .zip</button>
+          <button class="ghost" type="button" data-imp-open title="Import a Godot, Unity or Unreal project">Import game</button>
           <button class="primary" type="button" data-new-project>New project</button>
         </div>
       </div>
       <div class="pv-grid" id="projectGrid"></div>
+      <p class="pv-foot" id="projectsFoot"></p>
     </div>
   </section>
 
@@ -117,6 +120,21 @@
     <div class="ob-stage" id="obStage"></div>
   </section>
 
+  <!-- Importing a game project -->
+  <section class="onboard import-view" id="importView" hidden aria-label="Import a game">
+    <div class="petals" aria-hidden="true"></div>
+    <button class="ob-skip" type="button" data-imp-close>Close</button>
+    <div class="ob-stage wide" id="importStage"></div>
+  </section>
+
+  <!-- First-run setup -->
+  <section class="onboard setup" id="setup" hidden aria-label="Set up Glob">
+    <div class="petals" aria-hidden="true"></div>
+    <button class="ob-skip" type="button" data-setup-skip>Skip setup</button>
+    <div class="ob-stage" id="setupStage"></div>
+  </section>
+
+  <div class="update-banner" id="updateBanner" role="status" hidden></div>
   <dialog id="dialog"></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 

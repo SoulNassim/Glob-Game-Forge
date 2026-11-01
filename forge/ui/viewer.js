@@ -13,14 +13,44 @@ const ANGLES = {
   top: { azimuth: 0, elevation: 65 },
 };
 
+// Models exported elsewhere often point at textures by an absolute path on the exporting machine
+// (e.g. /home/app/mixamo/…/skin.fbm/basecolor.png). Anything outside the model's own folder is looked up
+// by file name next to the model instead, where Glob keeps a model's textures.
+function textureManager(url) {
+  const base = new URL(url, location.href);
+  const dir = base.href.slice(0, base.href.lastIndexOf("/") + 1);
+  const manager = new THREE.LoadingManager();
+  manager.setURLModifier((requested) => {
+    if (requested.startsWith("data:") || requested.startsWith("blob:")) return requested;
+    const resolved = new URL(requested.replace(/\\/g, "/"), dir).href;
+    if (resolved.startsWith(dir)) return resolved;
+    return dir + encodeURIComponent(decodeURIComponent(resolved.split("/").pop() || ""));
+  });
+  // Textures (embedded ones too) finish loading after the model itself; stills wait for them.
+  let busy = false;
+  const waiters = [];
+  manager.onStart = () => { busy = true; };
+  manager.onProgress = (_url, loaded, total) => { busy = loaded < total; };
+  manager.onLoad = () => { busy = false; waiters.splice(0).forEach((done) => done()); };
+  manager.settled = (ms = 15000) => (busy ? new Promise((done) => { waiters.push(done); setTimeout(done, ms); }) : Promise.resolve());
+  return manager;
+}
+
 export async function loadModel(url) {
   const ext = url.split("?")[0].split(".").pop().toLowerCase();
-  if (ext === "obj") return { object: await new OBJLoader().loadAsync(url), clips: [] };
+  const manager = textureManager(url);
+  if (ext === "obj") {
+    const object = await new OBJLoader(manager).loadAsync(url);
+    await manager.settled();
+    return { object, clips: [] };
+  }
   if (ext === "fbx") {
-    const object = await new FBXLoader().loadAsync(url);
+    const object = await new FBXLoader(manager).loadAsync(url);
+    await manager.settled();
     return { object, clips: object.animations || [] };
   }
-  const gltf = await new GLTFLoader().loadAsync(url);
+  const gltf = await new GLTFLoader(manager).loadAsync(url);
+  await manager.settled();
   return { object: gltf.scene, clips: gltf.animations || [] };
 }
 

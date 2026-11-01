@@ -123,7 +123,7 @@ function renderMarkdown(md, baseDir = "") {
   const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
   while (i < lines.length) {
     const line = lines[i];
-    if (!line.trim()) { i++; continue; }
+    if (!line.trim() || /^\s*<!--.*-->\s*$/.test(line)) { i++; continue; }
     const fence = line.match(/^```/);
     if (fence) {
       const buf = [];
@@ -240,6 +240,9 @@ async function openProjects() {
   $("#projectGrid").innerHTML = `<div class="pv-loading">Loading projects…</div>`;
   try { state.cards = (await api("/api/projects/cards")).projects; } catch (err) { toast(err.message, true); state.cards = []; }
   renderProjectGrid();
+  api("/api/storage").then((info) => {
+    $("#projectsFoot").innerHTML = `Projects are saved in <code>${esc(info.projects_dir)}</code> <button class="link-btn" data-st-open="projects">Open folder</button> · <button class="link-btn" data-st-move>Change</button>`;
+  }).catch(() => {});
 }
 
 function closeProjects() { $("#projectsView").hidden = true; }
@@ -258,6 +261,7 @@ function renderProjectGrid() {
       return `<div class="pcard${c.project === state.project ? " current" : ""}" data-open-project="${esc(c.project)}" tabindex="0" role="button">
         <div class="pcard-head"><div><strong>${esc(c.title)}</strong><small>${esc(timeAgo(c.updated))}</small>
           <small>${c.sections} section${c.sections === 1 ? "" : "s"} · ${c.assets} asset${c.assets === 1 ? "" : "s"}</small></div>
+          <button class="pcard-del" data-st-export="${esc(c.project)}" title="Export as .zip" aria-label="Export ${esc(c.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
           ${c.project === "default" ? "" : `<button class="pcard-del" data-delete-project="${esc(c.project)}" title="Delete project" aria-label="Delete ${esc(c.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>`}</div>
         <div class="pcard-art n${Math.min(imgs.length, 3)}">${imgs.length ? imgs.join("") : `<span class="pcard-initials">${esc(initials || "F")}</span>`}</div>
         ${c.project === state.project ? `<span class="pcard-badge">Open</span>` : ""}
@@ -517,7 +521,7 @@ const SUGGESTIONS = [
   ["◎", "Look at my project and suggest what's missing."],
   ["✎", "Write a short pitch and a feature list on the front page."],
 ];
-const TOOL_ICON = { write: "✎", append: "✎", create_folder: "▣", move: "↦", delete: "✕", generate: "✦", pick_winner: "★" };
+const TOOL_ICON = { write: "✎", append: "✎", create_folder: "▣", move: "↦", delete: "✕", generate: "✦", pick_winner: "★", request_access: "🔒", import_game: "⇣", copy_in: "⇣" };
 
 function renderMessages() {
   const box = $("#messages");
@@ -569,7 +573,9 @@ function renderMessage(m, agent = "glob") {
     return `<li class="${a.ok === false ? "bad" : ""}${openable ? " link" : ""}"${openable ? ` data-open="${esc(a.path)}"` : ""}><i>${a.ok === false ? "!" : TOOL_ICON[a.tool] || "•"}</i><span>${esc(a.summary)}</span></li>`;
   }).join("");
   const card = actions.length ? `<details class="changes"${actions.length <= 3 ? " open" : ""}><summary><span class="spark">✦</span>${actions.length} change${actions.length === 1 ? "" : "s"}${failed ? ` <em>${failed} failed</em>` : ""}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary><ul>${rows}</ul></details>` : "";
-  return `<div class="msg agent${m.error ? " error" : ""}">${avatarFor(agent)}<div class="bubble"><div class="who">${esc(agentName(agent))}${m.model && agent === "glob" ? ` <small>${esc(m.model)}</small>` : ""}</div><div class="md">${renderMarkdown(m.text)}</div>${card}</div></div>`;
+  const last = m === state.session?.messages?.at(-1);
+  const asks = (m.actions || []).filter((a) => a.access_request).map((a) => accessCard(a.access_request, last)).join("");
+  return `<div class="msg agent${m.error ? " error" : ""}">${avatarFor(agent)}<div class="bubble"><div class="who">${esc(agentName(agent))}${m.model && agent === "glob" ? ` <small>${esc(m.model)}</small>` : ""}</div><div class="md">${renderMarkdown(m.text)}</div>${asks}${card}</div></div>`;
 }
 
 function syncComposer() {
@@ -592,7 +598,9 @@ function renderAttachments() {
 }
 
 function addFiles(files) {
-  for (const file of [...files].slice(0, 4 - state.attachments.length)) {
+  const room = 4 - state.attachments.length;
+  if ([...files].length > room) toast(room ? `Up to 4 images per message; added ${room}.` : "Up to 4 images per message.", true);
+  for (const file of [...files].slice(0, Math.max(0, room))) {
     if (!file.type.startsWith("image/")) continue;
     const reader = new FileReader();
     reader.onload = () => { state.attachments.push({ name: file.name, data_url: reader.result }); renderAttachments(); };
@@ -795,7 +803,11 @@ async function settingsDialog(tab) {
   await renderSettings();
 }
 
-function closeSettings() { $("#settingsView").hidden = true; }
+function closeSettings() {
+  $("#settingsView").hidden = true;
+  // "Connect a provider…" in first-run setup comes back to the setup afterwards.
+  if (state.setupReturn && state.setup) { state.setupReturn = false; $("#setup").hidden = false; renderSetup(); }
+}
 
 const KEY_PROVIDERS = [
   { key: "gemini", name: "Google Gemini", use: "2D images (Nano Banana)", url: "https://aistudio.google.com/apikey", hint: "AIza…" },
@@ -808,7 +820,7 @@ async function renderSettings() {
   const st = state.settings;
   await loadModels();
   const info = state.modelInfo || { presets: {}, endpoints: [] };
-  const nav = [["models", "AI models"], ["agent", "Agent"], ["coding", "Coding agents"], ["images", "Image & 3D"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
+  const nav = [["models", "AI models"], ["agent", "Agent"], ["coding", "Coding agents"], ["images", "Image & 3D"], ["storage", "Storage & access"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
   let body = "";
   if (st.tab === "models") {
     const ready = state.models.filter((m) => m.ready);
@@ -864,6 +876,8 @@ async function renderSettings() {
       </div>`).join("")}</div>
       <div class="row"><button class="ghost" data-settings-tab="coding">Refresh</button></div>
       <p class="st-note">Edits: Claude Code may edit files without asking (not run commands), Codex runs sandboxed to the workspace, OpenCode and Gemini CLI auto-approve file edits. Claude Code also gets Glob's own tools.</p>`;
+  } else if (st.tab === "storage") {
+    body = await storageSettings();
   } else {
     const cfg = await api("/api/config");
     const studio = await studioOptions();
@@ -1415,6 +1429,7 @@ function runningJobs(path) {
 }
 
 const ICON = {
+  folder: `<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>`,
   sparkle: `<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16v4M17 18h4"/>`,
   variant: `<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/>`,
   edit: `<path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>`,
@@ -1449,9 +1464,16 @@ function modelCard(o, kind) {
     <div class="fmt-links">${icon("download")}${formats.map(([fmt, path]) => `<a href="${esc(fileUrl(path))}" download>${esc(fmt.toUpperCase())}</a>`).join("")}</div></div></div>`;
 }
 
-function outputGrid(items, winner, kind = "candidates") {
-  if (!items.length) return "";
-  return `<div class="out-grid">${items.map((o) => {
+function outputGrid(all, winner, kind = "candidates") {
+  if (!all.length) return "";
+  // Engine files the browser can't show (Godot .res clips, .blend…) are listed as compact chips.
+  const files = all.filter((o) => o.type === "file");
+  const items = all.filter((o) => o.type !== "file");
+  const chips = files.length ? `<div class="file-chips">${files.map((o) => {
+    const name = o.path.split("/").pop();
+    return `<a class="file-chip" href="${esc(fileUrl(o.path))}" download title="Download ${esc(name)}">${icon(kind === "animations" ? "film" : "download")}<span>${esc(name)}</span></a>`;
+  }).join("")}</div>` : "";
+  return (items.length ? "" : chips) + (items.length ? `<div class="out-grid">${items.map((o) => {
     if (o.type === "model") return modelCard(o, kind);
     const isWinner = o.path === winner;
     const img = `<a class="out-img" href="${esc(fileUrl(o.path))}" target="_blank" rel="noopener"><img src="${esc(fileUrl(o.path))}" alt="" loading="lazy">${isWinner ? `<span class="out-badge win">${icon("star")}Winner</span>` : ""}</a>`;
@@ -1467,12 +1489,12 @@ function outputGrid(items, winner, kind = "candidates") {
       <button class="act" data-split="${esc(o.path)}">${icon("scissors")}Split</button>
       <button class="act" data-icons="${esc(o.path)}">${icon("grid")}Icons</button>
       <button class="act wide pillar-act" data-make-pillar="${esc(o.path)}" title="Use this image as a style reference for a whole folder">${icon("layers")}Make pillar</button></div></div>`;
-  }).join("")}</div>`;
+  }).join("")}</div>${chips}` : "");
 }
 
 const OUTPUT_SECTIONS = [
   ["3d", "3D models"], ["rig", "Rigged"], ["animations", "Animations"], ["sprites", "Sprite sheets"], ["icons", "Icons"],
-  ["views", "Turnaround views"], ["candidates", "Candidates"], ["variants", "Variants"], ["edits", "Edits"], ["parts", "Parts"],
+  ["views", "Turnaround views"], ["candidates", "Candidates"], ["variants", "Variants"], ["edits", "Edits"], ["textures", "Textures"], ["parts", "Parts"],
 ];
 
 function renderAssetPage(a) {
@@ -2294,7 +2316,7 @@ function connectSocket() {
 
 document.addEventListener("click", async (event) => {
   const t = event.target.closest("[data-compact-now],[data-pick-winner-file],[data-bible-toggle],[data-bible-view],[data-new-chat],[data-settings-coding],[data-cli-login],[data-pick-model],[data-pick-effort],[data-pick-cli-model],[data-pick-cli-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
-  if (!t) return;
+  if (!t || event.target.closest("[data-st-export],[data-imp-use]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
   if (t.dataset.newAsset !== undefined) return newAssetDialog(t.dataset.newAsset);
@@ -2456,23 +2478,38 @@ document.addEventListener("submit", (event) => {
 // Drag images from the desktop onto an asset's winner box.
 // Drag images or 3D models from the desktop onto an asset page: images become candidates (and the winner),
 // models go to the asset's 3D section.
-const dropZone = (event) => event.target.closest?.("[data-drop-winner]") || event.target.closest?.("[data-drop-asset]");
+// Images dropped on the chat are attached to the next message; .zip files on the projects page are imported.
+const dropZone = (event) => event.target.closest?.("[data-drop-winner]") || event.target.closest?.("[data-drop-asset]")
+  || event.target.closest?.(".panel.chat") || event.target.closest?.("#projectsView");
+const clearDrop = () => document.querySelectorAll("[data-drop-winner].over, [data-drop-asset].over, .panel.chat.over, #projectsView.over").forEach((z) => z.classList.remove("over"));
 document.addEventListener("dragover", (event) => {
-  const zone = dropZone(event);
-  if (!zone || !event.dataTransfer?.types.includes("Files")) return;
+  if (!event.dataTransfer?.types.includes("Files")) return;
   event.preventDefault();
-  zone.classList.add("over");
+  const zone = dropZone(event);
+  event.dataTransfer.dropEffect = zone ? "copy" : "none";
+  if (zone && !zone.classList.contains("over")) { clearDrop(); zone.classList.add("over"); }
 });
 document.addEventListener("dragleave", (event) => {
   if (event.relatedTarget && dropZone({ target: event.relatedTarget })) return;
-  document.querySelectorAll("[data-drop-winner].over, [data-drop-asset].over").forEach((z) => z.classList.remove("over"));
+  clearDrop();
 });
 document.addEventListener("drop", (event) => {
+  if (!event.dataTransfer?.types.includes("Files")) return;
+  event.preventDefault();
+  clearDrop();
   const zone = dropZone(event);
   if (!zone) return;
-  event.preventDefault();
-  document.querySelectorAll("[data-drop-winner].over, [data-drop-asset].over").forEach((z) => z.classList.remove("over"));
   const files = [...event.dataTransfer.files];
+  if (zone.id === "projectsView") {
+    const zip = files.find((f) => /\.zip$/i.test(f.name));
+    return zip ? importArchive(zip) : toast("Drop a Glob project .zip here to import it.", true);
+  }
+  if (zone.classList.contains("panel")) {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (images.length) addFiles(images);
+    if (images.length < files.length) toast(images.length ? "Only images can be attached; the other files were skipped." : "Only images can be attached to a message.", !images.length);
+    return;
+  }
   const models = files.filter((f) => MODEL_RE.test(f.name));
   const images = files.filter((f) => !MODEL_RE.test(f.name));
   if (models.length) uploadModels(models);
@@ -2488,11 +2525,555 @@ $("#settingsView").addEventListener("input", (event) => {
     restoreView();
     await loadModels();
     state.agentCfg = await api("/api/config").catch(() => null);
+    await loadGrants();
     await loadClis();
     await loadJobs();
     await Promise.all([loadSessions(), loadOverview()]);
     connectSocket();
+    if (state.agentCfg && !state.agentCfg.onboarded) openSetup();
+    if (state.agentCfg?.auto_update_check !== false) checkForUpdate().then(renderUpdateBanner);
   } catch (err) {
     toast(`Could not start: ${err.message}`, true);
   }
 })();
+
+// ---------- folders: access grants, game import, storage, first-run setup ----------
+
+const fmtBytes = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : n >= 1048576 ? `${Math.round(n / 1048576)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const SHAPE_LABEL = { asset: "", kit: "kit", gallery: "images", audio: "audio", docs: "docs", data: "needs art" };
+
+async function loadGrants() {
+  try { state.grants = (await api("/api/access")).grants; } catch { state.grants = []; }
+  return state.grants;
+}
+
+const isGranted = (path, write = false) => (state.grants || []).some((g) => {
+  const root = g.path.toLowerCase().replace(/[\\/]+$/, "");
+  const p = String(path).toLowerCase().replace(/[\\/]+$/, "");
+  return (p === root || p.startsWith(`${root}\\`) || p.startsWith(`${root}/`)) && (g.write || !write);
+});
+
+async function chooseFolder(title) {
+  try { return (await api("/api/system/choose-folder", { method: "POST", body: { title } })).folder_path || ""; }
+  catch (err) { toast(err.message, true); return ""; }
+}
+
+async function grantFolder(path, write = false) {
+  state.grants = (await api("/api/access", { method: "POST", body: { path, write } })).grants;
+}
+
+// The agent asked for a folder in the chat: Allow / Don't allow.
+function accessCard(request, last) {
+  const allowed = isGranted(request.path, request.write);
+  const what = request.write ? "read and write" : "read";
+  return `<div class="access-card${allowed ? " ok" : ""}">
+    <div class="ac-head">${icon("folder")}<span>${allowed ? "Allowed" : `Glob asks to ${what} a folder`}</span></div>
+    <code>${esc(request.path)}</code>
+    ${request.reason ? `<p>${esc(request.reason)}</p>` : ""}
+    ${!request.exists ? `<p class="ac-warn">This folder doesn't exist on this computer. Check the path.</p>` : ""}
+    ${!allowed && last && request.exists ? `<div class="ac-actions"><button class="primary" data-access-allow="${esc(request.path)}" data-write="${request.write ? 1 : 0}">Allow</button>
+      <button class="ghost" data-access-deny="${esc(request.path)}">Don't allow</button>
+      <small>You can remove access any time in Settings → Storage & access.</small></div>` : ""}
+  </div>`;
+}
+
+async function answerAccess(path, allow, write) {
+  try {
+    if (allow) await grantFolder(path, write);
+    $("#input").value = allow
+      ? `I allowed access to ${path}${write ? " (read and write)" : ""}. Go ahead.`
+      : `Don't access ${path}.`;
+    renderMessages();
+    await send();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ----- importing a game project -----
+
+function openImport(folder = "") {
+  closeProjects();
+  state.imp = { step: "pick", folder, preview: null, target: "new", name: "", describe: state.models.some((m) => m.ready), log: [], phase: "", result: null };
+  $("#importView").hidden = false;
+  renderImport();
+  if (folder) scanImport();
+}
+
+function closeImport() { $("#importView").hidden = true; state.imp = null; }
+
+function unitStats(u) {
+  return [
+    u.models && plural(u.models, "model"), u.animations && plural(u.animations, "animation"), u.textures && plural(u.textures, "texture"),
+    u.variants && plural(u.variants, "variant"), u.images && plural(u.images, "image"), u.audio && plural(u.audio, "sound"),
+  ].filter(Boolean).join(" · ");
+}
+
+function renderImport() {
+  const imp = state.imp;
+  if (!imp) return;
+  let body = "";
+  if (imp.step === "pick") {
+    const recent = (state.grants || []).filter((g) => g.exists).slice(-6).reverse();
+    body = `<div class="ob-step enter"><p class="ob-kicker">Import a game</p><h1>Bring your <em>game</em> in.</h1>
+      <p class="ob-sub">Godot, Unity, Unreal or any folder of game art. Glob finds the characters, models, animations, textures, variants, kits and design docs, copies them into a project and lays them out in the overview. Your game folder is never changed.</p>
+      <div class="imp-pick"><input id="impPath" class="ob-input small" placeholder="D:\\Games\\MyGame" value="${esc(imp.folder)}" spellcheck="false">
+        <button class="ob-back" data-imp-browse>Browse…</button><button class="ob-next" data-imp-scan>Scan</button></div>
+      ${recent.length ? `<div class="imp-recent"><span>Folders Glob may use:</span>${recent.map((g) => `<button class="ob-chip" data-imp-use="${esc(g.path)}">${esc(g.path.split(/[\\/]/).pop() || g.path)}</button>`).join("")}</div>` : ""}
+    </div>`;
+  } else if (imp.step === "scanning") {
+    body = `<div class="ob-step enter"><div class="ob-orb"><span></span><span></span><span></span></div><p class="ob-kicker">Scanning</p><h1>Looking through<br>your game…</h1><p class="ob-sub">${esc(imp.folder)}</p></div>`;
+  } else if (imp.step === "preview") {
+    const p = imp.preview;
+    const c = p.counts;
+    const tiles = [["Characters", c.characters], ["3D models", c.models], ["Animations", c.animations], ["Textures", c.textures], ["Images", c.images], ["Sounds", c.audio], ["Needs art", c.needs_art], ["Docs", c.docs]].filter(([, n]) => n);
+    const current = humanize(state.project || "");
+    body = `<div class="imp-preview enter">
+      <div class="imp-top"><div><p class="ob-kicker">${esc(p.engine_label)} project</p><h2>${esc(p.title)}</h2><code>${esc(p.folder)}</code></div>
+        <button class="ob-back" data-imp-back>Choose another folder</button></div>
+      <div class="imp-tiles">${tiles.map(([label, n]) => `<div><strong>${n}</strong><span>${label}</span></div>`).join("")}</div>
+      <div class="imp-sections">${p.sections.map((s) => `<section><h3>${esc(s.title)} <small>${s.units.length}</small></h3><div class="imp-units">${s.units.map((u) => `
+        <div class="imp-unit${u.shape === "data" ? " needs" : ""}" title="${esc(u.source || u.description || "")}"><strong>${esc(u.title)}</strong>
+          <small>${esc(unitStats(u) || (u.description ? u.description.slice(0, 70) : ""))}</small>${SHAPE_LABEL[u.shape] ? `<em>${SHAPE_LABEL[u.shape]}</em>` : ""}</div>`).join("")}</div></section>`).join("")}</div>
+      <div class="imp-options">
+        <label class="imp-radio"><input type="radio" name="impTarget" value="new" ${imp.target === "new" ? "checked" : ""}><span>New project</span>
+          <input id="impName" class="imp-name" value="${esc(imp.name || p.title)}" maxlength="60"></label>
+        ${state.project ? `<label class="imp-radio"><input type="radio" name="impTarget" value="current" ${imp.target === "current" ? "checked" : ""}><span>Into <b>${esc(current)}</b> (merges with its sections and assets)</span></label>` : ""}
+        <label class="imp-check"><input type="checkbox" id="impDescribe" ${imp.describe ? "checked" : ""}><span>Let Glob look at the art and write a prompt for each asset (uses your chat model)</span></label>
+        <p class="imp-note">Copies ${c.files} files (${fmtBytes(c.bytes)}) into the project. ${p.skipped.archives ? `${p.skipped.archives} archives (.zip) are skipped. ` : ""}Glob's agent may read this folder afterwards; change that in Settings → Storage & access.</p>
+      </div>
+      <div class="ob-nav"><button class="ob-back" data-imp-close>Cancel</button><button class="ob-next forge" data-imp-run>✦ Import ${esc(p.title)}</button></div>
+    </div>`;
+  } else {
+    const done = imp.step === "done";
+    body = `<div class="ob-step enter">${done ? `<img class="ob-glob" src="/ui/glob-forge.svg" alt="">` : `<div class="ob-orb"><span></span><span></span><span></span></div>`}
+      <p class="ob-kicker">${done ? "Imported" : esc(imp.phase || "Importing")}</p><h1>${esc((imp.target === "new" ? imp.name : humanize(imp.result?.project || state.project)) || imp.preview?.title || "Your game")}</h1>
+      <ul class="ob-log">${imp.log.slice(-14).map((l) => `<li class="${l.cls || ""}">${esc(l.text)}</li>`).join("")}</ul>
+      ${done ? `<div class="ob-nav"><button class="ob-next forge" data-imp-enter>Open the project →</button></div>` : ""}</div>`;
+  }
+  $("#importStage").innerHTML = body;
+}
+
+function syncImport() {
+  const imp = state.imp;
+  if ($("#impPath")) imp.folder = $("#impPath").value.trim().replace(/^"|"$/g, "");
+  if ($("#impName")) imp.name = $("#impName").value.trim();
+  const target = document.querySelector("input[name=impTarget]:checked");
+  if (target) imp.target = target.value;
+  if ($("#impDescribe")) imp.describe = $("#impDescribe").checked;
+}
+
+async function scanImport() {
+  const imp = state.imp;
+  if (!imp.folder) { toast("Choose or paste a game folder first.", true); return; }
+  imp.step = "scanning";
+  renderImport();
+  try {
+    imp.preview = await api("/api/import/analyze", { method: "POST", body: { folder: imp.folder } });
+    imp.name = imp.preview.title;
+    imp.step = "preview";
+  } catch (err) {
+    imp.step = "pick";
+    toast(err.message, true);
+  }
+  renderImport();
+}
+
+async function runImport() {
+  syncImport();
+  const imp = state.imp;
+  const log = (text, cls = "") => { imp.log.push({ text, cls }); renderImport(); };
+  imp.step = "running";
+  imp.phase = "Copying files";
+  renderImport();
+  try {
+    const body = { folder: imp.folder, title: imp.target === "new" ? imp.name : "" };
+    if (imp.target === "current") body.project = state.project;
+    else body.name = imp.name;
+    let job = await api("/api/import/start", { method: "POST", body });
+    const project = job.project;
+    let seen = 0;
+    while (job.status === "running") {
+      await new Promise((r) => setTimeout(r, 600));
+      job = await api(`/api/import/jobs/${job.id}`);
+      for (const line of job.log.slice(seen)) log(line);
+      seen = job.log.length;
+    }
+    if (job.status !== "done") throw new Error(job.error || "The import stopped.");
+    const r = job.result;
+    log(`${r.assets} assets in ${Object.keys(r.sections).length} sections · ${r.copied} files copied`, "ok");
+    imp.result = { project };
+    await loadGrants();
+    state.project = project;
+    storeSet("forge.project", project);
+    // Previews for the 3D models, rendered here in the browser.
+    const { models } = await api(`/api/import/models?project=${encodeURIComponent(project)}`);
+    if (models.length) {
+      imp.phase = "Rendering previews";
+      log(`Rendering previews for ${plural(models.length, "model")}…`);
+      const viewer = await viewerModule().catch(() => null);
+      let made = 0;
+      for (const [i, model] of models.entries()) {
+        try {
+          const png = await viewer.renderThumb(projectFileUrl(project, model), 384);
+          await api(`/api/studio/thumb?project=${encodeURIComponent(project)}`, { method: "POST", body: { model, png } });
+          made += 1;
+        } catch { /* keep the placeholder */ }
+        if (i % 8 === 7 || i === models.length - 1) { imp.log.at(-1).text = `Rendering previews ${i + 1} / ${models.length}…`; renderImport(); }
+      }
+      log(`${made} previews rendered`, "ok");
+    }
+    if (imp.describe) {
+      imp.phase = "Looking at the art";
+      log("Glob is looking at your characters and items…");
+      try {
+        const { described } = await api(`/api/import/describe?project=${encodeURIComponent(project)}`, { method: "POST" });
+        log(described ? `Wrote prompts for ${plural(described, "asset")}` : "The chat model couldn't look at images; prompts stay empty for now.", described ? "ok" : "");
+      } catch (err) { log(`Couldn't describe the art: ${err.message}`, "bad"); }
+    }
+    imp.step = "done";
+  } catch (err) {
+    log(err.message, "bad");
+    imp.step = "done";
+  }
+  renderImport();
+}
+
+async function finishImport() {
+  const project = state.imp?.result?.project || state.project;
+  closeImport();
+  await switchProject(project);
+  showPanel("workspace", true);
+}
+
+// ----- storage: where projects live, export and import -----
+
+async function exportProject(project) {
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(project)}/export`, { method: "POST", body: {} });
+    if (result.cancelled) return;
+    toast(`Exported ${humanize(project)} to ${result.path} (${fmtBytes(result.size)})`);
+  } catch (err) {
+    if (/dialog/i.test(err.message)) { window.location.href = `/api/projects/${encodeURIComponent(project)}/export.zip`; return; }
+    toast(err.message, true);
+  }
+}
+
+async function importArchive(file) {
+  const form = new FormData();
+  if (file) form.append("file", file);
+  toast(file ? `Importing ${file.name}…` : "Choose a Glob project .zip…");
+  try {
+    const res = await fetch("/api/projects/import-archive", { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Import failed (${res.status})`);
+    if (data.cancelled) return;
+    toast(`Imported ${humanize(data.project)}`);
+    closeProjects();
+    closeSettings();
+    await switchProject(data.project);
+  } catch (err) { toast(err.message, true); }
+}
+
+function pickArchive() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".zip,application/zip";
+  input.onchange = () => input.files[0] && importArchive(input.files[0]);
+  input.click();
+}
+
+async function moveProjectsFolder() {
+  const folder = await chooseFolder("Choose where Glob keeps your projects");
+  if (!folder) return;
+  try {
+    await api("/api/storage/location", { method: "POST", body: { path: folder } });
+    toast(`Projects now live in ${folder}`);
+    await loadProjects();
+    await switchProject(state.projects.includes(state.project) ? state.project : state.projects[0] || "default");
+    if (!$("#settingsView").hidden) renderSettings();
+    if (state.setup) renderSetup();
+  } catch (err) { toast(err.message, true); }
+}
+
+function grantRows(grants) {
+  if (!grants.length) return `<p class="st-empty">No folders yet. Glob asks in the chat when it needs one, or add your game folder here.</p>`;
+  return grants.map((g) => `<div class="grant-row${g.exists ? "" : " missing"}"><span class="dot ${g.exists ? "live" : ""}"></span><code title="${esc(g.path)}">${esc(g.path)}</code>
+    <select data-grant-mode="${esc(g.path)}" aria-label="Access"><option value="read" ${g.write ? "" : "selected"}>Read</option><option value="write" ${g.write ? "selected" : ""}>Read & write</option></select>
+    ${g.exists ? `<button class="mini" data-imp-use="${esc(g.path)}" title="Import this folder as a game">Import</button><button class="mini" data-st-open="grant" data-path="${esc(g.path)}">Open</button>` : `<small>missing</small>`}
+    <button class="link-btn danger-text" data-grant-remove="${esc(g.path)}">Remove</button></div>`).join("");
+}
+
+async function storageSettings() {
+  const [info, grants] = await Promise.all([api("/api/storage"), loadGrants(), state.update ? null : checkForUpdate()]);
+  return `
+    <h1>Storage & access</h1><p class="st-lede">Where your projects are saved, how to move them between computers, and which folders on this computer Glob may use.</p>
+    <div class="st-label">Projects folder</div>
+    <div class="path-row"><code>${esc(info.projects_dir)}</code><button class="mini" data-st-open="projects">Open</button><button class="mini" data-st-move>Change…</button></div>
+    <p class="st-note">Each project is a folder in here. Its <code>workspace/</code> folder holds the pages, assets, images, models and chats you see in Glob${info.env_override ? ". (Set by FORGE_PROJECTS_DIR for this session.)" : "."}</p>
+    ${state.project ? `<div class="st-label">This project · ${esc(humanize(state.project))}</div>
+    <div class="path-row"><code>${esc(info.workspace_dir)}</code><button class="mini" data-st-open="workspace">Open</button></div>` : ""}
+    <div class="row wrap">${state.project ? `<button class="ghost" data-st-export="${esc(state.project)}">Export project as .zip…</button>` : ""}<button class="ghost" data-st-import-zip>Import a project .zip…</button><button class="ghost" data-imp-open>Import a game…</button></div>
+    <div class="st-label">Folders Glob may use</div>
+    <div class="grant-list">${grantRows(grants)}</div>
+    <div class="row"><button class="ghost" data-grant-add>+ Add a folder</button></div>
+    <p class="st-note">Glob's chat agent can read these folders (and write in them, when allowed); coding agents get them as extra working folders. API keys, .env and key files are always off-limits. When Glob needs another folder it asks you in the chat.</p>
+    ${updateSettings()}
+    <div class="st-label">Setup</div>
+    <div class="row"><button class="ghost" data-setup-open>Run first-time setup again</button></div>
+    <p class="st-note">Settings and API keys are stored in <code>${esc(info.config_dir)}</code>.</p>`;
+}
+
+// ----- first-run setup -----
+
+const SETUP_STEPS = 6;
+
+async function openSetup() {
+  state.setup = { step: 0 };
+  $("#setup").hidden = false;
+  const petals = $("#setup .petals");
+  if (!petals.childElementCount) petals.innerHTML = $("#onboarding .petals").innerHTML || Array.from({ length: 18 }, () => `<i style="--x:${Math.random() * 100}%;--d:${8 + Math.random() * 10}s;--delay:${-Math.random() * 18}s;--s:${0.5 + Math.random() * 0.9};--r:${Math.random() * 360}deg;--sway:${20 + Math.random() * 60}px"></i>`).join("");
+  await renderSetup();
+}
+
+async function closeSetup(done = true) {
+  $("#setup").hidden = true;
+  state.setup = null;
+  if (done) await api("/api/config", { method: "PUT", body: { onboarded: true } }).catch(() => {});
+}
+
+async function renderSetup() {
+  const st = state.setup;
+  if (!st) return;
+  const nav = (next = "Continue") => `<div class="ob-nav"><button class="ob-back" data-setup-back>Back</button><button class="ob-next" data-setup-next>${next}</button></div>`;
+  const dots = `<div class="setup-dots">${Array.from({ length: SETUP_STEPS }, (_, i) => `<i class="${i === st.step ? "on" : i < st.step ? "done" : ""}"></i>`).join("")}</div>`;
+  let body = "";
+  if (st.step === 0) {
+    body = `<div class="ob-step intro enter"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">Welcome to Glob</p><h1>Let's set up<br>your <em>forge</em>.</h1>
+      <p class="ob-sub">A few quick steps, all optional: a brain for the chat, your coding agents, image and 3D keys, and the folders Glob may use. Change any of it later in Settings.</p>
+      <button class="ob-next" data-setup-next>Start setup</button></div>`;
+  } else if (st.step === 1) {
+    await loadModels();
+    const ready = state.models.filter((m) => m.ready);
+    const info = state.modelInfo || {};
+    body = `<div class="ob-step enter"><p class="ob-kicker">1 / 4 · Brain</p><h1>Who should Glob<br>think with?</h1>
+      <p class="ob-sub">Glob's chat runs on any model: Anthropic, OpenAI, OpenRouter, Gemini, Ollama, LM Studio or any OpenAI-compatible URL.</p>
+      <div class="setup-list">${ready.length ? ready.slice(0, 6).map((m) => `<div><span class="dot live"></span>${esc(m.label)}<small>${esc(m.group || m.provider || "")}</small></div>`).join("") + (ready.length > 6 ? `<div><small>+ ${ready.length - 6} more</small></div>` : "") : `<div class="empty">Nothing connected yet.</div>`}</div>
+      <div class="setup-actions">${info.vscode_importable ? `<button class="ob-chip on" data-setup-vscode>⇣ Import ${plural(info.vscode_importable, "model")} from VS Code</button>` : ""}<button class="ob-chip" data-setup-settings="models">Connect a provider…</button></div>
+      ${nav(ready.length ? "Continue" : "Skip for now")}</div>`;
+  } else if (st.step === 2) {
+    await loadClis();
+    body = `<div class="ob-step enter"><p class="ob-kicker">2 / 4 · Coding agents</p><h1>Plug in your<br><em>agents</em>.</h1>
+      <p class="ob-sub">Claude Code, Codex, OpenCode and Gemini CLI run as chat tabs inside your project folder, with your own login. They get Glob's tools too.</p>
+      <div class="setup-clis">${state.clis.map((c) => `<div class="setup-cli${c.installed ? " on" : ""}">${agentIcon(c.id)}<div><strong>${esc(c.label)}</strong><small>${c.installed ? "Installed" : "Not installed"}</small></div>
+        <button class="ob-chip" data-cli-login="${c.id}">${c.installed ? "Log in" : "Install"}</button></div>`).join("")}</div>
+      <p class="ob-sub small">Install and Log in open a terminal; come back here when it's done. <button class="link-btn" data-setup-refresh>Refresh</button></p>
+      ${nav()}</div>`;
+  } else if (st.step === 3) {
+    const cfg = await api("/api/config");
+    body = `<div class="ob-step enter"><p class="ob-kicker">3 / 4 · Image & 3D</p><h1>Keys for images<br>and <em>3D</em>.</h1>
+      <p class="ob-sub">Glob is free; generation runs on your own provider accounts. Without keys you're in Demo Mode, which still lets you try everything.</p>
+      <form id="setupKeys" class="setup-keys">${KEY_PROVIDERS.map((k) => `<label><span><b>${k.name}</b> ${k.use} · <a href="${k.url}" target="_blank" rel="noopener">Get a key ↗</a></span>
+        <input name="${k.key}_api_key" type="password" autocomplete="off" placeholder="${cfg[`${k.key}_configured`] ? "Connected. Paste to replace" : k.hint}"></label>`).join("")}</form>
+      ${nav()}</div>`;
+  } else if (st.step === 4) {
+    const [info, grants] = await Promise.all([api("/api/storage"), loadGrants()]);
+    body = `<div class="ob-step enter"><p class="ob-kicker">4 / 4 · Folders</p><h1>Where things<br><em>live</em>.</h1>
+      <div class="setup-folder"><span>Projects are saved in</span><code>${esc(info.projects_dir)}</code><div><button class="ob-chip" data-st-open="projects">Open</button><button class="ob-chip" data-st-move>Change…</button></div></div>
+      <p class="ob-sub">Glob only sees its own projects folder. Give it your game folders so it can import characters, models and animations, and read your design docs.</p>
+      <div class="grant-list compact">${grantRows(grants)}</div>
+      <div class="setup-actions"><button class="ob-chip on" data-grant-add>+ Add a game folder</button></div>
+      ${nav()}</div>`;
+  } else {
+    body = `<div class="ob-step enter"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">All set</p><h1>What are we<br><em>forging</em>?</h1>
+      <div class="setup-actions big"><button class="ob-next forge" data-setup-finish="import">Import a game project</button><button class="ob-next" data-setup-finish="new">Start a new project</button>
+      ${state.project ? `<button class="ob-back" data-setup-finish="open">Open ${esc(humanize(state.project))}</button>` : ""}</div></div>`;
+  }
+  $("#setupStage").innerHTML = dots + body;
+}
+
+async function setupNext() {
+  const st = state.setup;
+  if (st.step === 3) {
+    const form = $("#setupKeys");
+    const updates = {};
+    for (const input of form.querySelectorAll("input")) if (input.value.trim()) updates[input.name] = input.value.trim();
+    if (Object.keys(updates).length) {
+      try { await api("/api/config", { method: "PUT", body: updates }); toast("Keys saved"); } catch (err) { return toast(err.message, true); }
+    }
+  }
+  st.step = Math.min(SETUP_STEPS - 1, st.step + 1);
+  await renderSetup();
+}
+
+// ----- events -----
+
+document.addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh]");
+  if (!t) return;
+  const d = t.dataset;
+  if (d.accessAllow) return answerAccess(d.accessAllow, true, d.write === "1");
+  if (d.accessDeny) return answerAccess(d.accessDeny, false, false);
+  if (d.impOpen !== undefined) { closeSettings(); return openImport(); }
+  if (d.impClose !== undefined) return closeImport();
+  if (d.impBrowse !== undefined) {
+    syncImport();
+    const folder = await chooseFolder("Choose your game folder");
+    if (folder) { state.imp.folder = folder; await scanImport(); }
+    return;
+  }
+  if (d.impScan !== undefined) { syncImport(); return scanImport(); }
+  if (d.impUse) {
+    event.stopPropagation();
+    if (!state.imp) { closeSettings(); if (state.setup) await closeSetup(); return openImport(d.impUse); }
+    state.imp.folder = d.impUse;
+    return scanImport();
+  }
+  if (d.impBack !== undefined) { state.imp.step = "pick"; return renderImport(); }
+  if (d.impRun !== undefined) return runImport();
+  if (d.impEnter !== undefined) return finishImport();
+  if (d.stOpen) {
+    try { await api("/api/storage/open", { method: "POST", body: { target: d.stOpen, path: d.path || "" } }); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (d.stMove !== undefined) return moveProjectsFolder();
+  if (d.stExport) { event.stopPropagation(); return exportProject(d.stExport); }
+  if (d.stImportZip !== undefined) return pickArchive();
+  if (d.grantAdd !== undefined) {
+    const folder = await chooseFolder("Choose a folder Glob may use");
+    if (!folder) return;
+    try { await grantFolder(folder); toast(`Glob may now read ${folder}`); } catch (err) { return toast(err.message, true); }
+    if (state.setup) return renderSetup();
+    return renderSettings();
+  }
+  if (d.grantRemove) {
+    try { state.grants = (await api("/api/access", { method: "DELETE", body: { path: d.grantRemove } })).grants; } catch (err) { return toast(err.message, true); }
+    if (state.setup) return renderSetup();
+    return renderSettings();
+  }
+  if (d.setupOpen !== undefined) { closeSettings(); return openSetup(); }
+  if (d.setupNext !== undefined) return setupNext();
+  if (d.setupBack !== undefined) { state.setup.step = Math.max(0, state.setup.step - 1); return renderSetup(); }
+  if (d.setupSkip !== undefined) return closeSetup();
+  if (d.setupRefresh !== undefined) return renderSetup();
+  if (d.setupVscode !== undefined) {
+    try { const { imported } = await api("/api/agent/endpoints/import-vscode", { method: "POST" }); toast(`Imported ${imported.reduce((n, e) => n + e.models.length, 0)} models from VS Code`); } catch (err) { toast(err.message, true); }
+    await loadModels();
+    renderModelPill();
+    return renderSetup();
+  }
+  if (d.setupSettings) {
+    $("#setup").hidden = true;
+    state.setupReturn = true;
+    return settingsDialog(d.setupSettings);
+  }
+  if (d.setupFinish) {
+    await closeSetup();
+    if (d.setupFinish === "import") return openImport();
+    if (d.setupFinish === "new") return startOnboarding();
+  }
+});
+
+document.addEventListener("change", async (event) => {
+  const select = event.target.closest?.("[data-grant-mode]");
+  if (!select) return;
+  try { await grantFolder(select.dataset.grantMode, select.value === "write"); toast(select.value === "write" ? "Glob may now read and write there" : "Read only"); } catch (err) { toast(err.message, true); }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.target.id === "impPath") { event.preventDefault(); syncImport(); scanImport(); }
+  if (event.key === "Escape" && state.imp && ["pick", "preview"].includes(state.imp.step)) closeImport();
+});
+
+// Images pasted into the message box are attached like dropped ones.
+$("#input").addEventListener("paste", (event) => {
+  const files = [...(event.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+  if (!files.length) return;
+  event.preventDefault();
+  addFiles(files);
+});
+
+// ---------- updates ----------
+
+const INSTALL_KIND = { "windows-app": "Windows app", "mac-app": "macOS app", "uv-tool": "installed with the terminal one-liner", source: "running from source" };
+
+async function checkForUpdate(force = false) {
+  try { state.update = await api(`/api/update${force ? "?force=true" : ""}`); } catch (err) { state.update = { error: err.message }; }
+  return state.update;
+}
+
+function renderUpdateBanner() {
+  const u = state.update;
+  const box = $("#updateBanner");
+  const busy = ["downloading", "installing", "restart", "failed"].includes(u?.state?.status);
+  if (!u || (!u.available && !busy) || (!busy && storeGet("forge.skipUpdate") === u.latest)) { box.hidden = true; return; }
+  const s = u.state || {};
+  let body;
+  if (s.status === "downloading" || s.status === "installing") {
+    body = `<span class="spinner"></span><span class="grow">${esc(s.message || "Updating…")}</span>${s.status === "downloading" && s.progress ? `<span class="ub-pct">${Math.round(s.progress * 100)}%</span>` : ""}`;
+  } else if (s.status === "restart") {
+    body = `<span class="ub-dot"></span><span class="grow">${esc(s.message)}</span>`;
+  } else if (s.status === "failed") {
+    body = `<span class="ub-dot bad"></span><span class="grow">${esc(s.error || "The update failed.")}</span><a class="mini" href="${esc(u.url || "#")}" target="_blank" rel="noopener">Download</a><button class="mini" data-update-dismiss>×</button>`;
+  } else {
+    const action = u.can_install
+      ? `<button class="mini on" data-update-install>Update now</button>`
+      : u.command ? `<code title="Run this in the Glob folder">${esc(u.command)}</code>` : `<a class="mini on" href="${esc(u.url)}" target="_blank" rel="noopener">Download</a>`;
+    body = `<span class="ub-dot"></span><span class="grow"><b>Glob ${esc(u.latest)}</b> is out <small>(you have ${esc(u.current)})</small> · <a href="${esc(u.url)}" target="_blank" rel="noopener">What's new</a></span>${action}<button class="mini" data-update-dismiss title="Not now">Later</button>`;
+  }
+  box.innerHTML = body;
+  box.hidden = false;
+}
+
+async function installUpdate() {
+  try {
+    state.update.state = await api("/api/update/install", { method: "POST" });
+    renderUpdateBanner();
+    if (!$("#settingsView").hidden && state.settings?.tab === "storage") renderSettings();
+    while (["downloading", "installing"].includes(state.update.state.status)) {
+      await new Promise((r) => setTimeout(r, 800));
+      try { state.update.state = await api("/api/update/state"); } catch { break; } // the app quit to install
+      renderUpdateBanner();
+    }
+  } catch (err) { toast(err.message, true); }
+}
+
+function updateSettings() {
+  const u = state.update || {};
+  const s = u.state || {};
+  const status = u.error ? esc(u.error)
+    : ["downloading", "installing", "restart", "failed"].includes(s.status) ? esc(s.error || s.message)
+    : u.available ? `Glob ${esc(u.latest)} is available.`
+    : u.latest ? "You have the latest version." : "Not checked yet.";
+  return `<div class="st-label">Updates</div>
+    <div class="set-row"><div><strong>Glob ${esc(u.current || "")}</strong><small>${esc(INSTALL_KIND[u.kind] || "")} · ${status}</small></div>
+      <div class="update-actions">${u.available && u.can_install ? `<button class="primary" data-update-install>Update to ${esc(u.latest)}</button>` : ""}<button class="ghost" data-update-check>Check now</button></div></div>
+    ${u.available && u.command ? `<p class="st-note">To update this copy, run <code>${esc(u.command)}</code> in the Glob folder.</p>` : ""}
+    <div class="set-row"><div><strong>Check for updates when Glob starts</strong><small>Asks GitHub for the latest release; nothing is installed without your click.</small></div>
+      <label class="switch"><input type="checkbox" data-update-auto ${state.agentCfg?.auto_update_check === false ? "" : "checked"}><span></span></label></div>`;
+}
+
+document.addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-update-install],[data-update-dismiss],[data-update-check]");
+  if (!t) return;
+  if (t.dataset.updateInstall !== undefined) return installUpdate();
+  if (t.dataset.updateDismiss !== undefined) {
+    if (state.update?.latest) storeSet("forge.skipUpdate", state.update.latest);
+    if (state.update?.state?.status === "failed") state.update.state = {};
+    $("#updateBanner").hidden = true;
+    return;
+  }
+  if (t.dataset.updateCheck !== undefined) {
+    t.disabled = true;
+    await checkForUpdate(true);
+    storeSet("forge.skipUpdate", "");
+    renderUpdateBanner();
+    return renderSettings();
+  }
+});
+
+document.addEventListener("change", async (event) => {
+  if (!event.target.matches?.("[data-update-auto]")) return;
+  try {
+    await api("/api/config", { method: "PUT", body: { auto_update_check: event.target.checked } });
+    state.agentCfg = { ...(state.agentCfg || {}), auto_update_check: event.target.checked };
+  } catch (err) { toast(err.message, true); }
+});

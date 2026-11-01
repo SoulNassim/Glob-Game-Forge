@@ -41,3 +41,5 @@ Name: "{autodesktop}\Glob"; Filename: "{app}\Glob.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Glob.exe"; Description: "{cm:LaunchProgram,Glob}"; Flags: nowait postinstall skipifsilent
+; Silent installs come from Glob's own updater: start the new version right away.
+Filename: "{app}\Glob.exe"; Flags: nowait; Check: WizardSilent

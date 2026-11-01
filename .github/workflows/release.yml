@@ -29,15 +29,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build app with PyInstaller
-        run: uv run --extra desktop --with pyinstaller python scripts/build_desktop.py
-
       - name: Version
         id: v
         shell: bash
         run: |
           ref="${GITHUB_REF_NAME#v}"
           [[ "$GITHUB_REF_TYPE" == "tag" ]] && echo "version=$ref" >> "$GITHUB_OUTPUT" || echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+
+      # The built app reports this version to its updater.
+      - name: Stamp version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: sed -i.bak -E "s/^__version__ = .*/__version__ = \"${{ steps.v.outputs.version }}\"/" forge/__init__.py && rm forge/__init__.py.bak
+
+      - name: Build app with PyInstaller
+        run: uv run --extra desktop --with pyinstaller python scripts/build_desktop.py
 
       - name: Windows installer (Inno Setup)
         if: runner.os == 'Windows'
