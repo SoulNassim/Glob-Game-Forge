@@ -11,6 +11,8 @@ import asyncio
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -1051,8 +1053,24 @@ async def api_steer_world(payload: dict[str, Any], project: str = "default") -> 
     )
 
 
+def _native_dialog_macos(kind: str, title: str) -> str:
+    # Tk must be created on the main thread on macOS (newer releases abort otherwise),
+    # so use the native picker in a separate process instead.
+    prompt = title.replace("\\", "\\\\").replace('"', '\\"')
+    verb = {"folder": "choose folder", "save": "choose file name"}.get(kind, "choose file")
+    script = f'POSIX path of ({verb} with prompt "{prompt}")'
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        if "-128" in result.stderr:  # user cancelled
+            return ""
+        raise RuntimeError(result.stderr.strip() or "osascript failed")
+    return result.stdout.strip()
+
+
 def _native_dialog(kind: str, title: str, **options: Any) -> str:
     """A native folder/open/save dialog on the user's own screen (Glob only listens on 127.0.0.1)."""
+    if sys.platform == "darwin":
+        return _native_dialog_macos(kind, title)
     try:
         import tkinter as tk
         from tkinter import filedialog
