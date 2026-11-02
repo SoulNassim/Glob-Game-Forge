@@ -190,6 +190,24 @@ async def call(model_id: str, prompt: str, system_prompt: str, images: list[tupl
     return {"text": text, "model": f"{label}{' · ' + model if model else ''}", "provider": "cli"}
 
 
+# The cheapest model to ask "are you there?" with.
+CHECK_MODELS = {"claude": "haiku", "codex": "", "gemini": "gemini-2.5-flash", "opencode": ""}
+
+
+async def check(cli_id: str) -> dict[str, Any]:
+    """Whether the CLI is installed and answers, i.e. is logged in."""
+    if cli_id not in CLIS:
+        raise ValueError(f"Unknown coding agent '{cli_id}'.")
+    if not find(cli_id):
+        return {"id": cli_id, "installed": False, "ok": False, "needs_login": False, "error": ""}
+    try:
+        await call(f"cli:{cli_id}/{CHECK_MODELS[cli_id]}", "Reply with exactly: ok", "You are a connection test.", [], "low")
+    except RuntimeError as exc:
+        text = str(exc)
+        return {"id": cli_id, "installed": True, "ok": False, "needs_login": "logged in" in text, "error": text[:400]}
+    return {"id": cli_id, "installed": True, "ok": True, "needs_login": False, "error": ""}
+
+
 def open_login(cli_id: str) -> None:
     """Open a real terminal window running the CLI's login (or install), so the user signs in their usual way."""
     spec = CLIS[cli_id]

@@ -56,11 +56,19 @@ MESH_CHOICES: dict[str, list[Any]] = {
 POLYCOUNT_PRESETS = (1500, 3000, 6000, 12000, 30000, 100000)
 # The fixed set of asset kinds; the UI offers these as tags so nobody has to type them.
 ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "vehicle", "ui", "vfx", "sfx", "voice", "music")
+# The framing each kind usually wants when the asset has no `aspect:` of its own (else the Settings default).
+KIND_ASPECT = {"environment": "16:9", "vfx": "16:9", "ui": "3:4"}
+# How strongly the pillars steer an asset (`pillars:` in its header): off, light, normal (default) or strong.
+PILLAR_STRENGTHS = ("off", "light", "normal", "strong")
 # Sound assets: their "candidates" are audio files in <asset>/audio/, the prompt describes the sound (or, for a voice,
 # is the line to speak) and the winner is the chosen take.
 AUDIO_KINDS = ("sfx", "voice", "music")
 AUDIO_SUFFIXES = {".mp3", ".wav", ".ogg", ".flac"}
 AUDIO_MODELS = (
+    # Signed-in services come first: when the user signed in, that is the account they mean to use.
+    {"id": "svc:elevenlabs/sfx", "label": "ElevenLabs · sound effects (signed in)", "kinds": ["sfx"], "service": "elevenlabs"},
+    {"id": "svc:elevenlabs/tts", "label": "ElevenLabs · voices (signed in)", "kinds": ["voice"], "service": "elevenlabs"},
+    {"id": "svc:elevenlabs/music", "label": "ElevenLabs · music (signed in)", "kinds": ["music"], "service": "elevenlabs"},
     {"id": "elevenlabs_audio:sfx", "label": "ElevenLabs · sound effects", "kinds": ["sfx"], "key": "elevenlabs"},
     {"id": "stability_audio:sfx", "label": "Stable Audio · sound effects", "kinds": ["sfx"], "key": "stability"},
     {"id": "elevenlabs_audio:tts", "label": "ElevenLabs · voices", "kinds": ["voice"], "key": "elevenlabs"},
@@ -71,9 +79,14 @@ AUDIO_CAPABILITY = {"sfx": ProviderCapability.SOUND_EFFECT, "tts": ProviderCapab
 PILLAR_RULE = (
     "Use the attached reference images only for art style: rendering, brushwork, material handling, lighting and "
     "camera angle. They show other characters, so do not copy their gender, faces, bodies, proportions, pose, "
-    "clothing or props. Create the new subject exactly as described at the top; the description decides who it "
+    "clothing, props, emblems, logos or markings. Create the new subject exactly as described at the top; the description decides who it "
     "is, and the style bible never overrides it."
 )
+PILLAR_RULE_LIGHT = (
+    "Loosely follow the colour palette and rendering of the attached reference images. Copy nothing else from them: "
+    "no subjects, shapes, emblems, logos, markings or props. Create the new subject exactly as described at the top."
+)
+PILLAR_RULE_STRONG = PILLAR_RULE + " Match their art style closely: same rendering, materials, outline and lighting."
 VARIANT_RULE = (
     "Create a variant of the first attached image. Keep the same subject, silhouette, proportions, pose, "
     "camera angle and art style; change only what is described above."
@@ -195,8 +208,13 @@ def list_image_models() -> list[dict[str, Any]]:
     from forge.providers.elevenlabs_image import IMAGE_MODELS, prefixed_model_id
     from forge.providers.gemini_image import MODEL_PRICING_USD
 
+    from forge import meshy_login
+
     cfg = load_config()
-    has = {name: bool(cfg.get_key(name)) for name in ("gemini", "meshy", "elevenlabs")}
+    # How each provider is reached, shown in the model menu: a pasted key, the user's sign-in, or nothing yet.
+    via = {name: "API key" if cfg.get_key(name, logins=False) else "" for name in ("gemini", "meshy", "elevenlabs")}
+    if not via["meshy"] and meshy_login.signed_in():
+        via["meshy"] = "signed in"
     models = []
     for model_id, price in MODEL_PRICING_USD.items():
         if model_id == "gemini-2.5-flash-image":
@@ -204,9 +222,9 @@ def list_image_models() -> list[dict[str, Any]]:
         meshy = model_id.startswith("meshy:")
         name = model_id.split(":", 1)[-1].removeprefix("gemini-").replace("-", " ").title().replace("Gpt", "GPT")
         name = re.sub(r"(\d) (\d)", r"\1.\2", name)
-        models.append({"id": model_id, "label": f"{'Meshy' if meshy else 'Gemini'} · {name}", "price": price, "available": has["meshy" if meshy else "gemini"]})
+        models.append({"id": model_id, "label": f"{'Meshy' if meshy else 'Gemini'} · {name}", "price": price, "available": bool(via[provider := "meshy" if meshy else "gemini"]), "via": via[provider]})
     for model_id, spec in IMAGE_MODELS.items():
-        models.append({"id": prefixed_model_id(model_id), "label": spec.label, "price": spec.usd, "available": has["elevenlabs"]})
+        models.append({"id": prefixed_model_id(model_id), "label": spec.label, "price": spec.usd, "available": bool(via["elevenlabs"]), "via": via["elevenlabs"]})
     return models
 
 
@@ -288,7 +306,100 @@ def update_asset(ws_dir: Path, rel: str, fields: dict[str, Any]) -> dict[str, An
         else:
             meta[key] = value
     path.write_text(serialize_frontmatter(meta, body), encoding="utf-8")
+    if winner and meta.get("cover"):
+        set_project_cover(ws_dir, str(winner))
     return describe_asset(ws_dir, rel)
+
+
+# ---------- key art ----------
+# A project's key art is an ordinary asset with `cover: true`: its winner is copied to the workspace's
+# cover image, which the overview and the projects page show. Picking another winner updates the cover.
+
+KEY_ART_FILE = "key-art.md"
+
+
+def set_project_cover(ws_dir: Path, image_rel: str) -> str:
+    image = resolve_rel(ws_dir, image_rel)
+    if not image.is_file() or image.suffix.lower() not in IMAGE_SUFFIXES:
+        raise FileNotFoundError(f"No image '{image_rel}'.")
+    root = ws_dir.resolve()
+    for old in root.iterdir():
+        if old.is_file() and old.stem.lower() == "cover" and old.suffix.lower() in IMAGE_SUFFIXES:
+            old.unlink()
+    target = root / f"cover{image.suffix.lower()}"
+    shutil.copy2(image, target)
+    return target.name
+
+
+def key_art_asset(ws_dir: Path, title: str, pitch: str) -> str:
+    """The project's key-art asset, made on first use with a prompt from the project's pitch."""
+    root = ws_dir.resolve()
+    for doc in sorted(root.rglob("*.md")):
+        if TRASH_DIR in doc.parts:
+            continue
+        try:
+            meta, _, _ = split_frontmatter(doc.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if meta.get("cover") and meta.get("kind"):
+            return _ws_rel(ws_dir, doc)
+    prompt = (f"Key art for the game \"{title}\". {pitch.strip()} A wide cinematic cover image: the hero in the "
+              "middle of their world at its most exciting moment, dramatic lighting, strong silhouette, no text, no logo.")
+    meta = {"kind": "environment", "prompt": re.sub(r"\s+", " ", prompt).strip(), "aspect": "16:9", "cover": True}
+    body = f"# Key art\n\nThe cover of {title}: shown on the project page and the projects overview. Pick another winner to change it.\n"
+    (root / KEY_ART_FILE).write_text(serialize_frontmatter(meta, body), encoding="utf-8")
+    return KEY_ART_FILE
+
+
+# ---------- batch & history ----------
+
+def assets_under(ws_dir: Path, folder: str = "") -> list[str]:
+    """Every asset document in a folder and below it, in the order the overview shows them."""
+    from forge.overview import _visible
+
+    root = ws_dir.resolve()
+    base = resolve_rel(ws_dir, folder) if folder else root
+    found = []
+    for doc in sorted(base.rglob("*.md")):
+        parts = doc.relative_to(root).parts
+        if PILLAR_DIR in parts or not all(_visible(Path(part)) for part in parts):
+            continue
+        try:
+            meta, _, _ = split_frontmatter(doc.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if is_asset(meta):
+            found.append(_ws_rel(ws_dir, doc))
+    return found
+
+
+def missing_assets(ws_dir: Path, folder: str = "") -> list[str]:
+    """Assets with nothing to pick from yet: no winner and no candidates or takes."""
+    missing = []
+    for rel in assets_under(ws_dir, folder):
+        asset = describe_asset(ws_dir, rel)
+        made = asset["outputs"]["audio"] if asset["kind"] in AUDIO_KINDS else asset["outputs"]["candidates"]
+        described = asset["prompt"].strip() or re.sub(r"^#.*$", "", asset["body"], flags=re.M).strip()  # a title alone says too little
+        if not asset["winner"] and not made and described:
+            missing.append(rel)
+    return missing
+
+
+def output_history(ws_dir: Path, rel: str) -> dict[str, dict[str, Any]]:
+    """What each output of an asset was made from (prompt, model, cost, time), read from the vault records."""
+    asset_path = resolve_rel(ws_dir, rel)
+    records = ws_dir.parent / "vault" / Path(_ws_rel(ws_dir, asset_path)).with_suffix("")
+    history: dict[str, dict[str, Any]] = {}
+    if not records.is_dir():
+        return history
+    for record in records.glob("*/*.json"):
+        try:
+            data = json.loads(record.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("file"):
+            history[data["file"]] = {k: data.get(k) for k in ("action", "prompt", "asset_prompt", "model", "provider", "cost_usd", "created_at")}
+    return history
 
 
 def remove_output(ws_dir: Path, rel: str, output: str) -> dict[str, Any]:
@@ -403,7 +514,7 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
             "parts": [],
             "references": [{"path": source, "source": "Winner image", "role": "source"}]
             + [{"path": view["path"], "source": "Turnaround view", "role": "view"} for view in asset["outputs"]["views"] if view["type"] == "image"][:3],
-            "model": f"{cfg.default_3d_provider}:{cfg.default_3d_model}",
+            "model": cfg.default_3d_service_model or f"{cfg.default_3d_provider}:{cfg.default_3d_model}",
             "settings": mesh_settings(cfg),
             "choices": {**MESH_CHOICES, "polycount_presets": list(POLYCOUNT_PRESETS)},
             "count": 1,
@@ -433,13 +544,16 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
     references: list[dict[str, str]] = []
     if source:
         references.append({"path": source, "source": "Source image", "role": "source"})
-    if action == "candidates":
+    strength = pillar_strength(asset["meta"])
+    if action == "candidates" and strength != "off":
         # Pillars only steer new images; a variant or edit works from its source image alone.
-        references += [{**pillar, "role": "pillar"} for pillar in asset["pillars"]]
-    rule = {"candidates": PILLAR_RULE, "variant": VARIANT_RULE, "edit": EDIT_RULE}[action]
+        pillars = asset["pillars"][-2:] if strength == "light" else asset["pillars"]  # the closest folder's come last
+        references += [{**pillar, "role": "pillar"} for pillar in pillars]
+    rule = {"candidates": {"light": PILLAR_RULE_LIGHT, "strong": PILLAR_RULE_STRONG}.get(strength, PILLAR_RULE), "variant": VARIANT_RULE, "edit": EDIT_RULE}[action]
     if action != "candidates" or any(ref["role"] == "pillar" for ref in references):
         parts.append({"source": "Reference rule", "text": rule, "role": "rule"})
-    prompt = compose_prompt([part["text"] for part in parts], cfg)
+    aspect = asset_aspect(asset, cfg) if action == "candidates" else cfg.image_aspect_ratio
+    prompt = compose_prompt([part["text"] for part in parts], cfg, aspect)
     return {
         "action": action,
         "asset": asset["path"],
@@ -449,14 +563,30 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
         "use_bible": True,
         "references": references[:MAX_REFERENCES],
         "model": model or cfg.default_image_model,
-        "settings": {"aspect_ratio": cfg.image_aspect_ratio, "transparent_background": cfg.image_remove_bg},
+        "settings": {"aspect_ratio": aspect, "transparent_background": cfg.image_remove_bg},
+        "pillar_strength": strength,
         "count": 2 if action == "candidates" else 1,
     }
 
 
+def asset_aspect(asset: dict[str, Any], cfg: Any) -> str:
+    """The asset's own framing, else the usual one for its kind, else the Settings default."""
+    return str(asset["meta"].get("aspect") or KIND_ASPECT.get(asset["kind"]) or cfg.image_aspect_ratio)
+
+
+def pillar_strength(meta: dict[str, Any]) -> str:
+    value = str(meta.get("pillars") or "normal").lower()
+    return value if value in PILLAR_STRENGTHS else "normal"
+
+
 def list_audio_models() -> list[dict[str, Any]]:
+    from forge import services
+
     cfg = load_config()
-    return [{**m, "available": bool(cfg.get_key(m["key"]))} for m in AUDIO_MODELS]
+    signed_in = set(services.connected())
+    # Demo mode never spends: a signed-in service has no demo of its own, so it only counts outside demo mode.
+    return [{**m, "available": m["service"] in signed_in and not cfg.demo_mode if "service" in m else bool(cfg.get_key(m["key"]))}
+            for m in AUDIO_MODELS]
 
 
 def _audio_request(asset: dict[str, Any], action: str, model: str) -> dict[str, Any]:
@@ -465,7 +595,8 @@ def _audio_request(asset: dict[str, Any], action: str, model: str) -> dict[str, 
         raise ValueError("Sound assets are made with Generate; variants, edits and 3D are for images.")
     text = asset["prompt"].strip() or asset["body"].strip()[:600]
     choices = [m for m in list_audio_models() if kind in m["kinds"]]
-    picked = next((m for m in choices if m["id"] == model), None) or next((m for m in choices if m["available"]), choices[0])
+    picked = (next((m for m in choices if m["id"] == model), None) or next((m for m in choices if m["available"]), None)
+              or next((m for m in choices if "service" not in m), choices[0]))
     settings: dict[str, Any] = {"duration": 0, "loop": False, "prompt_influence": 0.3} if kind == "sfx" else {}
     if kind == "voice":
         settings = {"voice_id": str(asset["meta"].get("voice") or ""), "model_id": "eleven_multilingual_v2"}
@@ -545,17 +676,17 @@ def prompt_with_bible(ws_dir: Path, request: dict[str, Any]) -> str:
     if not texts or not prompt:
         return prompt
     bible = "Style bible:\n" + "\n\n".join(texts)
-    for rule in (PILLAR_RULE, VARIANT_RULE, EDIT_RULE):
+    for rule in (PILLAR_RULE_STRONG, PILLAR_RULE, PILLAR_RULE_LIGHT, VARIANT_RULE, EDIT_RULE):
         at = prompt.find(rule)
         if at >= 0:
             return "\n\n".join(part for part in (prompt[:at].strip(), bible, prompt[at:].strip()) if part)
     return f"{prompt}\n\n{bible}"
 
 
-def compose_prompt(texts: list[str], cfg: Any | None = None) -> str:
+def compose_prompt(texts: list[str], cfg: Any | None = None, aspect: str = "") -> str:
     cfg = cfg or load_config()
     body = "\n\n".join(text.strip() for text in texts if text and text.strip())
-    return finalize_generation_prompt(body, pose_mode=cfg.image_pose_mode, aspect_ratio=cfg.image_aspect_ratio)
+    return finalize_generation_prompt(body, pose_mode=cfg.image_pose_mode, aspect_ratio=aspect or cfg.image_aspect_ratio)
 
 
 # ---------- running ----------
@@ -599,6 +730,7 @@ def _record(actions: Any, project: str, ws_dir: Path, asset_rel: str, action: st
         "file": _ws_rel(ws_dir, target),
         "store_asset_id": stored.id,
         "prompt": request.get("prompt", ""),
+        "asset_prompt": request.get("asset_prompt", ""),
         "references": [ref["path"] for ref in request.get("references", [])],
         "model": stored.model,
         "provider": stored.provider,
@@ -636,7 +768,10 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
     cfg = load_config()
     refs = [resolve_rel(ws_dir, ref["path"]) for ref in request.get("references") or [] if ref.get("path")]
     refs = [ref for ref in refs if ref.is_file()][:MAX_REFERENCES]
-    count = max(1, min(int(request.get("count") or 1), 4))
+    # Sound effects come in pools (five footsteps), so audio may ask for a few more takes.
+    count = max(1, min(int(request.get("count") or 1), 6 if request.get("audio") else 4))
+    # Each output remembers the asset prompt it came from, so an older prompt can be brought back.
+    request = {**request, "asset_prompt": str(meta.get("prompt") or "")}
     title = str(meta.get("title") or asset_path.stem.replace("-", " ").replace("_", " ").title())
     sources = [ref["path"] for ref in request.get("references") or [] if ref.get("role") == "source"]
     parent_ids = [pid for src in sources[:1] if (pid := _store_id_for(store, ws_dir, asset_rel, src))]
@@ -653,16 +788,31 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
         return await game_tools.animate(ws_dir, asset_rel, list(request.get("action_ids") or []), list(request.get("names") or []), int((request.get("settings") or {}).get("fps") or 30))
 
     if request.get("audio"):
-        provider_id, _, mode = str(request.get("model") or "").partition(":")
+        model_id = str(request.get("model") or "")
+        if model_id.startswith("svc:"):
+            provider_id, mode = "service", model_id.rsplit("/", 1)[-1]
+        else:
+            provider_id, _, mode = model_id.partition(":")
         capability = AUDIO_CAPABILITY.get(mode)
         if not provider_id or capability is None:
-            raise ValueError(f"Unknown sound model '{request.get('model')}'.")
+            raise ValueError(f"Unknown sound model '{model_id}'.")
+        picked = next((m for m in list_audio_models() if m["id"] == model_id), None)
+        if picked and not picked["available"] and not cfg.demo_mode:
+            # Without a key the provider falls back to demo mode and saves a silent file: say so instead.
+            how = f"sign in to {picked['service'].title()}" if "service" in picked else f"add a {picked['key'].title()} key"
+            raise ValueError(f"{picked['label']} isn't set up: {how} in Settings → Generators, or pick another generator.")
         text = str(request.get("prompt") or "").strip()
         if not text:
             raise ValueError("Describe the sound first (for a voice: the line to speak).")
         settings = {k: v for k, v in (request.get("settings") or {}).items() if v not in ("", None)}
         if not settings.get("duration"):
             settings.pop("duration", None)  # let the provider pick a fitting length
+        if provider_id == "service":
+            settings["model"] = model_id
+        elif mode == "tts" and not settings.get("voice_id"):
+            from forge.providers.elevenlabs_audio import list_voices
+
+            settings["voice_id"] = next((v["id"] for v in await list_voices()), "")  # any voice beats an error
         for index in range(count):
             stored = await executor._generate_single_asset(
                 provider_id=provider_id,
@@ -689,8 +839,10 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
     if action == "make_3d":
         if not refs:
             raise ValueError("Make 3D needs a source image.")
+        service_model = str(request.get("model") or "")
         stored = await executor._generate_single_asset(
-            provider_id=cfg.default_3d_provider or "meshy",
+            # A signed-in service's 3D model when one was picked, else the 3D provider from Settings.
+            provider_id="service" if service_model.startswith("svc:") else cfg.default_3d_provider or "meshy",
             # Several pictures (winner + turnaround views) give Meshy the back and sides too.
             capability=ProviderCapability.MULTI_IMAGE_TO_3D if len(refs) > 1 else ProviderCapability.IMAGE_TO_3D,
             name=f"{title} (3D)",
@@ -701,7 +853,7 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
             prompt_full=title,
             parent_ids=parent_ids,
             reference_files=refs[:4],
-            params=mesh_settings(cfg, request.get("settings")),
+            params={"model": service_model} if service_model.startswith("svc:") else mesh_settings(cfg, request.get("settings")),
             tags=["3d", f"asset:{asset_rel}"],
             force_uncached=True,
             bible=bible,
@@ -714,7 +866,10 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
         raise ValueError("The prompt is empty.")
     prompt = prompt_with_bible(ws_dir, request)
     request = {**request, "prompt": prompt}
-    params = {"use_reference_image": bool(refs), "aspect_ratio": cfg.image_aspect_ratio, "transparent": cfg.image_remove_bg}
+    # The sheet's own aspect ratio and background win over the Settings defaults.
+    sheet = request.get("settings") or {}
+    params = {"use_reference_image": bool(refs), "aspect_ratio": str(sheet.get("aspect_ratio") or cfg.image_aspect_ratio),
+              "transparent": bool(sheet.get("transparent_background", cfg.image_remove_bg))}
     if request.get("model"):
         params["model"] = str(request["model"])
     provider_id = resolve_image_provider("gemini", params)
@@ -741,4 +896,11 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
             run_spent_tracker=tracker,
         )
         created.append(_record(actions, project, ws_dir, asset_rel, action, stored, request, f"{asset_path.stem}-{stamp}-{index + 1}"))
+    remember: dict[str, Any] = {}
+    if action == "candidates" and params["aspect_ratio"] != str(meta.get("aspect") or ""):
+        remember["aspect"] = params["aspect_ratio"]  # the next run opens with the framing picked this time
+    if created and meta.get("cover") and not meta.get("winner"):
+        remember["winner"] = created[0]  # key art goes straight onto the project card
+    if remember:
+        update_asset(ws_dir, asset_rel, remember)
     return created

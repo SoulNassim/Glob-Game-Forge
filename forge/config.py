@@ -80,6 +80,8 @@ class ForgeConfig(BaseModel):
     default_image_model: str = "gemini-nano-banana-2.1"
     default_3d_provider: str = "meshy"
     default_3d_model: str = "meshy-7.1"
+    # A signed-in service's 3D model (svc:<service>/<model>) for Make 3D; empty uses default_3d_provider.
+    default_3d_service_model: str = ""
     default_critic_provider: str = "vscode_copilot"
     default_critic_model: str = "vscode:gpt-6-studierende"
 
@@ -140,7 +142,7 @@ class ForgeConfig(BaseModel):
     def has_live_3d_key(self) -> bool:
         return bool(self.get_key("meshy"))
 
-    def get_key(self, provider: str) -> str:
+    def get_key(self, provider: str, logins: bool = True) -> str:
         env_map = {
             "gemini": "GEMINI_API_KEY",
             "meshy": "MESHY_API_KEY",
@@ -165,6 +167,11 @@ class ForgeConfig(BaseModel):
             reg_val = _read_win32_user_env(env_name)
             if reg_val:
                 return reg_val
+        # 4. No key: Meshy also takes the user's Meshy sign-in (the Meshy CLI's login).
+        if provider == "meshy" and logins:
+            from forge import meshy_login
+
+            return meshy_login.token()
         return ""
 
     def masked_dict(self) -> dict[str, Any]:
@@ -172,13 +179,16 @@ class ForgeConfig(BaseModel):
         data = self.model_dump()
         for k in ("gemini_api_key", "meshy_api_key", "elevenlabs_api_key", "stability_api_key", "tripo_api_key", "openai_api_key", "anthropic_api_key"):
             provider = k.replace("_api_key", "")
-            raw = self.get_key(provider)
+            raw = self.get_key(provider, logins=False)
             if raw:
                 data[k] = f"••••{raw[-4:]}" if len(raw) > 4 else "••••"
                 data[f"{provider}_configured"] = True
             else:
                 data[k] = ""
                 data[f"{provider}_configured"] = False
+        from forge import meshy_login
+
+        data["meshy_signed_in"] = meshy_login.signed_in()
         return data
 
 

@@ -11,11 +11,14 @@ Glob makes the 2D art, 3D models, rigs, animations and sounds, and puts them in 
 
 **Free and open source (MIT).** You only bring API keys for the generators you use.
 
-[**Website**](https://soulnassim.github.io/Glob-Game-Forge/) · [Download](#install) · [Connect your agent](#connect-your-coding-agent) · [Desktop app](#desktop-app) · [Security](#security)
+[**Website**](https://soulnassim.github.io/Glob-Game-Forge/) · [**Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Download](#install) · [Connect your agent](#connect-your-coding-agent) · [Desktop app](#desktop-app) · [Security](#security)
 
 </div>
 
-![Glob workspace: chat on the left, live project overview on the right](docs/screenshots/workspace.png)
+![Glob with the Pocket Kaiju sample open: chat on the left, the project overview with its key art on the right](docs/screenshots/workspace.webp)
+
+<p align="center"><b>Pocket Kaiju</b>, a sample game made entirely in Glob: 16 assets, 3D models and sounds.<br>
+<a href="https://soulnassim.github.io/Glob-Game-Forge/demo/"><b>▶ Click through it in the live demo</b></a> (the real app in your browser, read-only, no keys) or open it in Glob with <i>Explore a finished project</i>.</p>
 
 ## Why Glob
 
@@ -44,10 +47,20 @@ Making the game is fun. Making the art is usually chaos:
  update_order status=integrated ─▶  integrated
 ```
 
-<table><tr>
-<td><img src="docs/screenshots/asset.png" alt="Asset page: winner image, prompt and actions"></td>
-<td><img src="docs/screenshots/send-sheet.png" alt="Send screen: model, price, prompt recipe and attached images"></td>
-</tr></table>
+<table>
+<tr>
+<td><img src="docs/screenshots/asset.webp" alt="Asset page for Mochi: winner image, prompt, actions and game tools"><br><sub>An asset: winner, prompt and what to do next.</sub></td>
+<td><img src="docs/screenshots/send-sheet.webp" alt="Generate sheet: source, model, price, final prompt and pillar images"><br><sub>Model, price and the exact prompt before anything is sent.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/viewer.webp" alt="3D viewer: Mochi with triangle count, size, game height and OBJ, STL and USDZ export"><br><sub>3D viewer with poly count, game height and export.</sub></td>
+<td><img src="docs/screenshots/board.webp" alt="Board: every Pocket Kaiju asset on one canvas, grouped by section"><br><sub>The board: every asset on one canvas.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/sound.webp" alt="Sound page: Mochi roar waveform with loop check and save selection"><br><sub>Sounds with a waveform you can trim and loop-check.</sub></td>
+<td><img src="docs/screenshots/projects.webp" alt="Projects page with Pocket Kaiju's key art as its card"><br><sub>Every project with its key art.</sub></td>
+</tr>
+</table>
 
 ## Install
 
@@ -136,10 +149,10 @@ Ready orders are copied automatically (toggle in Settings → Coding agent) to `
 | Google Gemini | Images |
 | Meshy | 3D models, rigging, animation |
 | Tripo | 3D models (alternative; pick it under "3D generator") |
-| ElevenLabs | Sound effects, voices, more image models |
+| ElevenLabs | Sound effects, voices, music, more image models (sign in, or paste a key) |
 | Stability AI | Music and loops (Stable Audio) |
 
-**Sound assets** have kinds `sfx`, `voice` and `music`. Takes live in `<asset>/audio/`. The prompt is the description; for a voice it is the line to speak. Pick a voice, or drop an MP3/WAV on the asset to add a take.
+**Sound assets** have kinds `sfx`, `voice` and `music`. Takes live in `<asset>/audio/`. The prompt is the description; for a voice it is the line to speak. When you are signed in to ElevenLabs, sounds, voices and music run on that account first. Pick a voice (Glob remembers it per asset), or drop an MP3/WAV on the asset to add a take. A generator that isn't set up is refused with a message; it never saves a silent placeholder.
 
 ## Import your game
 
@@ -185,7 +198,18 @@ Pushing a tag like `v1.0.0` runs [`.github/workflows/release.yml`](.github/workf
 - **Style that sticks.** Images in `pillars/` and rules in `pillars/*.md` stack from the project root down, so characters, items and UI can each have their own look. Any image can become a pillar with **✦ Make pillar**.
 - **Live workspace.** The app updates when files change on disk, so edits from your agent show up at once.
 - **Long chats stay fast.** Auto-compact folds older messages into a summary at the size you choose.
-- **Many projects.** The projects page shows every game with its latest art; deleted projects go to `projects/.trash/`.
+- **Many projects.** The projects page shows every game with its key art (or its latest images); deleted projects go to `projects/.trash/`. **Make key art** paints a cover from the project's pitch; pick another candidate on its page to change it.
+- **A finished sample.** *Explore a finished project* (on the projects page, the first onboarding step and an empty project) opens **Pocket Kaiju**: characters, 3D models, sounds and an agent order to click through, without spending credits.
+- **Board.** Every asset of the project on one zoomable canvas, grouped by section, to spot what doesn't match. **3D lineup** stands every model side by side at its height in the game (set it in the 3D viewer) next to a 1.7 m person.
+- **Generate all missing.** On the overview or any folder: candidates for every asset that has nothing to pick from yet, two at a time, with a cost estimate first. Running and waiting jobs show bottom right.
+- **Pick fast.** Click a candidate (or press `1`–`9`) to see it big; `←` `→` to step, `Enter` to pick the winner. Each image remembers the prompt it came from, with **Use this prompt again**.
+- **Pillar strength per asset:** off, light (palette only), normal or strong, so a prop doesn't copy the hero's crest. Each kind opens with a fitting framing (VFX and environments 16:9, UI 3:4); the sheet remembers what you pick.
+- **Credits first.** The generate sheet warns when a provider said "out of credits" lately and shows Meshy's balance when a key is set.
+- **3D viewer extras:** file size, dimensions, height in the game, and OBJ / STL / USDZ downloads converted in the browser.
+- **Sound tools:** the real waveform of the winner take; drag to select and **Save selection** as a new take; **Loop check** plays the end into the start. Sound effects come in pools of up to six variations.
+- **Hover previews.** Sounds play and 3D models turn when you hover their tile.
+- **Press kit.** One ZIP with a web page of the key art, every winner, the 3D models (turning, via `<model-viewer>`) and the sounds; upload the folder to itch.io or any static host.
+- **⌘K / Ctrl+K** jumps to any asset or folder and runs actions. **G** toggles gallery mode: dark, the art in front, the tools out of the way.
 
 <details>
 <summary><b>Workspace conventions</b></summary>
@@ -195,11 +219,13 @@ Pushing a tag like `v1.0.0` runs [`.github/workflows/release.yml`](.github/workf
 | Top-level folder, e.g. `02-characters/` | A section; the number sets its order and is hidden in the title |
 | `README.md` in a folder | That folder’s page; its `# Heading` is the title, the first paragraph the summary |
 | Root `README.md` (or `GAME.md`) | The project’s front page |
-| `cover.png` / `.jpg` / `.webp` | Hero image of its folder |
+| `cover.png` / `.jpg` / `.webp` | Hero image of its folder (at the root: the project's key art and projects-page card) |
 | `.md` with `kind:` and `prompt:` in its header | An asset. Kinds: character, creature, item, weapon, prop, environment, vehicle, ui, vfx, sfx, voice, music |
 | `pillars/*.png` (root = project bible) | Reference images sent with every generation at or below that folder |
 | `pillars/*.md` | Style-bible text added in front of every prompt at or below that folder |
 | `style:` in a folder README header | A one-line style rule, inherited the same way |
+| `pillars:` / `aspect:` / `height_m:` in an asset header | Pillar strength (`off`, `light`, `strong`), framing (`16:9`…) and height in metres for the 3D lineup |
+| `cover: true` in an asset header | Its winner becomes the project cover |
 
 Generated files are saved next to the asset (`<asset>/candidates|variants|edits|3d/`) and in the project vault (`projects/<name>/vault/`) with a JSON record of the exact prompt, images and model used.
 
@@ -266,8 +292,11 @@ uv run forge --mcp --project <name> # MCP server over stdio
 | `forge/ui/` | The web UI (plain HTML/CSS/JS) |
 | `docs/` | Website (`docs/index.html`) and screenshots |
 | `tools/make_glob_mascot.py` | Glob’s pixel art and app icon; edit the grids and rerun |
+| `forge/showcase.py` | Board data and the press kit |
+| `forge/samples/pocket-kaiju/` | The sample project; rebuild it from a finished workspace with `scripts/build_sample.py` |
+| `docs/demo/` | The live demo: the real UI on recorded answers for the sample. Rebuild with `uv run python scripts/build_demo.py` after changing the UI or the sample |
 
-The website is a static page in `docs/`; publish it with GitHub Pages (Settings → Pages → Deploy from branch → `main` / `docs`).
+The website is a static page in `docs/`; publish it with GitHub Pages (Settings → Pages → Deploy from branch → `main` / `docs`). The live demo is served from `docs/demo/` with it.
 
 > The Python package is still called `forge`; `forge` and `glob` are the same command.
 

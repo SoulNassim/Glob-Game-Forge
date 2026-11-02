@@ -303,7 +303,7 @@ class Meshy3DAdapter(ProviderAdapter):
                         provider=self.provider_id,
                         status_code=402,
                         retryable=False,
-                        how_to_fix="Top up your Meshy credits or switch to Demo Mode.",
+                        how_to_fix="Top up your Meshy credits, or pick a signed-in service as the Source in Make 3D.",
                     )
                 if resp.status_code == 429 or resp.status_code >= 500:
                     raise ProviderError(

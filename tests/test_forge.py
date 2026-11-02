@@ -20,8 +20,10 @@ from PIL import Image
 
 
 @pytest.fixture(autouse=True)
-def _force_demo_mode_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+def _force_demo_mode_in_tests(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
     monkeypatch.setenv("FORGE_DEMO_MODE", "1")
+    # Never read the developer's real ~/.forge: its keys and signed-in services would make real, paid calls.
+    monkeypatch.setenv("FORGE_CONFIG_DIR", str(tmp_path_factory.mktemp("forge-config")))
 
 from forge.agent.action_layer import ForgeActionLayer
 from forge.exporter.presets import export_project_assets
@@ -2101,3 +2103,12 @@ def test_import_follows_the_approved_plan(tmp_path: Path) -> None:
     heroes = ws / result["sections"]["characters"]
     assert heroes.name.endswith("heroes-foes") and (heroes / "zombie.md").is_file() and not (heroes / "rogue.md").exists()
     assert result["orders"] == 1 and orders.list_orders(ws)[0]["placeholder"].endswith("bone_key.tres")
+
+
+def test_frontmatter_reads_prompts_with_colons():
+    # Agents write prompts like "A roar: high and squeaky"; strict YAML rejects them, and the asset vanished.
+    from forge.blueprint_contract import split_frontmatter
+
+    meta, body, ok = split_frontmatter("---\nkind: sfx\ncount: 2\nprompt: A cute roar: squeaky, not scary # loud\n---\n# Roar\n")
+    assert ok and meta == {"kind": "sfx", "count": 2, "prompt": "A cute roar: squeaky, not scary # loud"}
+    assert body == "# Roar\n"

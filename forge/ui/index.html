@@ -70,6 +70,8 @@
           <nav class="crumbs" id="crumbs"></nav>
         </div>
         <div class="head-actions">
+          <button id="paletteBtn" class="palette-btn" type="button" title="Jump anywhere (⌘K)" aria-label="Jump anywhere"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><kbd>⌘K</kbd></button>
+          <button id="galleryBtn" class="icon-btn" type="button" title="Gallery mode: dark, art first (G)" aria-label="Gallery mode"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="m3.5 16 5-5 4 4 3-3 5 5"/><circle cx="15.5" cy="9" r="1.5"/></svg></button>
           <button id="refreshBtn" class="icon-btn" type="button" title="Refresh" aria-label="Refresh">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" /></svg>
           </button>
@@ -113,6 +115,7 @@
   <!-- New project onboarding -->
   <section class="onboard" id="onboarding" hidden aria-label="New project">
     <div class="petals" aria-hidden="true"></div>
+    <button class="ob-skip ob-cancel" type="button" data-ob-cancel>Cancel</button>
     <button class="ob-skip" type="button" data-ob-skip>Skip · start blank</button>
     <div class="ob-stage" id="obStage"></div>
   </section>

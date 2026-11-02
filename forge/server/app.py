@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from html import escape as html_escape
 import os
 import re
 import subprocess
@@ -20,12 +21,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from forge import access, asset_studio, game_import, game_tools, overview as project_overview, updater, vault
+from forge import access, asset_studio, game_import, game_tools, overview as project_overview, showcase, updater, vault
 from forge.agent.action_layer import ForgeActionLayer
 from forge.agent.autonomous import execute_agent_brief
 from forge.agent import cli_models, endpoints as model_endpoints
@@ -53,13 +54,13 @@ from forge.storage.project_catalog import (
     get_project_catalog,
     set_default_project,
 )
-from forge.storage.project_store import list_all_projects, sanitize_project_name
+from forge.storage.project_store import home_owner, list_all_projects, make_home, project_home, sanitize_project_name
 from forge.storage import workspace_archive
 from forge.stylepacks.builtins import VARIANT_CHIP_PRESETS, save_custom_style_pack
 from forge.models import StylePack
 from forge.watcher.folder_watcher import WatchFolderService
 from forge.watcher.workspace_watcher import WorkspaceWatcher
-from forge import game_link, orders
+from forge import game_link, orders, service_gen, services
 from forge.agent import connect as connect_agent
 
 
@@ -310,7 +311,7 @@ async def api_list_projects() -> dict[str, Any]:
 async def api_project_cards() -> dict[str, Any]:
     names = list_all_projects(actions.root_dir)
     root = actions.root_dir or get_projects_root()
-    return {"projects": [project_overview.project_card(root / name / "workspace", name) for name in names]}
+    return {"projects": [project_overview.project_card(project_home(name, root) / "workspace", name) for name in names]}
 
 
 @app.post("/api/projects/default")
@@ -400,17 +401,35 @@ async def api_create_project(payload: dict[str, Any]) -> dict[str, Any]:
     name = sanitize_project_name(raw_name)
     if not name or name in {".", ".."}:
         raise HTTPException(status_code=400, detail="Project name is invalid.")
-    if payload.get("unique"):
+    game = Path(str(payload.get("game_folder") or "")).expanduser() if payload.get("game_folder") else None
+    if game is not None and not (game.is_absolute() and game.is_dir()):
+        raise HTTPException(status_code=400, detail="Choose your game's folder.")
+    # Optional: keep Glob's files somewhere other than the game's glob/ folder (say, in Documents).
+    home_folder = Path(str(payload.get("home_folder"))).expanduser() if payload.get("home_folder") and game else None
+    if home_folder is not None and not (home_folder.is_absolute() and home_folder.is_dir()):
+        raise HTTPException(status_code=400, detail="Choose an existing folder for Glob's files.")
+    existing = home_owner(game, actions.root_dir) if game else None
+    if existing:
+        # The game already has a Glob project: open that one instead of starting a second.
+        name = existing
+    elif payload.get("unique"):
         # New projects from the UI never open an existing one by accident.
         base, root, index = name, actions.root_dir or get_projects_root(), 2
         while (root / name).exists():
             name, index = f"{base}-{index}", index + 1
     try:
+        if game and not existing:
+            make_home(name, game, actions.root_dir, home_folder)
         store = actions.get_store(name)
+        if game and not existing:
+            # Choosing the game in Glob is the user's consent: link it and tell its coding agents about Glob.
+            await asyncio.to_thread(connect_agent.connect, name, str(game), None)
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "project": store.project_name,
+        "existing": bool(existing),
+        "home": str(store.project_dir),
         "bible": store.get_bible().model_dump(),
         "projects": list_all_projects(actions.root_dir),
     }
@@ -1216,6 +1235,59 @@ async def api_disconnect(project: str = "default") -> dict[str, Any]:
     return await asyncio.to_thread(connect_agent.disconnect, project)
 
 
+# --- Generation services the user signs in to (hosted MCP + OAuth), no API key ---
+
+@app.get("/api/services")
+async def api_services() -> dict[str, Any]:
+    return {"services": services.status()}
+
+
+@app.post("/api/services/{service}/connect")
+async def api_service_connect(service: str, request: Request) -> dict[str, Any]:
+    # The browser comes back to this same Glob server once the user has signed in.
+    redirect_uri = str(request.base_url).rstrip("/").replace("://localhost", "://127.0.0.1") + services.CALLBACK_PATH
+    try:
+        return {"authorize_url": await asyncio.to_thread(services.start_sign_in, service, redirect_uri)}
+    except (services.ServiceError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/services/callback", response_class=HTMLResponse)
+async def api_service_callback(state: str = "", code: str = "", error: str = "", error_description: str = "") -> HTMLResponse:
+    def page(title: str, text: str, ok: bool) -> HTMLResponse:
+        return HTMLResponse(
+            "<!doctype html><meta charset=utf-8><title>Glob</title><body style=\"margin:0;display:grid;place-items:center;height:100vh;"
+            "background:#070708;color:#f4f4f5;font:16px system-ui\"><div style=\"text-align:center;max-width:420px\">"
+            f"<div style=\"font-size:46px\">{'🤜🤛' if ok else '⚠️'}</div><h1 style=\"font-size:24px\">{html_escape(title)}</h1>"
+            f"<p style=\"color:#a1a1aa\">{html_escape(text)}</p></div>{'<script>setTimeout(()=>window.close(),1800)</script>' if ok else ''}",
+            status_code=200 if ok else 400)
+
+    if error or not code:
+        return page("Sign-in cancelled", error_description or error or "No code came back. Try again from Glob.", False)
+    try:
+        service = await asyncio.to_thread(services.finish_sign_in, state, code)
+    except (services.ServiceError, httpx.HTTPError) as exc:
+        return page("Sign-in failed", str(exc), False)
+    label = services.SERVICES[service]["label"]
+    await ws_manager.broadcast({"type": "service_connected", "service": service})
+    return page(f"{label} is connected", "Glob can use it now. You can close this tab and go back to Glob.", True)
+
+
+@app.delete("/api/services/{service}")
+async def api_service_disconnect(service: str) -> dict[str, Any]:
+    services.disconnect(service)
+    return {"services": services.status()}
+
+
+@app.post("/api/services/{service}/test")
+async def api_service_test(service: str) -> dict[str, Any]:
+    try:
+        tools = await asyncio.to_thread(services.list_tools, service, True)
+    except (services.ServiceError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"tools": [t.get("name") for t in tools]}
+
+
 # --- Folder access: what Glob's agent may read (and write) outside the projects folder ---
 
 @app.get("/api/access")
@@ -1255,14 +1327,21 @@ async def api_import_start(payload: dict[str, Any]) -> dict[str, Any]:
     if not folder or not Path(folder).expanduser().is_dir():
         raise HTTPException(status_code=400, detail="Choose a game folder first.")
     project = str(payload.get("project") or "").strip()
+    game = Path(folder).expanduser().resolve()
+    if not project:
+        project = home_owner(game, actions.root_dir) or ""
     if not project:
         name = sanitize_project_name(str(payload.get("name") or Path(folder).name).strip() or "imported_game")
         base, root, index = name, actions.root_dir or get_projects_root(), 2
         while (root / name).exists():
             name, index = f"{base}-{index}", index + 1
         project = name
+        # A new project lives in the game it comes from, linked to it.
+        make_home(project, game, actions.root_dir)
     try:
         ws_dir = _ws_dir(project)
+        if not game_link.get_link(project, actions.root_dir):
+            await asyncio.to_thread(connect_agent.connect, project, str(game), None)
         # Choosing the folder in Glob's own import screen is the user's consent to read it.
         access.grant(folder, write=bool(access.granted_path(str(Path(folder).expanduser().resolve()), need_write=True)))
     except (OSError, ValueError) as exc:
@@ -1387,7 +1466,7 @@ def _project_dir(project: str) -> Path:
     target = (root / project).resolve()
     if sanitize_project_name(project) != project or target.parent != root or not target.is_dir():
         raise HTTPException(status_code=404, detail=f"Project '{project}' was not found.")
-    return target
+    return project_home(project, root).resolve()
 
 
 @app.post("/api/projects/{project}/export")
@@ -1407,7 +1486,7 @@ async def api_export_project(project: str, payload: dict[str, Any]) -> dict[str,
     target = Path(dest).expanduser()
     if not target.is_absolute():
         raise HTTPException(status_code=400, detail="Use a full file path.")
-    result = await asyncio.to_thread(workspace_archive.export_project, source, target)
+    result = await asyncio.to_thread(workspace_archive.export_project, source, target, None, project)
     return result
 
 
@@ -1417,7 +1496,7 @@ async def api_download_project(project: str) -> FileResponse:
 
     source = _project_dir(project)
     target = Path(tempfile.gettempdir()) / f"{project}.glob.zip"
-    await asyncio.to_thread(workspace_archive.export_project, source, target)
+    await asyncio.to_thread(workspace_archive.export_project, source, target, None, project)
     return FileResponse(target, media_type="application/zip", filename=f"{project}.glob.zip")
 
 
@@ -1817,7 +1896,7 @@ def _load_jobs(project: str) -> None:
     except (OSError, ValueError):
         return
     for job in saved:
-        if job.get("status") == "running":
+        if job.get("status") in ("running", "queued"):
             job.update(status="interrupted", finished_at=time.time(),
                        error="Forge restarted while this was running, so the result was not saved. Run it again.")
         studio_jobs.setdefault(job["id"], job)
@@ -1839,7 +1918,8 @@ async def api_studio_asset(path: str, project: str = "default") -> dict[str, Any
 
 @app.patch("/api/studio/asset")
 async def api_studio_update_asset(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
-    allowed = {"kind", "prompt", "winner", "style", "title"}
+    # The voice sheet remembers its pick; pillars, aspect and height are set from the asset page and the viewer.
+    allowed = {"kind", "prompt", "winner", "style", "title", "voice", "voice_name", "pillars", "aspect", "height_m"}
     fields = {key: value for key, value in dict(payload.get("fields") or {}).items() if key in allowed}
     result = _overview_call(asset_studio.update_asset, _ws_dir(project), str(payload.get("path") or ""), fields)
     await workspace_changed(project)
@@ -1882,16 +1962,68 @@ async def _run_studio_job(project: str, job: dict[str, Any], request: dict[str, 
         job["outputs"] = await asset_studio.run_action(actions, project, request)
         job["status"] = "done"
     except ProviderError as exc:
-        job["status"], job["error"] = "failed", exc.message
+        # The fix is what the user needs next, so it goes on the asset page with the error.
+        specific = exc.how_to_fix and exc.how_to_fix != ProviderError("", provider="").how_to_fix  # skip the generic default
+        job["status"], job["error"] = "failed", f"{exc.message} {exc.how_to_fix}" if specific else exc.message
+        _note_credits(request, exc.provider, exc.message, exc.status_code)
     except Exception as exc:  # noqa: BLE001 — report any failure on the asset page
         reason = str(exc).strip() or type(exc).__name__
         if "Timeout" in type(exc).__name__:
             reason = "The request took too long (timed out). Large models upload slowly; try a remeshed, smaller model."
         job["status"], job["error"] = "failed", reason[:400]
+        _note_credits(request, "", reason, 0)
     job["finished_at"] = time.time()
     _save_jobs(project)
     await ws_manager.broadcast({"type": "studio_job", "project": project, "job": dict(job)})
     await workspace_changed(project)
+
+
+# Providers that said "out of credits" lately, so the generate sheet can warn before the next run.
+credit_alerts: dict[str, dict[str, Any]] = {}
+
+
+def _note_credits(request: dict[str, Any], provider: str, message: str, status: int) -> None:
+    if status != 402 and not re.search(r"credit|insufficient|balance|quota", message, re.I):
+        return
+    model = str(request.get("model") or "")
+    if model.startswith("svc:"):
+        provider = model[4:].split("/")[0]
+    elif not provider:
+        provider = model.partition(":")[0] or ("meshy" if request.get("action") == "make_3d" else "")
+    if provider:
+        credit_alerts[provider] = {"at": time.time(), "error": message[:200]}
+
+
+# Batch runs go through a small queue so twenty assets don't hit a provider all at once.
+_batch_slots: dict[str, asyncio.Semaphore] = {}
+
+
+def queue_studio_job(project: str, request: dict[str, Any]) -> dict[str, Any]:
+    asset_studio.read_asset(_ws_dir(project), str(request.get("asset") or ""))
+    job = {
+        "id": f"job_{int(time.time() * 1000)}_{len(studio_jobs)}",
+        "project": project,
+        "asset": request.get("asset"),
+        "action": request.get("action"),
+        "status": "queued",
+        "batch": True,
+        "started_at": time.time(),
+    }
+    _load_jobs(project)
+    studio_jobs[job["id"]] = job
+    asyncio.create_task(_run_queued(project, job, request))
+    return dict(job)
+
+
+async def _run_queued(project: str, job: dict[str, Any], request: dict[str, Any]) -> None:
+    await ws_manager.broadcast({"type": "studio_job", "project": project, "job": dict(job)})
+    async with _batch_slots.setdefault(project, asyncio.Semaphore(2)):
+        if job["status"] == "cancelled":
+            return
+        job.update(status="running", started_at=time.time())
+        _save_jobs(project)
+        await ws_manager.broadcast({"type": "studio_job", "project": project, "job": dict(job)})
+        await _run_studio_job(project, job, request)
 
 
 def start_studio_job(project: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -1921,6 +2053,13 @@ async def _start_studio_job(project: str, job: dict[str, Any], request: dict[str
 workspace_agent.job_starter = start_studio_job
 
 
+@app.get("/api/studio/service-models")
+async def api_studio_service_models() -> dict[str, Any]:
+    """Image and 3D models of the services the user signed in to, for the studio's source menu."""
+    image, mesh = await asyncio.gather(asyncio.to_thread(service_gen.catalog, "image"), asyncio.to_thread(service_gen.catalog, "3d"))
+    return {"image": image, "3d": mesh}
+
+
 @app.post("/api/studio/run")
 async def api_studio_run(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return _overview_call(start_studio_job, project, dict(payload.get("request") or {}))
@@ -1928,7 +2067,7 @@ async def api_studio_run(payload: dict[str, Any], project: str = "default") -> d
 
 @app.get("/api/studio/options")
 async def api_studio_options() -> dict[str, Any]:
-    return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": load_config().default_image_model, "kinds": list(asset_studio.ASSET_KINDS)}
+    return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": load_config().default_image_model, "selected_3d": load_config().default_3d_service_model, "kinds": list(asset_studio.ASSET_KINDS)}
 
 
 @app.get("/api/studio/voices")
@@ -1937,10 +2076,21 @@ async def api_studio_voices() -> dict[str, Any]:
         from forge.providers.elevenlabs_audio import list_voices
     except ImportError:
         return {"voices": []}
+    error = ""
     try:
-        return {"voices": await list_voices()}
+        voices = await list_voices()
     except Exception as exc:  # noqa: BLE001 — an empty list keeps the voice picker usable
-        return {"voices": [], "error": str(exc)[:200]}
+        voices, error = [], str(exc)[:200]
+    if not voices:
+        # No key, or a rejected one: the account the user signed in to has the same voices.
+        from forge import service_gen, services
+
+        if "elevenlabs" in services.connected():
+            try:
+                return {"voices": await asyncio.to_thread(service_gen.list_voices)}
+            except Exception as exc:  # noqa: BLE001
+                error = str(exc)[:200]
+    return {"voices": voices, **({"error": error} if error else {})}
 
 
 @app.post("/api/studio/audio-upload")
@@ -1961,6 +2111,130 @@ async def api_studio_make_pillar(payload: dict[str, Any], project: str = "defaul
     saved = _overview_call(asset_studio.make_pillar, _ws_dir(project), str(payload.get("image") or ""), str(payload.get("folder") or ""))
     await workspace_changed(project)
     return {"saved": saved}
+
+
+@app.get("/api/studio/history")
+async def api_studio_history(path: str, project: str = "default") -> dict[str, Any]:
+    """What each output of an asset was made from, so an older prompt can be brought back."""
+    return {"history": _overview_call(asset_studio.output_history, _ws_dir(project), path)}
+
+
+@app.get("/api/studio/credits")
+async def api_studio_credits() -> dict[str, Any]:
+    """Providers that ran out of credits in the last six hours, and Meshy's balance when a key is set."""
+    fresh = {k: v for k, v in credit_alerts.items() if time.time() - v["at"] < 6 * 3600}
+    balance = None
+    key = load_config().get_key("meshy")
+    if key:
+        try:
+            async with httpx.AsyncClient(timeout=6) as client:
+                res = await client.get("https://api.meshy.ai/openapi/v1/balance", headers={"Authorization": f"Bearer {key}"})
+            if res.status_code == 200:
+                balance = res.json().get("balance")
+        except (httpx.HTTPError, ValueError):
+            pass
+    return {"alerts": fresh, "meshy_balance": balance}
+
+
+@app.get("/api/studio/batch")
+async def api_studio_batch_plan(folder: str = "", project: str = "default") -> dict[str, Any]:
+    """The assets "Generate all missing" would make, with the request each one would send."""
+    ws_dir = _ws_dir(project)
+    plan = []
+    for rel in _overview_call(asset_studio.missing_assets, ws_dir, folder):
+        try:
+            req = asset_studio.build_request(ws_dir, rel, "candidates")
+        except (FileNotFoundError, ValueError):
+            continue
+        plan.append({"asset": rel, "audio": bool(req.get("audio")), "model": req.get("model"), "count": req.get("count", 1)})
+    return {"folder": folder, "assets": plan}
+
+
+@app.post("/api/studio/batch")
+async def api_studio_batch(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    ws_dir = _ws_dir(project)
+    wanted = [str(p) for p in payload.get("assets") or []] or _overview_call(asset_studio.missing_assets, ws_dir, str(payload.get("folder") or ""))
+    count = payload.get("count")
+    jobs, skipped = [], []
+    for rel in wanted:
+        try:
+            req = asset_studio.build_request(ws_dir, rel, "candidates")
+        except (FileNotFoundError, ValueError) as exc:
+            skipped.append({"asset": rel, "reason": str(exc)})
+            continue
+        if count:
+            req["count"] = int(count)
+        jobs.append(queue_studio_job(project, req))
+    _save_jobs(project)
+    return {"jobs": jobs, "skipped": skipped}
+
+
+@app.post("/api/studio/jobs/{job_id}/cancel")
+async def api_studio_cancel_job(job_id: str, project: str = "default") -> dict[str, Any]:
+    """Take a job that hasn't started out of the batch queue."""
+    job = studio_jobs.get(job_id)
+    if not job or job.get("project") != project:
+        raise HTTPException(status_code=404, detail="No such job.")
+    if job["status"] != "queued":
+        raise HTTPException(status_code=400, detail="Only waiting jobs can be cancelled.")
+    job.update(status="cancelled", finished_at=time.time())
+    _save_jobs(project)
+    await ws_manager.broadcast({"type": "studio_job", "project": project, "job": dict(job)})
+    return dict(job)
+
+
+@app.post("/api/overview/key-art")
+async def api_overview_key_art(project: str = "default") -> dict[str, Any]:
+    """Make (or reuse) the project's key-art asset and start two candidates; the first becomes the cover."""
+    ws_dir = _ws_dir(project)
+    ov = project_overview.build_overview(ws_dir, project)
+    rel = _overview_call(asset_studio.key_art_asset, ws_dir, ov["title"], ov["excerpt"] or "")
+    request = _overview_call(asset_studio.build_request, ws_dir, rel, "candidates")
+    job = _overview_call(start_studio_job, project, request)
+    await workspace_changed(project)
+    return {"asset": rel, "job": job}
+
+
+@app.post("/api/overview/cover")
+async def api_overview_cover(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    """Use any workspace image as the project's cover."""
+    name = _overview_call(asset_studio.set_project_cover, _ws_dir(project), str(payload.get("image") or ""))
+    await workspace_changed(project)
+    return {"cover": name}
+
+
+@app.get("/api/board")
+async def api_board(project: str = "default") -> dict[str, Any]:
+    return await asyncio.to_thread(showcase.board, _ws_dir(project), project)
+
+
+@app.get("/api/press-kit")
+async def api_press_kit(project: str = "default") -> Response:
+    data = await asyncio.to_thread(showcase.press_kit_zip, _ws_dir(project), project)
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{project}-press-kit.zip"'})
+
+
+SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
+
+
+@app.post("/api/projects/sample")
+async def api_install_sample(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Copy a finished sample project (Pocket Kaiju) in as a new project to look around in."""
+    import shutil
+
+    sample = str((payload or {}).get("sample") or "pocket-kaiju")
+    source = SAMPLES_DIR / sample
+    if not re.fullmatch(r"[a-z0-9-]+", sample) or not source.is_dir():
+        raise HTTPException(status_code=404, detail="No such sample project.")
+    root = actions.root_dir or get_projects_root()
+    base = name = sanitize_project_name(sample.replace("-", "_"))
+    index = 2
+    while (root / name).exists():
+        name, index = f"{base}_{index}", index + 1
+    actions.get_store(name)
+    ws_dir = _ws_dir(name)
+    await asyncio.to_thread(shutil.copytree, source, ws_dir, dirs_exist_ok=True)
+    return {"project": name, "projects": list_all_projects(actions.root_dir)}
 
 
 # --- Final Vault: every asset's chosen image and newest model, ready to export ---
@@ -2082,6 +2356,13 @@ async def api_agent_models() -> dict[str, Any]:
         "vscode_importable": sum(1 for m in models if m["provider"] == "vscode"),
         "clis": cli_models.detect(),
     }
+
+
+@app.post("/api/agent/cli/{cli_id}/check")
+async def api_cli_check(cli_id: str) -> dict[str, Any]:
+    if cli_id not in cli_models.CLIS:
+        raise HTTPException(status_code=404, detail=f"Unknown coding agent '{cli_id}'.")
+    return await cli_models.check(cli_id)
 
 
 @app.post("/api/agent/cli/{cli_id}/login")
@@ -2399,6 +2680,12 @@ class NoCacheStaticFiles(StaticFiles):
 
 if UI_DIR.exists():
     app.mount("/ui", NoCacheStaticFiles(directory=str(UI_DIR)), name="ui")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def serve_favicon() -> FileResponse:
+    # Browsers ask for /favicon.ico whatever the page's <link rel="icon"> says.
+    return FileResponse(UI_DIR / "glob-icon.png", media_type="image/png")
 
 
 @app.get("/", response_class=HTMLResponse)

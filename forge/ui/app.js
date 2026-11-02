@@ -299,10 +299,14 @@ function renderProjectGrid() {
           <small>${c.sections} section${c.sections === 1 ? "" : "s"} · ${c.assets} asset${c.assets === 1 ? "" : "s"}</small></div>
           <button class="pcard-del" data-st-export="${esc(c.project)}" title="Export as .zip" aria-label="Export ${esc(c.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
           ${c.project === "default" ? "" : `<button class="pcard-del" data-delete-project="${esc(c.project)}" title="Delete project" aria-label="Delete ${esc(c.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>`}</div>
-        <div class="pcard-art n${Math.min(imgs.length, 3)}">${imgs.length ? imgs.join("") : `<span class="pcard-initials">${esc(initials || "F")}</span>`}</div>
+        ${c.cover ? `<div class="pcard-art cover"><img src="${esc(projectFileUrl(c.project, c.cover))}" alt="" loading="lazy"></div>`
+          : `<div class="pcard-art n${Math.min(imgs.length, 3)}">${imgs.length ? imgs.join("") : `<span class="pcard-initials">${esc(initials || "F")}</span>`}
+            ${c.assets ? `<button class="pcard-keyart" data-key-art="${esc(c.project)}" title="Generate a cover image for this project from its pitch">${icon("sparkle")}Make key art</button>` : ""}</div>`}
         ${c.project === state.project ? `<span class="pcard-badge">Open</span>` : ""}
       </div>`;
-    }).join("")}`;
+    }).join("")}
+    ${(state.cards || []).some((c) => c.project.startsWith("pocket_kaiju")) || query ? "" : `<button class="pcard pcard-sample" data-install-sample><span class="pcard-sample-art"><img src="/ui/sample-cover.jpg" alt=""></span>
+      <span class="pcard-sample-text"><strong>Explore a finished project</strong><small>Pocket Kaiju: characters, 3D models, sounds and an agent order, ready to click through. No credits used.</small></span></button>`}`;
 }
 
 function deleteProjectDialog(project) {
@@ -310,7 +314,7 @@ function deleteProjectDialog(project) {
   openDialog(`
     <form class="dlg" id="deleteProjectForm">
       <h2>Delete ${esc(card?.title || humanize(project))}?</h2>
-      <p>The project is moved to <code>projects/.trash/</code>, so you can still get it back from disk.</p>
+      <p>Glob forgets the project (its entry goes to <code>projects/.trash/</code>). A project that lives in a game folder keeps its files there, in <code>glob/</code>.</p>
       <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="danger">Delete project</button></div>
     </form>`);
   $("#deleteProjectForm").addEventListener("submit", async (event) => {
@@ -331,50 +335,81 @@ function deleteProjectDialog(project) {
 
 // ---------- new project onboarding ----------
 
-const GENRES = ["Action RPG", "Survival horror", "Cozy sim", "Platformer", "Strategy", "Puzzle", "Racing", "Roguelike", "Visual novel", "Shooter"];
+const GENRES = ["Action", "Arcade", "Action RPG", "Survival horror", "Cozy sim", "Platformer", "Strategy", "Puzzle", "Racing", "Roguelike", "Visual novel", "Shooter"];
 const LOOKS = ["Low-poly", "Stylized hand-painted", "Realistic PBR", "Toon / cel-shaded", "Pixel art", "Voxel", "Dark fantasy", "Sci-fi hard-surface"];
 
-function startOnboarding() {
+// `seamless` comes from first-run setup: same backdrop, so it swaps in without a fade and skips the intro.
+function startOnboarding(seamless = false) {
   closeProjects();
-  state.ob = { step: 0, name: "", pitch: "", genres: [], looks: [], dimension: "3D", rules: "" };
-  showScene($("#onboarding"));
-  $("#onboarding").classList.remove("forging");
-  spawnPetals();
+  state.ob = { step: seamless === true ? 1 : 0, seamless: seamless === true, game: "", home: "", name: "", pitch: "", genres: [], looks: [], dimension: "3D", rules: "" };
+  const el = $("#onboarding");
+  spawnPetals(el);
+  el.classList.toggle("instant", seamless === true);
+  showScene(el);
+  el.classList.remove("forging");
   renderOnboarding();
 }
 
-function spawnPetals() {
-  const box = $("#onboarding .petals");
-  if (box.childElementCount) return;
-  box.innerHTML = Array.from({ length: 22 }, (_, i) => `<i style="--x:${Math.random() * 100}%;--d:${8 + Math.random() * 10}s;--delay:${-Math.random() * 18}s;--s:${0.5 + Math.random() * 0.9};--r:${Math.random() * 360}deg;--sway:${20 + Math.random() * 60}px"></i>`).join("");
+// One set of petals for every scene, timed from page load: a scene that takes over from another
+// shows them exactly where they were, so nothing jumps.
+const PETALS = Array.from({ length: 22 }, () => ({ x: Math.random() * 100, d: 8 + Math.random() * 10, phase: Math.random() * 18, s: 0.5 + Math.random() * 0.9, r: Math.random() * 360, sway: 20 + Math.random() * 60 }));
+
+function spawnPetals(scene) {
+  const t = performance.now() / 1000;
+  scene.querySelector(".petals").innerHTML = PETALS.map((p) => `<i style="--x:${p.x}%;--d:${p.d}s;--delay:${-(p.phase + t).toFixed(2)}s;--s:${p.s};--r:${p.r}deg;--sway:${p.sway}px"></i>`).join("");
 }
 
 function chipGroup(name, options, selected) {
   return `<div class="ob-chips">${options.map((o) => `<button type="button" class="ob-chip${selected.includes(o) ? " on" : ""}" data-ob-chip="${esc(name)}" data-value="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
 }
 
+// The game folder, and where Glob keeps the project: in the game's glob/ folder unless the user picks another place.
+function obFolders(ob) {
+  const where = ob.home ? `${ob.home.replace(/[\\/]+$/, "")}/${ob.name || "<project name>"}` : ob.game ? `${ob.game.replace(/[\\/]+$/, "")}/glob` : "your game folder, in glob/";
+  return `<button type="button" class="ob-folder${ob.game ? " on" : ""}" data-ob-game>${ob.game ? `<strong>${esc(ob.game.split(/[\\/]/).filter(Boolean).pop())}</strong><small>${esc(ob.game)}</small>` : `<strong>Choose game folder…</strong><small>Godot, Unity, Unreal or anything else</small>`}</button>
+    <div class="ob-home"><span>Glob's workspace</span><code title="${esc(where)}"><bdi>${esc(where)}</bdi></code>
+      <button type="button" class="link-btn" data-ob-home>${ob.home ? "Change…" : "Keep it somewhere else…"}</button>
+      ${ob.home ? `<button type="button" class="link-btn" data-ob-home-reset>Back to the game folder</button>` : ""}</div>`;
+}
+
 function renderOnboarding() {
   const ob = state.ob;
   const steps = [
     () => `<div class="ob-step intro"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">Glob</p><h1>Every world starts<br>with a <em>spark</em>.</h1>
-      <p class="ob-sub">Answer three quick questions and the agent builds your project: sections, pages, first assets and a style bible.</p>
-      <div class="ob-nav"><button class="ob-next" data-ob-next>Begin</button><button class="ob-back" data-imp-open title="Import a Godot, Unity or Unreal project">Import a game</button></div></div>`,
-    () => `<div class="ob-step"><p class="ob-kicker">1 / 3 · Name</p><h1>What's it called?</h1>
+      <p class="ob-sub">Four quick questions and the agent builds your project: sections, pages, first assets and a style bible.</p>
+      <div class="ob-nav"><button class="ob-next" data-ob-next>Begin</button><button class="ob-back" data-imp-open title="Import a Godot, Unity or Unreal project">Import a game</button></div>
+      <button class="ob-sample" data-install-sample>${icon("eye")} Or look around a finished sample project first</button></div>`,
+    () => `<div class="ob-step"><p class="ob-kicker">1 / 4 · Your game</p><h1>Where's your <em>game</em>?</h1>
+      <p class="ob-sub">Pick the game's folder, even an empty one. Glob keeps this project inside it in <code>glob/</code> (or wherever you choose), and your coding agent finds finished assets in <code>glob_delivery/</code>.</p>
+      ${obFolders(ob)}
+      <div class="ob-nav">${ob.step > 0 && !ob.seamless ? `<button class="ob-back" data-ob-back>Back</button>` : ""}<button class="ob-next" data-ob-next ${ob.game ? "" : "disabled"}>Continue</button></div></div>`,
+    () => `<div class="ob-step"><p class="ob-kicker">2 / 4 · Name</p><h1>What's it called?</h1>
       <input id="obName" class="ob-input" maxlength="60" placeholder="The Hollow Below" value="${esc(ob.name)}" autofocus>
-      <button class="ob-next" data-ob-next>Continue</button></div>`,
-    () => `<div class="ob-step"><p class="ob-kicker">2 / 3 · The game</p><h1>Tell me about it.</h1>
+      <div class="ob-nav"><button class="ob-back" data-ob-back>Back</button><button class="ob-next" data-ob-next>Continue</button></div></div>`,
+    () => `<div class="ob-step"><p class="ob-kicker">3 / 4 · The game</p><h1>Tell me about it.</h1>
       <textarea id="obPitch" class="ob-input" rows="3" placeholder="A cozy farming game on floating islands where you tame storm spirits…">${esc(ob.pitch)}</textarea>
       ${chipGroup("genres", GENRES, ob.genres)}
       <div class="ob-nav"><button class="ob-back" data-ob-back>Back</button><button class="ob-next" data-ob-next>Continue</button></div></div>`,
-    () => `<div class="ob-step"><p class="ob-kicker">3 / 3 · The look</p><h1>How should it look?</h1>
+    () => `<div class="ob-step"><p class="ob-kicker">4 / 4 · The look</p><h1>How should it look?</h1>
       ${chipGroup("looks", LOOKS, ob.looks)}
       <div class="ob-dim">${["3D", "2D"].map((d) => `<button type="button" class="ob-chip${ob.dimension === d ? " on" : ""}" data-ob-dim="${d}">${d}</button>`).join("")}</div>
       <textarea id="obRules" class="ob-input small" rows="3" placeholder="Asset rules for every image, e.g. T-pose, front view, under 10k triangles, muted palette…">${esc(ob.rules)}</textarea>
       <div class="ob-nav"><button class="ob-back" data-ob-back>Back</button><button class="ob-next forge" data-ob-forge>✦ Forge my world</button></div></div>`,
+    // "Skip · start blank": no questions, but the project still needs its game and a home.
+    () => `<div class="ob-step"><p class="ob-kicker">Blank workspace</p><h1>Where does it <em>live</em>?</h1>
+      <p class="ob-sub">An empty project, linked to your game. Fill it yourself or ask Glob in the chat.</p>
+      <input id="obName" class="ob-input" maxlength="60" placeholder="Project name" value="${esc(ob.name)}">
+      ${obFolders(ob)}
+      <div class="ob-nav">${ob.seamless ? "" : `<button class="ob-back" data-ob-restart>Answer the questions instead</button>`}<button class="ob-next" data-ob-blank ${ob.game ? "" : "disabled"}>Create blank workspace</button></div></div>`,
   ];
+  $("#onboarding").classList.toggle("blank", ob.step === OB_BLANK);
   $("#obStage").innerHTML = steps[ob.step]();
-  $("#obStage").firstElementChild.classList.add("enter");
-  setTimeout(() => $("#obStage [autofocus], #obStage textarea")?.focus(), 350);
+  // Animate in only on a new step: picking a folder or a chip redraws the same step, which should stay still.
+  if (ob.shown !== ob.step) {
+    ob.shown = ob.step;
+    $("#obStage").firstElementChild.classList.add("enter");
+    setTimeout(() => $("#obStage [autofocus], #obStage textarea")?.focus(), 350);
+  }
 }
 
 function syncOnboarding() {
@@ -384,17 +419,48 @@ function syncOnboarding() {
   if ($("#obRules")) ob.rules = $("#obRules").value.trim();
 }
 
-async function createProject(name) {
-  const created = await api("/api/projects", { method: "POST", body: { name: name || "Untitled project", unique: true } });
+async function createProject(name, gameFolder, homeFolder = "") {
+  const created = await api("/api/projects", { method: "POST", body: { name: name || "Untitled project", unique: true, game_folder: gameFolder, home_folder: homeFolder || undefined } });
   state.project = created.project;
   storeSet("forge.project", created.project);
+  if (created.existing) toast(`This game already has a Glob project: opened ${humanize(created.project)}`);
   return created.project;
 }
 
-async function skipOnboarding() {
+async function chooseGameFolder() {
+  const folder = await chooseFolder("Choose your game's folder");
+  if (!folder) return;
+  state.ob.game = folder;
+  if (!state.ob.name) state.ob.name = folder.split(/[\\/]/).filter(Boolean).pop().replace(/[-_]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+  renderOnboarding();
+}
+
+const OB_BLANK = 5;
+
+// Back to where the user was, with nothing created.
+function cancelOnboarding() {
+  hideScene($("#onboarding"));
+}
+
+function skipOnboarding() {
   syncOnboarding();
+  state.ob.step = OB_BLANK;
+  renderOnboarding();
+}
+
+async function chooseHomeFolder() {
+  syncOnboarding();
+  const folder = await chooseFolder("Where should Glob keep this project's workspace?");
+  if (!folder) return;
+  state.ob.home = folder;
+  renderOnboarding();
+}
+
+async function createBlank() {
+  syncOnboarding();
+  if (!state.ob.game) return toast("Choose your game's folder first.", true);
   try {
-    const project = await createProject(state.ob.name);
+    const project = await createProject(state.ob.name, state.ob.game, state.ob.home);
     await switchProject(project); // load behind the scene, so the app is ready when it fades out
     hideScene($("#onboarding"));
     toast(`Created ${humanize(project)}: a blank workspace`);
@@ -404,16 +470,21 @@ async function skipOnboarding() {
 async function forgeWorld() {
   syncOnboarding();
   const ob = state.ob;
-  if (!ob.name) { ob.step = 1; renderOnboarding(); toast("Give your world a name first.", true); return; }
+  if (!ob.game) { ob.step = 1; renderOnboarding(); toast("Choose your game's folder first.", true); return; }
+  if (!ob.name) { ob.step = 2; renderOnboarding(); toast("Give your world a name first.", true); return; }
   $("#onboarding").classList.add("forging");
   $("#obStage").innerHTML = `<div class="ob-step forging-step enter"><div class="ob-orb"><span></span><span></span><span></span></div>
     <p class="ob-kicker">Forging</p><h1>${esc(ob.name)}</h1><ul class="ob-log" id="obLog"><li>Creating the project…</li></ul></div>`;
   const log = (text, cls = "") => { $("#obLog").insertAdjacentHTML("beforeend", `<li class="${cls}">${text}</li>`); };
   let poll;
   try {
-    const project = await createProject(ob.name);
+    const project = await createProject(ob.name, ob.game, ob.home);
     const look = [ob.dimension, ...ob.looks].join(", ");
-    const rules = [look && `- Look: ${look}`, ...ob.rules.split(/\n|;/).map((r) => r.trim()).filter(Boolean).map((r) => `- ${r}`)].filter(Boolean);
+    // Spell the dimension out: image models read a bare "3D, Toon" as a flat cartoon drawing.
+    const lookLine = ob.dimension === "3D"
+      ? `- Look: rendered 3D game asset${ob.looks.length ? ` (${ob.looks.join(", ")})` : ""}, like a model in the game engine, not a flat 2D drawing`
+      : `- Look: 2D game art${ob.looks.length ? ` (${ob.looks.join(", ")})` : ""}`;
+    const rules = [lookLine, ...ob.rules.split(/\n|;/).map((r) => r.trim()).filter(Boolean).map((r) => `- ${r}`)].filter(Boolean);
     if (rules.length) {
       await api("/api/overview/file", { method: "PUT", body: { path: "pillars/style-bible.md", content: `# Style bible\n\n${rules.join("\n")}\n` } });
       log("Style bible written: put in front of every image prompt", "ok");
@@ -426,6 +497,7 @@ async function forgeWorld() {
       log("No chat model is connected, so Glob can't design the sections here. Connect your game in Settings → Coding agent and give your agent this:", "");
       $("#obLog").insertAdjacentHTML("afterend", `<pre class="cn-cmd ob-brief"><code>${esc(brief)}</code></pre><button class="ob-back" data-cn-copy="${esc(brief)}">Copy</button>`);
       $(".ob-brief + button").insertAdjacentHTML("afterend", `<button class="ob-next forge" data-ob-enter>Enter your world →</button>`);
+      forged();
       return;
     }
     const session = await api("/api/agent/sessions", { method: "POST", body: { title: "Project setup" } });
@@ -456,6 +528,15 @@ async function forgeWorld() {
     log(`The agent stopped: ${esc(err.message)}. Your project is still created; you can continue in the chat.`, "bad");
   }
   $("#obLog").insertAdjacentHTML("afterend", `<button class="ob-next forge" data-ob-enter>Enter your world →</button>`);
+  forged();
+}
+
+// The world is made: the "Forging" screen settles so it no longer looks busy.
+function forged() {
+  $(".forging-step")?.classList.add("forged");
+  const kicker = $(".forging-step .ob-kicker");
+  if (kicker) kicker.textContent = "Ready";
+  $("[data-ob-enter]")?.focus();
 }
 
 async function finishOnboarding() {
@@ -468,6 +549,8 @@ async function switchProject(name) {
   state.view = { type: "home" };
   state.trail = [];
   await loadJobs();
+  renderJobDock();
+  state.palette = state.board = state.boardView = null;
   await Promise.all([loadSessions(), loadOverview(), loadConnect()]);
 }
 
@@ -476,6 +559,7 @@ async function switchProject(name) {
 async function loadSessions() {
   const data = await api("/api/agent/sessions");
   state.sessions = (data.sessions || []).filter((s) => s.group !== "Archive" || s.message_count);
+  applyChatMode();
   const remembered = storeGet(`forge.session.${state.project}`);
   const pick = state.sessions.find((s) => s.id === remembered) || state.sessions[state.sessions.length - 1];
   if (pick) await openSession(pick.id);
@@ -555,8 +639,11 @@ function renderMessages() {
     return;
   }
   const thinking = state.sending ? `<div class="msg agent thinking"><img class="avatar forge" src="/ui/glob-forge.svg" alt=""><div class="bubble"><div class="who">Glob</div><span class="shimmer">Forging…</span></div></div>` : "";
-  box.innerHTML = banner + messages.map(renderMessage).join("") + thinking;
-  box.scrollTop = box.scrollHeight;
+  // Only messages that are new since the last draw animate in; redraws of the same chat stay still.
+  const seen = state.drawn?.session === state.sessionId ? state.drawn.count : messages.length;
+  state.drawn = { session: state.sessionId, count: messages.length };
+  box.innerHTML = banner + messages.map((m, i) => renderMessage(m).replace('<div class="msg ', `<div class="msg ${i >= seen ? "fresh " : ""}`)).join("") + thinking;
+  box.scrollTo({ top: box.scrollHeight, behavior: "instant" }); // the box scrolls smoothly; a redraw must not glide through history
   syncComposer();
 }
 
@@ -663,14 +750,39 @@ function renderModelPill() {
     : ready ? "Pick a model" : "Connect a model";
 }
 
+// Coding agents running on the user's own login, with their logos (Glob chat model menu, setup, settings).
+const AGENT_LOGO = { claude: "/ui/logos/claude.svg", codex: "/ui/logos/codex.svg", gemini: "/ui/logos/gemini.svg", opencode: "/ui/logos/opencode.svg" };
+const MODEL_TABS = [["fav", "Favorites"], ["claude", "Claude Code"], ["codex", "Codex"], ["gemini", "Gemini"], ["opencode", "OpenCode"], ["custom", "API & custom"]];
+
+const modelTab = (m) => (m.provider === "cli" ? m.id.slice(4).split("/")[0] : "custom");
+
+function favoriteModels() {
+  try { return JSON.parse(storeGet("glob.favoriteModels") || "[]"); } catch { return []; }
+}
+
+function toggleFavorite(id) {
+  const favs = favoriteModels();
+  storeSet("glob.favoriteModels", JSON.stringify(favs.includes(id) ? favs.filter((f) => f !== id) : [...favs, id]));
+  renderModelPop();
+}
+
 function renderModelPop() {
-  const groups = {};
-  for (const m of state.models.filter((x) => x.ready)) (groups[m.group || m.provider] ||= []).push(m);
+  const ready = state.models.filter((x) => x.ready);
+  const favs = favoriteModels().filter((id) => ready.some((m) => m.id === id));
+  const tabs = MODEL_TABS.filter(([id]) => (id === "fav" ? favs.length : ready.some((m) => modelTab(m) === id)));
   const m = currentModel();
+  if (!tabs.some(([id]) => id === state.modelTab)) state.modelTab = favs.length ? "fav" : (m ? modelTab(m) : tabs[0]?.[0]);
+  const shown = state.modelTab === "fav" ? ready.filter((x) => favs.includes(x.id)) : ready.filter((x) => modelTab(x) === state.modelTab);
+  const groups = {};
+  for (const x of shown) (groups[state.modelTab === "custom" ? x.group || x.provider : ""] ||= []).push(x);
+  const row = (x) => `<button type="button" class="pop-model${x.id === state.model ? " on" : ""}" data-pick-model="${esc(x.id)}">
+    ${x.provider === "cli" && state.modelTab === "fav" ? `<img src="${AGENT_LOGO[modelTab(x)]}" alt="">` : ""}<span>${esc(x.label)}</span>
+    <i class="pop-star${favs.includes(x.id) ? " on" : ""}" data-fav-model="${esc(x.id)}" title="${favs.includes(x.id) ? "Remove from favorites" : "Add to favorites"}">★</i>${x.id === state.model ? "<b>✓</b>" : ""}</button>`;
   $("#modelPop").innerHTML = `
-    ${Object.keys(groups).length ? Object.entries(groups).map(([group, items]) => `<div class="pop-group">${esc(group)}</div>
-      ${items.map((x) => `<button type="button" class="pop-model${x.id === state.model ? " on" : ""}" data-pick-model="${esc(x.id)}"><span>${esc(x.label)}</span>${x.id === state.model ? "<b>✓</b>" : ""}</button>`).join("")}`).join("")
-      : `<p class="pop-empty">No model connected yet.</p>`}
+    ${tabs.length > 1 ? `<div class="pop-tabs">${tabs.map(([id, label]) => `<button type="button" class="${id === state.modelTab ? "on" : ""}" data-model-tab="${id}" title="${label}">${id === "fav" ? "★" : AGENT_LOGO[id] ? `<img src="${AGENT_LOGO[id]}" alt="">` : "API"}</button>`).join("")}</div>
+      <div class="pop-tab-name">${esc(MODEL_TABS.find(([id]) => id === state.modelTab)?.[1] || "")}</div>` : ""}
+    <div class="pop-list">${shown.length ? Object.entries(groups).map(([group, items]) => `${group ? `<div class="pop-group">${esc(group)}</div>` : ""}${items.map(row).join("")}`).join("")
+      : `<p class="pop-empty">No model connected yet.</p>`}</div>
     ${m?.efforts?.length ? `<div class="pop-group">Reasoning effort</div><div class="effort-seg">${m.efforts.map((e) => `<button type="button" class="${e === state.effort ? "on" : ""}" data-pick-effort="${e}">${EFFORT_LABEL[e]}</button>`).join("")}</div>` : ""}
     <button type="button" class="pop-add" data-settings>＋ Add a model…</button>`;
 }
@@ -723,6 +835,70 @@ function closeSettings() {
   if (state.setupReturn && state.setup) { state.setupReturn = false; showScene($("#setup")); renderSetup(); }
 }
 
+// Generation services the user signs in to (hosted MCP + OAuth), shown in setup and Settings → Generators.
+const SERVICE_LOGO = { elevenlabs: "/ui/logos/elevenlabs.svg", meshy: "/ui/logos/meshy.png", fal: "/ui/logos/fal.png", higgsfield: "/ui/logos/higgsfield.png" };
+
+async function loadServices() {
+  try { state.services = (await api("/api/services")).services; } catch { state.services = state.services || []; }
+  return state.services;
+}
+
+function serviceCardsHTML() {
+  return `<div class="agent-cards" id="serviceCards">${(state.services || []).map((sv) => {
+    const waiting = state.serviceWaiting === sv.id;
+    const cls = sv.connected ? "ok" : waiting ? "login" : sv.error ? "error" : "idle";
+    const note = sv.connected ? `Connected · ${sv.use === "generators" ? `powers the ${sv.label} models` : "the Glob chat can use it"}` : waiting ? "Sign in in your browser…" : sv.error || sv.makes;
+    return `<div class="agent-card ${cls}" role="button" tabindex="0" ${sv.connected ? "" : `data-service-connect="${sv.id}"`} title="${esc(sv.makes)}">
+      <span class="agent-logo"><img src="${SERVICE_LOGO[sv.id]}" alt=""></span>
+      <span class="agent-text"><strong>${esc(sv.label)}</strong><small>${esc(note)}</small></span>
+      <span class="agent-mark">${sv.connected ? `<button type="button" class="link-btn" data-service-disconnect="${sv.id}" title="Sign out">✓</button>` : waiting ? `<i class="agent-spin"></i>` : "→"}</span></div>`;
+  }).join("")}</div>`;
+}
+
+function renderServiceCards() {
+  const box = $("#serviceCards");
+  if (box) box.outerHTML = serviceCardsHTML();
+}
+
+// Opens the service's sign-in page; the browser comes back to Glob, which finishes the sign-in.
+async function connectService(id) {
+  // Open the tab during the click, so the browser doesn't block it while Glob prepares the sign-in.
+  const tab = window.open("about:blank", "_blank");
+  if (tab) tab.opener = null;
+  state.serviceWaiting = id;
+  renderServiceCards();
+  let url;
+  try { url = (await api(`/api/services/${id}/connect`, { method: "POST" })).authorize_url; } catch (err) {
+    // Say why in the tab too, in case the browser won't let Glob close it.
+    try { tab.document.body.innerHTML = `<p style="font:16px system-ui;padding:40px">Sign-in could not start: ${esc(err.message)}</p>`; } catch { /* already gone */ }
+    tab?.close();
+    state.serviceWaiting = null;
+    renderServiceCards();
+    return toast(err.message, true);
+  }
+  if (tab) tab.location.href = url;
+  else window.open(url, "_blank", "noopener");
+  clearTimeout(state.serviceTimer);
+  let tries = 0;
+  const poll = async () => {
+    await loadServices();
+    const sv = state.services.find((x) => x.id === id);
+    if (sv?.connected) return serviceConnected(id);
+    if (++tries < 90 && state.serviceWaiting === id) state.serviceTimer = setTimeout(poll, 2000);
+    else { state.serviceWaiting = null; renderServiceCards(); }
+  };
+  state.serviceTimer = setTimeout(poll, 2000);
+}
+
+function serviceConnected(id) {
+  if (state.serviceWaiting !== id && !$("#serviceCards")) return;
+  clearTimeout(state.serviceTimer);
+  state.serviceWaiting = null;
+  renderServiceCards();
+  const sv = (state.services || []).find((x) => x.id === id);
+  playFistbump(SERVICE_LOGO[id], sv?.label || "The service", $("#serviceFistbump"));
+}
+
 const KEY_PROVIDERS = [
   { key: "gemini", name: "Google Gemini", use: "2D images (Nano Banana)", url: "https://aistudio.google.com/apikey", hint: "AIza…" },
   { key: "meshy", name: "Meshy", use: "3D models, rigs, animations", url: "https://www.meshy.ai/settings/api", hint: "msy_…" },
@@ -753,7 +929,7 @@ async function renderSettings() {
       <div class="st-label">Coding agents · your own login</div>
       <p class="st-empty">Claude Code, Codex, Gemini CLI and OpenCode can run Glob's chat on your existing subscription, no API key. Installed ones appear in the model menu.</p>
       <div class="preset-grid">
-        ${(info.clis || []).map((c) => `<button class="preset" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i>${c.installed ? "✓" : "⇣"}</i><strong>${esc(c.label)}</strong><small>${c.installed ? "Installed · Log in" : "Install"}</small></button>`).join("")}
+        ${(info.clis || []).map((c) => `<button class="preset" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i><img class="preset-logo" src="${AGENT_LOGO[c.id]}" alt=""></i><strong>${esc(c.label)}</strong><small>${c.installed ? "Installed · Log in" : "Install"}</small></button>`).join("")}
       </div>
       <div class="st-label">Connected · ${ready.length}</div>
       ${ready.length ? Object.entries(groups).map(([group, items]) => {
@@ -789,19 +965,24 @@ async function renderSettings() {
   } else {
     const cfg = await api("/api/config");
     const studio = await studioOptions();
+    state.settings.cfg = cfg;
+    state.settings.defaults = null;
     body = `
-      <h1>Generators</h1><p class="st-lede">Paste a key and Glob can make 2D art, 3D models and sounds. Keys stay on this computer; you pay the providers directly.</p>
+      <h1>Generators</h1><p class="st-lede">Sign in or paste a key and Glob can make 2D art, 3D models and sounds. Everything stays on this computer; you pay the providers directly.</p>
       ${budgetCard(await api("/api/budget").catch(() => null))}
+      <div class="st-label">Default generators</div>
+      <form id="defaultsForm" class="gen-defaults">${(await (state.serviceModelsReady || loadServiceModels()), defaultsHTML(cfg, studio))}</form>
+      <div class="st-label">Sign in · no API key</div>
+      ${(await loadServices(), serviceCardsHTML())}
+      <div class="fistbump" id="serviceFistbump" hidden></div>
+      <p class="st-empty">Glob's chat uses connected services with your account's plan, including features an API key doesn't unlock.</p>
+      <div class="st-label">API keys</div>
       <form id="keysForm" class="key-cards">
         ${KEY_PROVIDERS.map((k) => `<div class="key-card${cfg[`${k.key}_configured`] ? " on" : ""}">
           <div class="key-top"><span class="dot ${cfg[`${k.key}_configured`] ? "live" : ""}"></span><strong>${k.name}</strong><a href="${k.url}" target="_blank" rel="noopener">Get a key ↗</a></div>
           <small>${k.use}</small>
           <input name="${k.key}_api_key" type="password" autocomplete="off" placeholder="${cfg[`${k.key}_configured`] ? `Connected (${esc(cfg[`${k.key}_api_key`])}). Paste to replace` : k.hint}">
         </div>`).join("")}
-        <label class="st-select">3D generator
-          <select name="default_3d_provider">${[["meshy", "Meshy (rigging & animation too)"], ["tripo", "Tripo"]].map(([id, label]) => `<option value="${id}" ${cfg.default_3d_provider === id ? "selected" : ""} ${cfg[`${id}_configured`] ? "" : "disabled"}>${label}${cfg[`${id}_configured`] ? "" : " (no key)"}</option>`).join("")}</select></label>
-        <label class="st-select">Default image model
-          <select name="default_image_model">${studio.models.map((m) => `<option value="${esc(m.id)}" ${m.id === studio.selected ? "selected" : ""} ${m.available ? "" : "disabled"}>${esc(m.label)} · $${m.price.toFixed(3)}${m.available ? "" : " (no key)"}</option>`).join("")}</select></label>
         <div class="row"><button class="primary">Save</button></div>
       </form>`;
   }
@@ -810,6 +991,17 @@ async function renderSettings() {
       <button class="icon-btn" type="button" data-close-settings title="Close" aria-label="Close">✕</button></header>
     <div class="st-main"><nav class="st-nav">${nav}</nav><div class="st-body">${body}</div></div>`;
   $("#keysForm")?.addEventListener("submit", saveKeys);
+  $("#defaultsForm")?.addEventListener("submit", saveDefaults);
+  $("#defaultsForm")?.addEventListener("change", (event) => {
+    const kind = event.target.dataset.defSource;
+    if (!kind) return;
+    // A new source: show its models, starting from its recommended one.
+    const source = event.target.value;
+    const pick = kind === "3d" ? (source === "keys" ? "" : (state.serviceModels["3d"].find((m) => m.id === SERVICE_DEFAULT_MODEL[`${source}/3d`]) || state.serviceModels["3d"].find((m) => m.service === source) || {}).id || "")
+      : source === "keys" ? (state.studio.models.find((m) => m.available) || {}).id || "" : (state.serviceModels.image.find((m) => m.id === SERVICE_DEFAULT_MODEL[`${source}/image`]) || state.serviceModels.image.find((m) => m.service === source) || {}).id || "";
+    state.settings.defaults = { ...readDefaults(event.target.form), ...(kind === "3d" ? { model3d: pick } : { image: pick }) };
+    event.target.form.innerHTML = defaultsHTML(state.settings.cfg, state.studio, state.settings.defaults);
+  });
   $("#agentForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.target;
@@ -996,6 +1188,51 @@ async function saveEndpoint() {
   } catch (err) { toast(err.message, true); }
 }
 
+// The default 2D and 3D generators: where each runs (your keys or a signed-in service) and with which model.
+function defaultsHTML(cfg, studio, d = null) {
+  d = d || { image: studio.selected, aspect: cfg.image_aspect_ratio, transparent: cfg.image_remove_bg, model3d: cfg.default_3d_service_model, provider3d: cfg.default_3d_provider };
+  const sm = state.serviceModels || { image: [], "3d": [] };
+  const sources = (kind) => [...new Map(sm[kind].map((m) => [m.service, m.label.split(" · ")[0]])).entries()];
+  const src2d = modelSource(d.image), src3d = modelSource(d.model3d);
+  const sourceSelect = (kind, current, keysLabel) => `<select data-def-source="${kind}"><option value="keys" ${current === "keys" ? "selected" : ""}>${keysLabel}</option>
+    ${sources(kind).map(([id, label]) => `<option value="${esc(id)}" ${current === id ? "selected" : ""}>${esc(label)} · signed in (MCP)</option>`).join("")}</select>`;
+  const keys3d = [["meshy", "Meshy (rigging & animation too)"], ["tripo", "Tripo"]].map(([id, label]) => `<option value="${id}" ${d.provider3d === id ? "selected" : ""} ${cfg[`${id}_configured`] || cfg[`${id}_signed_in`] ? "" : "disabled"}>${label}${cfg[`${id}_configured`] ? "" : cfg[`${id}_signed_in`] ? " · signed in" : " · no key"}</option>`).join("");
+  return `
+    <div class="gen-row"><div class="gen-kind"><strong>2D images</strong><small>Generate 2D, variants, edits, views</small></div>
+      <label>Source ${sourceSelect("image", src2d, "Glob · your API keys")}</label>
+      <label>Model <select name="default_image_model">${src2d === "keys" ? imageModelOptions(studio.models, d.image) : serviceModelOptions("image", src2d, d.image)}</select></label>
+      <label>Aspect <select name="image_aspect_ratio">${aspectOptions(d.aspect)}</select></label>
+      <label class="gen-check"><input type="checkbox" name="image_remove_bg" ${d.transparent ? "checked" : ""}> Transparent background</label></div>
+    <div class="gen-row"><div class="gen-kind"><strong>3D models</strong><small>Make 3D from the winner image</small></div>
+      <label>Source ${sourceSelect("3d", src3d, "Glob · Meshy / Tripo")}</label>
+      <label>Model ${src3d === "keys" ? `<select name="default_3d_provider">${keys3d}</select>` : `<select name="default_3d_service_model">${serviceModelOptions("3d", src3d, d.model3d)}</select>`}</label></div>
+    <p class="st-empty">Every Generate window starts from these and can switch for one run. ${sm.loading ? "Checking your signed-in services…" : ""}</p>
+    <div class="row"><button class="primary">Save defaults</button></div>`;
+}
+
+function readDefaults(form) {
+  return {
+    image: form.default_image_model?.value || "",
+    aspect: form.image_aspect_ratio?.value || "1:1",
+    transparent: !!form.image_remove_bg?.checked,
+    model3d: form.default_3d_service_model?.value || "",
+    provider3d: form.default_3d_provider?.value || state.settings.cfg.default_3d_provider,
+  };
+}
+
+async function saveDefaults(event) {
+  event.preventDefault();
+  const d = readDefaults(event.target);
+  const updates = { default_image_model: d.image, user_locked_image_model: true, image_aspect_ratio: d.aspect, image_remove_bg: d.transparent,
+    default_3d_service_model: d.model3d, default_3d_provider: d.provider3d };
+  try {
+    await api("/api/config", { method: "PUT", body: updates });
+    state.studio = null;
+    toast("Defaults saved");
+    await renderSettings();
+  } catch (err) { toast(err.message, true); }
+}
+
 async function saveKeys(event) {
   event.preventDefault();
   const updates = {};
@@ -1019,6 +1256,16 @@ async function testModel(id) {
     if (out) { out.className = "test-result bad"; out.textContent = "Failed"; out.title = err.message; }
     toast(err.message, true);
   }
+}
+
+// Image models grouped by provider, each group saying how Glob reaches it: a pasted key, a sign-in, or nothing yet.
+const MODEL_VIA = { "API key": "uses your API key", "signed in": "uses your Meshy sign-in" };
+function imageModelOptions(models, selected) {
+  return Object.entries(Object.groupBy(models, (m) => m.label.split(" · ")[0])).map(([provider, items]) => {
+    const via = items.find((m) => m.via)?.via;
+    const how = via ? MODEL_VIA[via] || via : "not set up yet: Settings → Generators";
+    return `<optgroup label="${esc(provider)} · ${esc(how)}">${items.map((m) => `<option value="${esc(m.id)}" ${m.id === selected ? "selected" : ""} ${m.available ? "" : "disabled"}>${esc(m.label.split(" · ").slice(1).join(" · ") || m.label)} · $${m.price.toFixed(3)}</option>`).join("")}</optgroup>`;
+  }).join("");
 }
 
 function openDialog(html) {
@@ -1047,12 +1294,13 @@ function projectTitle() {
 
 function renderSections() {
   const ov = state.overview;
-  const active = ["home", "vault", "orders"].includes(state.view.type) ? "" : (state.view.path || "").split("/")[0];
+  const active = PLAIN_VIEWS.includes(state.view.type) ? "" : (state.view.path || "").split("/")[0];
   const initials = projectTitle().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   $("#sections").innerHTML = `
     <div class="proj-card"><span class="proj-badge">${esc(initials || "F")}</span><div><strong>${esc(projectTitle())}</strong><small>${esc(ov.excerpt || "Your game project")}</small></div></div>
     <button class="sec${state.view.type === "home" ? " active" : ""}" data-home><small>00</small>Overview</button>
     <button class="sec vault-sec${state.view.type === "orders" ? " active" : ""}" data-orders>${icon("inbox")}<span class="sec-name">Agent Orders</span>${orderBadge(ov.orders)}</button>
+    <button class="sec vault-sec${state.view.type === "board" ? " active" : ""}" data-board>${icon("grid")}<span class="sec-name">Board</span></button>
     <button class="sec vault-sec${state.view.type === "vault" ? " active" : ""}" data-vault>${icon("box")}<span class="sec-name">Final Vault</span></button>
     ${ov.sections.length ? `<div class="sec-label">Sections</div>` : ""}
     ${ov.sections.map((s) => `<button class="sec${s.path === active ? " active" : ""}" data-folder="${esc(s.path)}"><small>${s.number}</small><span class="sec-name">${esc(s.title)}</span>${s.children?.length ? `<span class="caret${s.path === active ? " open" : ""}"></span>` : ""}</button>${s.path === active ? subTree(s.children) : ""}`).join("")}
@@ -1076,6 +1324,7 @@ function renderCrumbs() {
   const path = state.view.path || "";
   if (state.view.type === "home") parts.push(`<strong>${esc(projectTitle())}</strong>`);
   else if (state.view.type === "vault") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Final Vault</strong>`);
+  else if (state.view.type === "board") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Board</strong>`);
   else if (state.view.type === "orders") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Agent Orders</strong>`);
   else {
     parts.push(`<button data-home>${esc(projectTitle())}</button>`);
@@ -1112,8 +1361,8 @@ function folderCards(folders, numbered) {
 
 function assetTiles(assets, folderPath) {
   return `<div class="asset-grid">${assets.map((f) => `
-    <button class="asset-tile" data-open="${esc(f.path)}">
-      <span class="asset-img">${f.thumb ? `<img src="${esc(fileUrl(f.thumb))}" alt="" loading="lazy">` : `<span class="asset-empty">No image yet</span>`}<span class="kind-tag">${esc(f.asset_kind)}</span></span>
+    <button class="asset-tile" data-open="${esc(f.path)}"${f.audio ? ` data-hover-audio="${esc(f.audio)}"` : ""}${f.model ? ` data-hover-model="${esc(f.model)}"` : ""}>
+      <span class="asset-img">${f.thumb ? `<img src="${esc(fileUrl(f.thumb))}" alt="" loading="lazy">` : f.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : `<span class="asset-empty">No image yet</span>`}<span class="kind-tag">${esc(f.asset_kind)}</span>${f.model ? `<span class="tile-3d">${icon("cube")}3D</span>` : ""}</span>
       <strong>${esc(f.title)}</strong>
     </button>`).join("")}
     ${folderPath !== undefined ? `<button class="asset-tile add" data-new-asset="${esc(folderPath)}"><span class="asset-img"><span class="plus">+</span></span><strong>New asset</strong></button>` : ""}</div>`;
@@ -1270,6 +1519,8 @@ async function readPage(path) {
 async function renderView() {
   await renderViewBody();
   mountHero();
+  mountWave();
+  if (state.view.type === "board") mountBoard();
 }
 
 // The live 3D hero on an asset page. Its canvas survives re-renders of the same asset, so the
@@ -1314,16 +1565,28 @@ async function renderViewBody() {
       content.innerHTML = `<div class="empty"><h1>This project is empty</h1>
         <p>Tell the agent on the left about your game, for example:</p>
         <p><em>“Create a project structure for a cozy farming game set on a floating island.”</em></p>
-        <p>Sections, documents and pages will appear here as the agent creates them.</p></div>`;
+        <p>Sections, documents and pages will appear here as the agent creates them.</p>
+        <button class="keyart-cta sample-cta" data-install-sample>${icon("eye")}<span><strong>Or explore a finished project first</strong><small>Pocket Kaiju: characters, 3D models, sounds and an agent order. Opens as its own project; no credits used.</small></span></button></div>`;
       return;
     }
     const body = await readPage(ov.page);
+    const jobsHere = Object.values(state.jobs).some((j) => j.asset?.endsWith?.("key-art.md") && ["running", "queued"].includes(j.status));
     content.innerHTML = `
-      <div class="kicker">Project / ${esc(projectTitle())}</div>
-      <h1 class="title">${esc(projectTitle())}</h1>
-      ${ov.excerpt ? `<p class="lede">${esc(ov.excerpt)}</p>` : ""}
-      ${ov.cover ? `<img class="hero" src="${esc(fileUrl(ov.cover))}" alt="">` : ""}
-      ${ov.page ? `<div class="actions-row"><button class="ghost" data-open="${esc(ov.page)}">Open ${esc(ov.page)}</button></div>` : ""}
+      <header class="proj-hero${ov.cover ? " has-cover" : ""}">
+        ${ov.cover ? `<div class="proj-hero-blur" style="background-image:url('${esc(fileUrl(ov.cover))}')"></div><img class="proj-hero-img" src="${esc(fileUrl(ov.cover))}" alt="">` : ""}
+        <div class="proj-hero-text">
+          <div class="kicker">Project / ${esc(projectTitle())}</div>
+          <h1 class="title">${esc(projectTitle())}</h1>
+          ${ov.excerpt ? `<p class="lede">${esc(ov.excerpt)}</p>` : ""}
+        </div>
+        ${ov.cover ? "" : `<button class="keyart-cta" data-key-art="${esc(state.project)}"${jobsHere ? " disabled" : ""}>${icon("sparkle")}<span><strong>${jobsHere ? "Painting key art…" : "Make key art"}</strong><small>${jobsHere ? "It becomes the cover when it lands" : "A cover image from your pitch, for this page and the projects overview"}</small></span></button>`}
+      </header>
+      <div class="actions-row">
+        <button class="ghost" data-board>${icon("grid")} Board</button>
+        <button class="ghost" data-batch="">${icon("sparkle")} Generate all missing</button>
+        <button class="ghost" data-press-kit>${icon("download")} Press kit</button>
+        ${ov.page ? `<button class="ghost" data-open="${esc(ov.page)}">Open ${esc(ov.page)}</button>` : ""}
+      </div>
       ${body ? `<div class="md">${renderMarkdown(stripLead(body), "")}</div>` : ""}
       ${ov.sections.length ? `<h2 class="block-title">Sections</h2>${folderCards(ov.sections, true)}` : ""}
       ${pillarStrip(ov.pillars || [], "", "Bible pillars", ov.text_pillars || [])}
@@ -1333,6 +1596,7 @@ async function renderViewBody() {
 
   if (view.type === "vault") return renderVault();
   if (view.type === "orders") return renderOrders();
+  if (view.type === "board") return renderBoard();
 
   if (view.type === "folder") {
     let folder;
@@ -1343,7 +1607,7 @@ async function renderViewBody() {
     state.view.page = folder.page || "";
     if (view.editing && folder.page) {
       const file = await api(`/api/overview/file?path=${encodeURIComponent(folder.page)}`);
-      content.innerHTML = `<div class="doc-bar"><span class="path">${esc(folder.page)}</span><div><button class="ghost" data-cancel-edit>Cancel</button> <button class="primary" data-save>Save</button></div></div>
+      content.innerHTML = `<div class="doc-bar"><span class="path"><bdi>${esc(folder.page)}</bdi></span><div><button class="ghost" data-cancel-edit>Cancel</button> <button class="primary" data-save>Save</button></div></div>
         <textarea class="editor" id="editor" spellcheck="false">${esc(file.content)}</textarea>`;
       return;
     }
@@ -1352,7 +1616,7 @@ async function renderViewBody() {
     const assets = folder.files.filter((f) => f.kind === "asset");
     const others = folder.files.filter((f) => f.kind !== "asset");
     content.innerHTML = `
-      <div class="doc-bar"><span class="path">${esc(folder.page || folder.path)}</span><div>${folder.page ? `<button class="ghost" data-edit>Edit page</button> ` : ""}<button class="ghost" data-new-folder="${esc(folder.path)}">+ New folder</button> <button class="ghost" data-new-asset="${esc(folder.path)}">+ New asset</button> <button class="ghost" data-export="${esc(folder.path)}">Export</button></div></div>
+      <div class="doc-bar"><span class="path"><bdi>${esc(folder.page || folder.path)}</bdi></span><div>${folder.page ? `<button class="ghost" data-edit>Edit page</button> ` : ""}<button class="ghost" data-new-folder="${esc(folder.path)}">+ New folder</button> <button class="ghost" data-new-asset="${esc(folder.path)}">+ New asset</button> ${assets.length || folder.folders.length ? `<button class="ghost" data-batch="${esc(folder.path)}" title="Generate candidates for every asset in here that has none yet">${icon("sparkle")} Generate missing</button> ` : ""}<button class="ghost" data-export="${esc(folder.path)}">Export</button></div></div>
       <div class="kicker">Section / ${esc(humanize(view.path.split("/")[0]))}</div>
       <h1 class="title">${esc(folder.title)}</h1>
       ${folder.excerpt ? `<p class="lede">${esc(folder.excerpt)}</p>` : ""}
@@ -1369,7 +1633,8 @@ async function renderViewBody() {
   if (view.type === "doc") {
     let file;
     try { file = await api(`/api/overview/file?path=${encodeURIComponent(view.path)}`); } catch (err) {
-      toast(err.message, true);
+      // A view restored from last time can point at a file that's gone since: just start at the overview.
+      if (!view.restored) toast(err.message, true);
       state.view = { type: "home" };
       return renderView();
     }
@@ -1379,7 +1644,7 @@ async function renderViewBody() {
       if (asset?.is_asset) { content.innerHTML = renderAssetPage(asset); content.dataset.dropAsset = ""; queueThumbs(asset); showOrderBanner(asset); return; }
     }
     content.innerHTML = `
-      <div class="doc-bar"><span class="path">${esc(file.path)}</span>
+      <div class="doc-bar"><span class="path"><bdi>${esc(file.path)}</bdi></span>
         <div>${view.editing ? `<button class="ghost" data-cancel-edit>Cancel</button> <button class="primary" data-save>Save</button>` : `${isMd && !/(^|\/)(README|index|GAME)\.md$/i.test(view.path) && !/(^|\/)pillars\//.test(view.path) ? `<button class="ghost" data-to-folder title="Make this document a folder (it becomes the folder's page) so you can put assets and sub-folders in it">Turn into folder</button> <button class="ghost" data-make-asset>Turn into asset</button> ` : ""}${/(^|\/)README\.md$/i.test(view.path) && dirOf(view.path) ? `<button class="ghost" data-new-folder="${esc(dirOf(view.path))}">+ New folder</button> <button class="ghost" data-new-asset="${esc(dirOf(view.path))}">+ New asset</button> ` : ""}<button class="ghost" data-edit>Edit</button>`}</div></div>
       ${view.editing ? `<textarea class="editor" id="editor" spellcheck="false">${esc(file.content)}</textarea>`
         : isMd ? withToc(renderMarkdown(file.content, dirOf(file.path))) : `<div class="md"><pre><code>${esc(file.content)}</code></pre></div>`}`;
@@ -1465,7 +1730,7 @@ async function renderOrders() {
       : `<div class="ord-conn off"><span class="dot"></span>No coding agent connected yet: connect your game folder so your agent can order assets and receive them. <button class="primary" data-settings-connect>Connect</button></div>`}
     <div class="vault-bar">
       <button class="primary" data-order-new>＋ New order</button>
-      ${c.draft ? `<button class="ghost" data-order-sort>${icon("sparkle")} Sort ${plural(c.draft, "draft")} with Glob</button>` : ""}
+      ${c.draft ? `<button class="ghost" data-order-sort${state.sending ? " disabled" : ""}>${state.sending ? `<span class="spinner"></span> Glob is sorting…` : `${icon("sparkle")} Sort ${plural(c.draft, "draft")} with Glob`}</button>` : ""}
       <span class="grow"></span>
       ${c.cancelled ? `<label class="inline"><input type="checkbox" data-order-cancelled ${state.showCancelled ? "checked" : ""}> Show ${c.cancelled} cancelled</label>` : ""}
     </div>
@@ -1564,7 +1829,7 @@ document.addEventListener("click", async (event) => {
   if (d.orderNew !== undefined) return orderDialog(null);
   if (d.orderEdit) return orderDialog(d.orderEdit);
   if (d.orderFile) return fileOrderDialog(d.orderFile);
-  if (d.orderSort !== undefined) return sortDraftsWithGlob();
+  if (d.orderSort !== undefined) { if (state.sending) return; t.disabled = true; return sortDraftsWithGlob(); }
   if (d.settingsConnect !== undefined) return settingsDialog("connect");
   try {
     if (d.orderDeliver) {
@@ -1749,7 +2014,7 @@ function outputGrid(all, winner, kind = "candidates") {
     if (o.type === "model") return modelCard(o, kind);
     if (o.type === "audio") return audioCard(o, winner);
     const isWinner = o.path === winner;
-    const img = `<a class="out-img" href="${esc(fileUrl(o.path))}" target="_blank" rel="noopener"><img src="${esc(fileUrl(o.path))}" alt="" loading="lazy">${isWinner ? `<span class="out-badge win">${icon("star")}Winner</span>` : ""}</a>`;
+    const img = `<a class="out-img" href="${esc(fileUrl(o.path))}" target="_blank" rel="noopener" data-lightbox="${esc(o.path)}"><img src="${esc(fileUrl(o.path))}" alt="" loading="lazy">${isWinner ? `<span class="out-badge win">${icon("star")}Winner</span>` : ""}</a>`;
     if (!WORK_KINDS.has(kind)) {
       return `<div class="out${kind === "icons" || kind === "sprites" ? " checker" : ""}">${removeBtn(o.path)}${img}<div class="out-bar">
         ${kind === "parts" || kind === "views" ? `<button class="act" data-icons="${esc(o.path)}">${icon("grid")}Icons</button><button class="act" data-winner="${esc(o.path)}">${icon("star")}Winner</button>` : ""}
@@ -1807,7 +2072,7 @@ function renderAssetPage(a) {
         ${heroModel.thumb ? `<img class="hero-poster" src="${esc(fileUrl(heroModel.thumb))}" alt="">` : ""}<div class="hero-stage"></div>
         <span class="out-badge mesh hero-badge">${icon("cube")}3D · drag to turn</span>
         <button type="button" class="mini hero-open" data-view-model="${esc(heroModel.path)}">${icon("eye")}Open viewer</button>
-        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy"><span class="drop-icon">⇣</span>No winner yet.<br>Generate 2D candidates, <b>drop or paste an image here</b><br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
+        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy"><span class="drop-icon">⇣</span>No winner yet.<br>${(o.candidates || []).length ? `<button type="button" class="link-btn" data-scroll-candidates>Pick one of the ${(o.candidates || []).length} candidates below</button>, <b>drop or paste an image here</b>` : "Generate 2D candidates, <b>drop or paste an image here</b>"}<br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
       <div class="asset-side">
         <label class="field-label" for="assetPrompt">Prompt: what this ${esc(a.kind)} looks like</label>
         <textarea id="assetPrompt" class="prompt-box" rows="6" data-asset="${esc(a.path)}">${esc(a.prompt)}</textarea>
@@ -1819,18 +2084,19 @@ function renderAssetPage(a) {
         </div>
         ${gameTools(a)}
         <div class="applied">
-          <div class="field-label">Pillars sent with every generation</div>
+          <div class="field-label pillar-head">Pillars sent with every generation
+            <select class="pillar-strength" data-pillar-strength title="How strongly the pillars steer this asset">${[["off", "Off"], ["light", "Light · palette only"], ["normal", "Normal"], ["strong", "Strong · match closely"]].map(([v, l]) => `<option value="${v}" ${(a.meta.pillars || "normal") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
           ${a.pillars.length ? Object.entries(groups).map(([src, items]) => `<div class="applied-group"><span>${esc(src)}</span><div class="pillar-row small">${items.map((p) => `<img src="${esc(fileUrl(p.path))}" title="${esc(p.path)}" alt="">`).join("")}</div></div>`).join("")
-            : `<p class="pillar-empty">No pillars apply yet. Add reference images on the project front page (bible) or on this asset's folder.</p>`}
+            : `<p class="pillar-empty">${(a.text_pillars || []).length ? "No reference images yet: add some" : "No pillars apply yet. Add reference images"} on the project front page (bible) or on this asset's folder.</p>`}
           ${(a.text_pillars || []).length ? `<details class="bible-mini"><summary><span>Style bible</span>${a.text_pillars.map((t) => esc(t.source)).join(" · ")}<em>View</em></summary>
             ${a.text_pillars.map((t) => `<div class="md">${renderMarkdown(t.text)}</div>`).join("")}</details>` : ""}
           ${a.style_rules.map((r) => `<div class="applied-group"><span>Style · ${esc(r.source)}</span><p>${esc(r.text)}</p></div>`).join("")}
         </div>
       </div>
     </div>
-    ${OUTPUT_SECTIONS.map(([kind, label]) => (o[kind] || []).length ? `<h2 class="block-title">${label}</h2>${outputGrid(o[kind], a.winner, kind)}` : "").join("")}
+    ${OUTPUT_SECTIONS.map(([kind, label]) => (o[kind] || []).length ? `<h2 class="block-title" id="out-${kind}">${label}</h2>${outputGrid(o[kind], a.winner, kind)}` : "").join("")}
     <h2 class="block-title">Notes</h2>
-    <div class="doc-bar"><span class="path">${esc(a.path)}</span><button class="ghost" data-edit>Edit document</button></div>
+    <div class="doc-bar"><span class="path"><bdi>${esc(a.path)}</bdi></span><button class="ghost" data-edit>Edit document</button></div>
     <div class="md">${renderMarkdown(a.body.replace(/^#\s+.+$/m, ""), dirOf(a.path))}</div>`;
 }
 
@@ -1845,7 +2111,10 @@ function renderAudioAsset(a, title, jobs) {
     ${jobs.length ? `<div class="job-banner"><span class="spinner"></span>${esc(copy.run)} running… takes appear here automatically.</div>` : ""}
     <div class="asset-top">
       <div class="winner-box audio-hero drop-zone" data-drop-winner title="Drop an audio file here">${a.winner && AUDIO_RE.test(a.winner)
-        ? `<div class="audio-big"><span class="wave big" aria-hidden="true">${"<i></i>".repeat(28)}</span><audio controls src="${esc(fileUrl(a.winner))}"></audio><small>${esc(a.winner.split("/").pop())}</small></div><span class="drop-hint">Drop an audio file to add a take</span>`
+        ? `<div class="audio-big" data-wave-src="${esc(a.winner)}"><canvas class="wave-canvas" height="120"></canvas><audio controls src="${esc(fileUrl(a.winner))}"></audio>
+            <div class="wave-tools"><small>${esc(a.winner.split("/").pop())}</small><span class="grow"></span><span class="wave-sel" hidden></span>
+              <button type="button" class="mini" data-wave-loop title="Play the last 2 seconds straight into the first 2, to hear the loop seam">${icon("turn")}Loop check</button>
+              <button type="button" class="mini" data-wave-trim disabled title="Drag across the waveform to choose a part, then save it as a new take">${icon("scissors")}Save selection</button></div></div><span class="drop-hint">Drop an audio file to add a take</span>`
         : `<div class="no-thumb big"><p class="drop-copy"><span class="drop-icon">♪</span>${copy.empty}<br>Generate takes or <b>drop an MP3 / WAV here</b>.</p></div>`}</div>
       <div class="asset-side">
         <label class="field-label" for="assetPrompt">${copy.prompt}</label>
@@ -1856,7 +2125,7 @@ function renderAudioAsset(a, title, jobs) {
     </div>
     ${takes.length ? `<h2 class="block-title">Takes</h2>${outputGrid(takes, a.winner, "audio")}` : ""}
     <h2 class="block-title">Notes</h2>
-    <div class="doc-bar"><span class="path">${esc(a.path)}</span><button class="ghost" data-edit>Edit document</button></div>
+    <div class="doc-bar"><span class="path"><bdi>${esc(a.path)}</bdi></span><button class="ghost" data-edit>Edit document</button></div>
     <div class="md">${renderMarkdown(a.body.replace(/^#\s+.+$/m, ""), dirOf(a.path))}</div>`;
 }
 
@@ -1889,18 +2158,19 @@ async function renderAudioSheet() {
       <header class="sheet-head"><span class="sheet-icon">${icon("sparkle")}</span>
         <div><h2>${esc(copy.run)} <span>· ${esc(humanize(p.asset.split("/").pop()))}</span></h2><p>${p.kind === "voice" ? "The line is spoken by the voice you pick." : "Takes land under the asset; pick the winner by ear."}</p></div></header>
       <div class="sheet-model">
-        <label class="model-pick">Generator<select id="auModel">${p.models.map((m) => `<option value="${esc(m.id)}" ${m.id === p.model ? "selected" : ""} ${m.available ? "" : "disabled"}>${esc(m.label)}${m.available ? "" : " · no key"}</option>`).join("")}</select></label>
+        <label class="model-pick">Generator<select id="auModel">${p.models.map((m) => `<option value="${esc(m.id)}" ${m.id === p.model ? "selected" : ""} ${m.available ? "" : "disabled"}>${esc(m.label)}${m.available ? "" : m.service ? " · not signed in" : " · no key"}</option>`).join("")}</select></label>
       </div>
       <div class="sheet-body"><section>
         <label class="field-label" for="pvPrompt">${p.kind === "voice" ? "Line to speak" : "Prompt"} <em>exactly what is sent</em></label>
         <textarea id="pvPrompt" class="final-prompt" rows="4">${esc(p.prompt)}</textarea>
       </section><section class="audio-opts">
-        ${p.kind === "voice" ? `<label>Voice<select id="auVoice">${voices.map((v) => `<option value="${esc(v.id)}" ${v.id === s.voice_id ? "selected" : ""}>${esc(v.name)}${v.category ? ` · ${esc(v.category)}` : ""}</option>`).join("") || `<option value="">${model?.available ? "Loading voices failed" : "Add an ElevenLabs key first"}</option>`}</select></label>` : ""}
+        ${p.kind === "voice" ? `<label>Voice<select id="auVoice">${voices.map((v) => `<option value="${esc(v.id)}" ${v.id === s.voice_id ? "selected" : ""}>${esc(v.name)}${v.category ? ` · ${esc(v.category)}` : ""}</option>`).join("") || `<option value="">${model?.available ? "Loading voices failed" : "Sign in to ElevenLabs or add a key first"}</option>`}</select></label>` : ""}
         ${p.kind !== "voice" ? `<label>Length<select id="auDuration">${(p.kind === "music" ? [15, 30, 60, 90, 120, 180] : [0, 1, 2, 3, 5, 8, 12, 20, 30]).map((d) => `<option value="${d}" ${Number(s.duration) === d ? "selected" : ""}>${d ? `${d} s` : "Automatic"}</option>`).join("")}</select></label>
           <label class="mesh-toggle"><span class="switch"><input type="checkbox" id="auLoop" ${s.loop ? "checked" : ""}><span></span></span><span>Seamless loop<small>For ambience, engines, music beds</small></span></label>` : ""}
       </section></div>
       <footer class="sheet-foot">
-        <label class="inline">Takes <select id="pvCount">${[1, 2, 3, 4].map((n) => `<option ${n === p.count ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label class="inline">${p.kind === "sfx" ? "Variations" : "Takes"} <select id="pvCount">${(p.kind === "sfx" ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4]).map((n) => `<option ${n === p.count ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        ${p.kind === "sfx" ? `<span class="cost">A pool of variations keeps repeated sounds (footsteps, hits) from sounding robotic</span>` : ""}
         <span class="grow"></span>
         <button type="button" class="ghost" data-close>Cancel</button><button type="button" class="run-btn" data-run>${icon("sparkle")}${esc(copy.run)}</button>
       </footer>
@@ -1925,14 +2195,14 @@ async function saveAssetPrompt() {
 async function openPreview(action, source = "", instruction = "") {
   try {
     await saveAssetPrompt();
-    await studioOptions();
+    await Promise.all([studioOptions(), loadCredits()]);
     const req = await api("/api/studio/preview", { method: "POST", body: { path: state.view.path, action, source, instruction } });
     // A variant or edit starts from an existing image, so the style bible stays off unless switched on.
     if (action === "rig") { state.preview = req; return renderRigSheet(); }
     if (action === "animate") { state.preview = { ...req, picked: [], search: "" }; return renderAnimateSheet(); }
     if (req.audio) { state.preview = req; return renderAudioSheet(); }
     const bible = action === "variant" || action === "edit" || action === "views" ? false : req.use_bible !== false;
-    state.preview = applyBible({ ...req, use_bible: bible, instruction, references: req.references.map((r) => ({ ...r, on: true })) });
+    state.preview = applyBible({ ...req, model3d: String(req.model || "").startsWith("svc:") ? req.model : "", use_bible: bible, instruction, references: req.references.map((r) => ({ ...r, on: true })) });
     renderPreview();
   } catch (err) { toast(err.message, true); }
 }
@@ -1957,7 +2227,58 @@ const PART_ROLE = { bible: "Style bible", subject: "Subject", style: "Style rule
 
 async function studioOptions() {
   if (!state.studio) state.studio = await api("/api/studio/options").catch(() => ({ models: [], kinds: [], selected: "" }));
+  if (!state.serviceModels) loadServiceModels();
   return state.studio;
+}
+
+// Models of the services the user signed in to. Asking each service takes a moment, so the sheet redraws when they arrive.
+function loadServiceModels() {
+  state.serviceModels = { image: [], "3d": [], loading: true };
+  state.serviceModelsReady = api("/api/studio/service-models").catch(() => ({ image: [], "3d": [] })).then((models) => {
+    state.serviceModels = models;
+    if (state.preview && $("#dialog")?.open && $("#pvSource")) { syncPreviewFields(); renderPreview(); }
+    return models;
+  });
+  return state.serviceModelsReady;
+}
+
+const ASPECTS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"];
+const aspectOptions = (value) => [...new Set([value || "1:1", ...ASPECTS])].map((a) => `<option ${a === (value || "1:1") ? "selected" : ""}>${esc(a)}</option>`).join("");
+
+// Where a studio model runs: "keys" (Glob's providers, with your API keys) or a signed-in service's id.
+const modelSource = (model) => (String(model || "").startsWith("svc:") ? model.slice(4).split("/")[0] : "keys");
+
+function sourcePicker(p, kind) {
+  const list = state.serviceModels?.[kind] || [];
+  const services = [...new Map(list.map((m) => [m.service, m.label.split(" · ")[0]])).entries()];
+  const current = modelSource(kind === "3d" ? p.model3d : p.model);
+  // The default can be a signed-in service whose models haven't arrived yet: show it chosen, not "keys".
+  if (current !== "keys" && !services.some(([id]) => id === current)) services.push([current, humanize(current)]);
+  const keysLabel = kind === "3d" ? "Glob · Meshy / Tripo settings" : "Glob · your API keys";
+  return `<label class="model-pick">Source <select id="pvSource">
+    <option value="keys" ${current === "keys" ? "selected" : ""}>${keysLabel}</option>
+    ${services.map(([id, label]) => `<option value="${esc(id)}" ${current === id ? "selected" : ""}>${esc(label)} · signed in (MCP)</option>`).join("")}
+    ${state.serviceModels?.loading ? `<option disabled>Checking signed-in services…</option>` : ""}</select></label>`;
+}
+
+function serviceModelOptions(kind, service, selected) {
+  const list = (state.serviceModels?.[kind] || []).filter((m) => m.service === service);
+  const pending = selected && selected.startsWith(`svc:${service}/`) && !list.some((m) => m.id === selected)
+    ? `<option value="${esc(selected)}" selected>${esc(humanize(selected.split("/").pop()))}${state.serviceModels?.loading ? " · loading…" : ""}</option>` : "";
+  return pending + list.map((m) => `<option value="${esc(m.id)}" ${m.id === selected ? "selected" : ""}>${esc(m.label.split(" · ").slice(1).join(" · "))}</option>`).join("");
+}
+
+// Each service's own recommended model, picked when the user switches to it.
+const SERVICE_DEFAULT_MODEL = { "elevenlabs/image": "svc:elevenlabs/gpt-image-2.5-sunburst", "higgsfield/image": "svc:higgsfield/gpt_image_2_5", "higgsfield/3d": "svc:higgsfield/meshy_v7_image_to_3d" };
+
+function onSourceChange(kind) {
+  const p = state.preview;
+  const source = $("#pvSource").value;
+  const pick = source === "keys"
+    ? (kind === "3d" ? "" : (state.studio.models.find((m) => m.id === state.studio.selected && m.available) || state.studio.models.find((m) => m.available) || {}).id || "")
+    : (state.serviceModels[kind].find((m) => m.id === SERVICE_DEFAULT_MODEL[`${source}/${kind}`]) || state.serviceModels[kind].find((m) => m.service === source) || {}).id || "";
+  if (kind === "3d") p.model3d = pick; else p.model = pick;
+  renderPreview();
 }
 
 function renderPreview() {
@@ -1968,7 +2289,12 @@ function renderPreview() {
   const models = state.studio?.models || [];
   const model = models.find((m) => m.id === p.model);
   const on = p.references.filter((r) => r.on).length;
-  const cost = is3d ? ` · ≈ $${(p.settings.should_texture ? 0.3 : 0.2).toFixed(2)} (${p.settings.should_texture ? 30 : 20} Meshy credits)` : model ? ` · ≈ $${(model.price * (p.count || 1)).toFixed(2)}` : "";
+  const source = modelSource(is3d ? p.model3d : p.model);
+  const serviceLabel = (state.serviceModels?.[is3d ? "3d" : "image"] || []).find((m) => m.service === source)?.label.split(" · ")[0] || source;
+  const cost = source !== "keys" ? ` · paid in your ${serviceLabel} credits`
+    : is3d ? ` · ≈ $${(p.settings.should_texture ? 0.3 : 0.2).toFixed(2)} (${p.settings.should_texture ? 30 : 20} Meshy credits)` : model ? ` · ≈ $${(model.price * (p.count || 1)).toFixed(2)}` : "";
+  const alert = creditAlert(source !== "keys" ? source : is3d ? "meshy" : (p.model || "").split(":")[0]);
+  const balance = is3d && source === "keys" && state.credits?.meshy_balance != null ? ` · ${state.credits.meshy_balance} Meshy credits left` : "";
   const refs = p.references.map((r, i) => `
     <label class="ref role-${esc(r.role)}${r.on ? "" : " off"}"><input type="checkbox" data-ref="${i}" ${r.on ? "checked" : ""}>
       <img src="${esc(fileUrl(r.path))}" alt=""><span title="${esc(refLabel(r))}">${esc(refLabel(r).split(" · ")[0])}</span></label>`).join("");
@@ -1979,16 +2305,21 @@ function renderPreview() {
         <span class="sheet-icon">${icon(theme.icon)}</span>
         <div><h2>${esc(ACTION_LABEL[p.action])} <span>· ${esc(assetName)}</span></h2><p>${esc(theme.blurb)}</p></div>
       </header>
-      ${is3d ? "" : `<div class="sheet-model">
-        <label class="model-pick">Image model
-          <select id="pvModel">${Object.entries(Object.groupBy(models, (m) => m.label.split(" · ")[0])).map(([provider, items]) => `<optgroup label="${esc(provider)}${items.some((m) => m.available) ? "" : " · no key"}">${items.map((m) => `<option value="${esc(m.id)}" ${m.id === p.model ? "selected" : ""} ${m.available ? "" : "disabled"}>${esc(m.label)} · $${m.price.toFixed(3)}</option>`).join("")}</optgroup>`).join("")}
-          ${model ? "" : `<option value="${esc(p.model)}" selected>${esc(p.model)}</option>`}</select></label>
-        ${Object.entries(p.settings).map(([k, v]) => `<span class="chip">${esc(k.replace(/_/g, " "))} <b>${esc(Array.isArray(v) ? v.join(", ") : String(v))}</b></span>`).join("")}
+      ${is3d ? `<div class="sheet-model">${sourcePicker(p, "3d")}
+        ${source === "keys" ? "" : `<label class="model-pick">Model <select id="pvModel3d">${serviceModelOptions("3d", source, p.model3d)}</select></label>`}</div>` : `<div class="sheet-model">
+        ${sourcePicker(p, "image")}
+        <label class="model-pick">Model
+          <select id="pvModel">${source === "keys" ? imageModelOptions(models, p.model) : serviceModelOptions("image", source, p.model)}
+          ${model || source !== "keys" ? "" : `<option value="${esc(p.model)}" selected>${esc(p.model)}</option>`}</select></label>
+        ${"aspect_ratio" in p.settings ? `<label class="model-pick">Aspect <select id="pvAspect">${aspectOptions(p.settings.aspect_ratio)}</select></label>` : ""}
+        ${"transparent_background" in p.settings ? `<label class="mesh-toggle sheet-bg"><span class="switch"><input type="checkbox" id="pvTransparent" ${p.settings.transparent_background ? "checked" : ""}><span></span></span><span>Transparent background<small>${source === "keys" ? "Cut out by the generator" : `${esc(serviceLabel)} cuts it out after (a few extra credits)`}</small></span></label>` : ""}
+        ${Object.entries(p.settings).filter(([k]) => k !== "aspect_ratio" && k !== "transparent_background").map(([k, v]) => `<span class="chip">${esc(k.replace(/_/g, " "))} <b>${esc(Array.isArray(v) ? v.join(", ") : String(v))}</b></span>`).join("")}
       </div>`}
+      ${alert ? `<div class="credit-warn"><span class="bad-dot">!</span><span><b>${esc(humanize(alert.provider))} ran out of credits ${esc(timeAgo(alert.at).toLowerCase())}.</b> Top up first, or pick another Source above.</span></div>` : ""}
       ${needsInstruction ? `<div class="sheet-instruction"><label>What should change?<textarea id="pvInstruction" rows="2" placeholder="${p.action === "variant" ? "Frost-themed armour, icy blue trim" : "Remove the shield"}"></textarea></label>
         <button class="ghost" data-rebuild>Update prompt</button></div>` : ""}
       <div class="sheet-body${is3d ? " mesh-body" : ""}">
-        ${is3d ? meshOptions(p) : `<section>
+        ${is3d ? (source === "keys" ? meshOptions(p) : `<section class="mesh-opts"><p class="hint-line">${esc(serviceLabel)} makes the model from the ticked image${p.references.length > 1 ? "s" : ""}, with its own settings. The GLB lands here like any other output.</p></section>`) : `<section>
           ${p.action === "views" ? `<p class="hint-line">One image per view: ${esc(p.settings.views || "")}. <code>{view}</code> is replaced for each image.</p>` : bibleSwitch(p)}
           <label class="field-label" for="pvPrompt">Prompt <em>exactly what is sent</em></label>
           <textarea id="pvPrompt" class="final-prompt" rows="6">${esc(p.prompt)}</textarea>
@@ -2003,7 +2334,7 @@ function renderPreview() {
       </div>
       <footer class="sheet-foot">
         ${is3d ? "" : `<label class="inline">Images <select id="pvCount">${[1, 2, 3, 4].map((n) => `<option ${n === p.count ? "selected" : ""}>${n}</option>`).join("")}</select></label>`}
-        <span class="cost">${on} image${on === 1 ? "" : "s"} attached${cost}</span>
+        <span class="cost">${on} image${on === 1 ? "" : "s"} attached${cost}${balance}</span>
         <span class="grow"></span>
         ${is3d ? "" : `<button type="button" class="ghost copy-req" data-copy-request title="Copy this prompt and the ticked images, to paste into ChatGPT, Gemini or another tool yourself (no API cost)">${icon("copy")}Copy prompt + images</button>`}
         <button type="button" class="ghost" data-close>Cancel</button><button type="button" class="run-btn" data-run>${icon(theme.icon)}${esc(ACTION_LABEL[p.action])}</button>
@@ -2012,6 +2343,8 @@ function renderPreview() {
   const instruction = $("#pvInstruction");
   if (instruction) instruction.value = p.instruction || "";
   $("#pvModel")?.addEventListener("change", () => { syncPreviewFields(); renderPreview(); });
+  $("#pvModel3d")?.addEventListener("change", () => { syncPreviewFields(); renderPreview(); });
+  $("#pvSource")?.addEventListener("change", () => { syncPreviewFields(); onSourceChange(is3d ? "3d" : "image"); });
   $("#pvCount")?.addEventListener("change", () => { syncPreviewFields(); renderPreview(); });
   document.querySelectorAll("#dialog [data-mesh], #dialog [data-fmt]").forEach((el) => el.addEventListener("change", () => { syncMesh(); renderPreview(); }));
 }
@@ -2104,7 +2437,11 @@ function syncPreviewFields() {
   if ($("#pvPrompt")) p.prompt = $("#pvPrompt").value;
   if ($("#pvCount")) p.count = Number($("#pvCount").value);
   if ($("#pvInstruction")) p.instruction = $("#pvInstruction").value;
-  if ($("#pvModel")) p.model = $("#pvModel").value;
+  // An empty select means its models are still loading: keep the model the sheet opened with.
+  if ($("#pvModel")?.value) p.model = $("#pvModel").value;
+  if ($("#pvModel3d")?.value) p.model3d = $("#pvModel3d").value;
+  if ($("#pvAspect")) p.settings.aspect_ratio = $("#pvAspect").value;
+  if ($("#pvTransparent")) p.settings.transparent_background = $("#pvTransparent").checked;
   syncMesh();
   syncAudioFields();
 }
@@ -2116,7 +2453,7 @@ async function rebuildPreview() {
   const extras = p.references.filter((r) => r.role === "extra");
   try {
     const req = await api("/api/studio/preview", { method: "POST", body: { path: p.asset, action: p.action, source, instruction: p.instruction, model: p.model } });
-    state.preview = applyBible({ ...req, instruction: p.instruction, count: p.count, use_bible: p.use_bible, showBible: p.showBible, references: [...req.references.map((r) => ({ ...r, on: true })), ...extras] });
+    state.preview = applyBible({ ...req, model3d: p.model3d, instruction: p.instruction, count: p.count, use_bible: p.use_bible, showBible: p.showBible, references: [...req.references.map((r) => ({ ...r, on: true })), ...extras] });
     renderPreview();
   } catch (err) { toast(err.message, true); }
 }
@@ -2126,7 +2463,7 @@ async function runPreview() {
   if (!prepareGameRun()) return;
   const p = state.preview;
   if ((p.action === "variant" || p.action === "edit") && !String(p.instruction || "").trim()) { toast("Describe what should change, then press Update prompt.", true); return; }
-  const request = { action: p.action, asset: p.asset, prompt: p.prompt, count: p.count, settings: p.settings, action_ids: p.action_ids, names: p.names, model: p.action === "make_3d" ? "" : p.model, use_bible: p.use_bible !== false, references: p.references.filter((r) => r.on).map(({ path, source, role }) => ({ path, source, role })) };
+  const request = { action: p.action, asset: p.asset, prompt: p.prompt, count: p.count, settings: p.settings, action_ids: p.action_ids, names: p.names, model: p.action === "make_3d" ? (p.model3d || "") : p.model, use_bible: p.use_bible !== false, references: p.references.filter((r) => r.on).map(({ path, source, role }) => ({ path, source, role })) };
   if (p.audio) {
     Object.assign(request, { audio: true, kind: p.kind });
     if (p.kind === "voice") {
@@ -2155,7 +2492,8 @@ async function pickWinner(file) {
   try {
     await api("/api/studio/asset", { method: "PATCH", body: { path: state.view.path, fields: { winner: file } } });
     toast("Winner picked");
-    renderView();
+    await renderView();
+    if (state.lb) renderLightbox();
   } catch (err) { toast(err.message, true); }
 }
 
@@ -2210,7 +2548,7 @@ async function makeAsset() {
 
 // The current page and the pages before it survive a refresh, per project.
 const viewKey = () => `forge.view.${state.project}`;
-const PLAIN_VIEWS = ["home", "vault", "orders"];
+const PLAIN_VIEWS = ["home", "vault", "orders", "board"];
 const plainView = (v) => (PLAIN_VIEWS.includes(v.type) ? { type: v.type } : { type: v.type, path: v.path });
 
 function saveView() {
@@ -2220,10 +2558,10 @@ function saveView() {
 }
 
 function restoreView() {
-  if (location.hash === "#vault" || location.hash === "#orders") { state.view = { type: location.hash.slice(1) }; return; }
+  if (["#vault", "#orders", "#board"].includes(location.hash)) { state.view = { type: location.hash.slice(1) }; return; }
   const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
   if (hash) {
-    state.view = { type: hash[1], path: decodeURIComponent(hash[2]) };
+    state.view = { type: hash[1], path: decodeURIComponent(hash[2]), restored: true };
     try { state.trail = (JSON.parse(storeGet(viewKey()) || "null")?.trail || []).filter((v) => v.type === "home" || typeof v.path === "string"); } catch { /* no trail */ }
     return;
   }
@@ -2231,7 +2569,7 @@ function restoreView() {
     const saved = JSON.parse(storeGet(viewKey()) || "null");
     const ok = (v) => v && (PLAIN_VIEWS.includes(v.type) || ((v.type === "folder" || v.type === "doc") && typeof v.path === "string"));
     if (!ok(saved?.view)) return;
-    state.view = plainView(saved.view);
+    state.view = { ...plainView(saved.view), restored: true };
     state.trail = (saved.trail || []).filter(ok);
   } catch { /* start at the overview */ }
 }
@@ -2255,11 +2593,22 @@ function go(view) {
   if (view.type === "doc" && /(^|\/)README\.md$/i.test(view.path) && dirOf(view.path)) view = { type: "folder", path: dirOf(view.path) };
   const same = state.view.type === view.type && state.view.path === view.path;
   if (!same) state.trail.push(plainView(state.view));
+  // A dialog or the lightbox belongs to the page being left (also on browser Back or a pasted link).
+  if (!same && $("#dialog").open) closeDialog();
+  if (!same && state.lb) closeLightbox();
+  if (!$("#projectsView").hidden && state.project) closeProjects();
   state.view = view;
   $("#content").scrollTop = 0;
   showPanel("workspace", true);
   renderView();
 }
+
+// A link pasted or edited in the address bar (#doc=…, #folder=…, #orders) opens that view.
+window.addEventListener("hashchange", () => {
+  const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
+  if (hash) go({ type: hash[1], path: decodeURIComponent(hash[2]) });
+  else if (["#vault", "#orders", "#board"].includes(location.hash)) go({ type: location.hash.slice(1) });
+});
 
 function openPath(path) {
   if (!path) return;
@@ -2535,7 +2884,7 @@ function pickModelFile() {
   input.click();
 }
 
-const viewerModule = () => import("/ui/viewer.js");
+const viewerModule = () => import("./viewer.js");
 const thumbTried = new Set();
 
 // Models without a preview get one rendered in the browser, once per session.
@@ -2572,6 +2921,7 @@ async function viewModel(path, focusSprites = false) {
     const stage = $("#viewerStage");
     stage.innerHTML = "";
     view = await viewer.createViewer(stage, fileUrl(path));
+    state.viewerAsset = state.view.type === "doc" ? await api(`/api/studio/asset?path=${encodeURIComponent(state.view.path)}`).catch(() => null) : null;
     state.viewer = { path, view, viewer, sheet: null };
   } catch (err) {
     $("#viewerStage").innerHTML = `<p class="hint-line">Could not open this model: ${esc(err.message)}</p>`;
@@ -2580,7 +2930,11 @@ async function viewModel(path, focusSprites = false) {
   const { stats, clips } = view;
   const clipOptions = (sel) => `<option value="-1" ${sel === -1 ? "selected" : ""}>No animation</option>${clips.map((c, i) => `<option value="${i}" ${sel === i ? "selected" : ""}>${esc(c)}</option>`).join("")}`;
   $("#viewerSide").innerHTML = `
-    <div class="viewer-stats"><span><b>${stats.triangles.toLocaleString()}</b> triangles</span><span><b>${stats.meshes}</b> meshes</span><span><b>${stats.bones}</b> bones</span><span><b>${clips.length}</b> clips</span></div>
+    <div class="viewer-stats"><span><b>${stats.triangles.toLocaleString()}</b> triangles</span><span><b>${stats.meshes}</b> meshes</span><span><b>${stats.bones}</b> bones</span><span><b>${clips.length}</b> clips</span><span><b id="viewerBytes">…</b> file</span><span><b>${[stats.size.x, stats.size.y, stats.size.z].map((n) => n.toFixed(2)).join(" × ")}</b> units</span></div>
+    ${state.view.type === "doc" ? `<label class="field-label" for="viewerHeight">Height in the game</label>
+    <div class="height-row"><input id="viewerHeight" type="number" min="0.05" max="200" step="0.05" value="${esc(state.viewerAsset?.meta?.height_m || "")}" placeholder="${esc(String(KIND_HEIGHT[state.viewerAsset?.kind] || 1))}"><span>m</span><button type="button" class="ghost" data-height-save>Save</button><button type="button" class="link-btn" data-lineup>Compare in lineup</button></div>` : ""}
+    <div class="field-label">Download as</div>
+    <div class="fmt-links export-row"><a href="${esc(fileUrl(path))}" download>${esc(path.split(".").pop().toUpperCase())}</a>${["obj", "stl", "usdz"].filter((f) => !path.toLowerCase().endsWith(`.${f}`)).map((f) => `<button type="button" class="link-btn" data-viewer-export="${f}" title="Converted in your browser">${f.toUpperCase()}</button>`).join("")}</div>
     ${clips.length ? `<label class="field-label">Animation</label><select id="viewerClip">${clipOptions(0)}</select>` : ""}
     <button type="button" class="ghost" data-viewer-thumb>${icon("eye")} Use this view as preview</button>
     <details class="sprite-box" ${focusSprites ? "open" : ""}><summary>${icon("grid")} Sprite sheet</summary>
@@ -2595,6 +2949,7 @@ async function viewModel(path, focusSprites = false) {
       <div id="spriteOut"></div>
     </details>`;
   if (clips.length) { view.play(0); $("#viewerClip").addEventListener("change", (e) => view.play(Number(e.target.value))); }
+  fetch(fileUrl(path), { method: "HEAD" }).then((r) => { const n = Number(r.headers.get("content-length")); if ($("#viewerBytes")) $("#viewerBytes").textContent = n ? fmtBytes(n) : "?"; }).catch(() => {});
 }
 
 async function renderSprites() {
@@ -2778,16 +3133,24 @@ function connectSocket() {
   ws.onmessage = (event) => {
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
+    if (msg.type === "service_connected") loadServices().then(() => serviceConnected(msg.service));
+    // A cover being painted for another project shows on its card as soon as it lands.
+    if (msg.type === "studio_job" && msg.job.status === "done" && !$("#projectsView").hidden) openProjects();
+    if (msg.type === "studio_job" && msg.job.status === "failed") state.credits = null; // may have been "out of credits"
     if (msg.type === "studio_job" && msg.project === state.project) {
       const known = state.jobs[msg.job.id];
       state.jobs[msg.job.id] = msg.job;
-      if (msg.job.status === "failed") toast(`${ACTION_LABEL[msg.job.action] || "Job"} failed: ${msg.job.error}`, true);
-      else if (msg.job.status === "done" && known?.status !== "done") toast(`${ACTION_LABEL[msg.job.action] || "Job"} finished`);
+      const name = humanize((msg.job.asset || "").split("/").pop() || "");
+      if (msg.job.status === "failed") toast(`${ACTION_LABEL[msg.job.action] || "Job"} failed${msg.job.batch ? ` (${name})` : ""}: ${msg.job.error}`, true);
+      else if (msg.job.status === "done" && known?.status !== "done") toast(msg.job.batch ? `${name} is ready to pick` : `${ACTION_LABEL[msg.job.action] || "Job"} finished`);
+      renderJobDock();
       if (state.view.path === msg.job.asset && !state.view.editing) renderView();
+      else if (msg.job.status === "done" && ["board", "home"].includes(state.view.type)) renderView();
     }
     if (msg.type === "orders_delivered" && msg.project === state.project) {
       toast(`Delivered ${plural(msg.orders.length, "order")} to ${state.connect?.game_name || "the game"}`);
     }
+    if (msg.type === "workspace_changed" && (!msg.project || msg.project === state.project)) { state.palette = null; state.board = null; }
     if (msg.type === "workspace_changed" && (!msg.project || msg.project === state.project) && !state.view.editing) {
       clearTimeout(pending);
       pending = setTimeout(loadOverview, 250);
@@ -2799,12 +3162,14 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-compact-now],[data-pick-winner-file],[data-bible-toggle],[data-bible-view],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-orders],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
-  if (!t || event.target.closest("[data-st-export],[data-imp-use]")) return;
+  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-orders],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
   if (t.dataset.newAsset !== undefined) return newAssetDialog(t.dataset.newAsset);
   if (t.dataset.toc) { event.preventDefault(); return document.getElementById(t.dataset.toc)?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  if (t.dataset.obCancel !== undefined) return cancelOnboarding();
+  if (t.dataset.scrollCandidates !== undefined) return $("#out-candidates")?.scrollIntoView({ behavior: "smooth", block: "start" });
   if (t.dataset.pickWinnerFile !== undefined) {
     const input = document.createElement("input");
     input.type = "file";
@@ -2818,6 +3183,14 @@ document.addEventListener("click", async (event) => {
   }
   if (t.dataset.bibleToggle !== undefined) { if (event.target.tagName !== "INPUT") return; syncPreviewFields(); state.preview.use_bible = event.target.checked; applyBible(state.preview); return renderPreview(); }
   if (t.dataset.bibleView !== undefined) { syncPreviewFields(); state.preview.showBible = !state.preview.showBible; return renderPreview(); }
+  if (t.dataset.serviceDisconnect) {
+    event.stopImmediatePropagation();
+    try { state.services = (await api(`/api/services/${t.dataset.serviceDisconnect}`, { method: "DELETE" })).services; toast("Signed out"); } catch (err) { toast(err.message, true); }
+    return renderServiceCards();
+  }
+  if (t.dataset.serviceConnect) return connectService(t.dataset.serviceConnect);
+  if (t.dataset.favModel) { event.stopImmediatePropagation(); return toggleFavorite(t.dataset.favModel); }
+  if (t.dataset.modelTab) { event.stopImmediatePropagation(); state.modelTab = t.dataset.modelTab; return renderModelPop(); }
   if (t.dataset.pickModel) return pickModel(t.dataset.pickModel);
   if (t.dataset.pickEffort) return pickEffort(t.dataset.pickEffort);
   if (t.dataset.closeSettings !== undefined) return closeSettings();
@@ -2848,6 +3221,11 @@ document.addEventListener("click", async (event) => {
     return renderSettings();
   }
   if (t.dataset.newProject !== undefined) return startOnboarding();
+  if (t.dataset.obGame !== undefined) return chooseGameFolder();
+  if (t.dataset.obHome !== undefined) return chooseHomeFolder();
+  if (t.dataset.obHomeReset !== undefined) { syncOnboarding(); state.ob.home = ""; return renderOnboarding(); }
+  if (t.dataset.obBlank !== undefined) return createBlank();
+  if (t.dataset.obRestart !== undefined) { syncOnboarding(); state.ob.step = 0; return renderOnboarding(); }
   if (t.dataset.deleteProject) { event.stopPropagation(); return deleteProjectDialog(t.dataset.deleteProject); }
   if (t.dataset.openProject) { closeProjects(); return switchProject(t.dataset.openProject); }
   if (t.dataset.obSkip !== undefined) return skipOnboarding();
@@ -2924,12 +3302,13 @@ $("#input").addEventListener("paste", (event) => {
 $("#fileInput").addEventListener("change", (event) => { addFiles(event.target.files); event.target.value = ""; });
 $("#projectsBtn").addEventListener("click", openProjects);
 $("#closeProjectsBtn").addEventListener("click", closeProjects);
-$("#newProjectBtn").addEventListener("click", startOnboarding);
+$("#newProjectBtn").addEventListener("click", () => startOnboarding());
 $("#projectSearch").addEventListener("input", renderProjectGrid);
 $("#projectSort").addEventListener("change", renderProjectGrid);
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || $("#onboarding").hidden || event.target.tagName === "TEXTAREA") return;
-  if ($("#obName")) { event.preventDefault(); syncOnboarding(); state.ob.step = 2; renderOnboarding(); }
+  if (state.ob?.step === OB_BLANK) { event.preventDefault(); return createBlank(); }
+  if ($("#obName")) { event.preventDefault(); syncOnboarding(); state.ob.step = 3; renderOnboarding(); }
 });
 $("#settingsBtn").addEventListener("click", () => settingsDialog());
 $("#refreshBtn").addEventListener("click", loadOverview);
@@ -2941,12 +3320,13 @@ document.addEventListener("click", (event) => {
 });
 $("#backBtn").addEventListener("click", goBack);
 // The Glob chat is optional (Settings → Glob chat): "on", "off", or "auto", which hides it once a coding agent is
-// connected to the project. The hide/show buttons override that per project.
+// connected to the project, unless the project already has Glob chats. The hide/show buttons override that per project.
 function applyChatMode() {
   const shell = document.querySelector(".shell");
   const mode = state.agentCfg?.chat_mode || "auto";
   const manual = storeGet(`forge.chatHidden.${state.project}`);
-  const hidden = mode === "off" || (manual !== null && manual !== "" ? manual === "1" : mode === "auto" && Boolean(state.connect?.connected));
+  const chatted = (state.sessions || []).some((s) => s.message_count);
+  const hidden = mode === "off" || (manual !== null && manual !== "" ? manual === "1" : mode === "auto" && Boolean(state.connect?.connected) && !chatted);
   shell.classList.toggle("chat-off", mode === "off");
   shell.classList.toggle("chat-hidden", hidden);
   if (hidden) showPanel("workspace");
@@ -3006,16 +3386,18 @@ $("#settingsView").addEventListener("input", (event) => {
 
 (async function init() {
   try {
+    state.agentCfg = await api("/api/config").catch(() => null);
+    // First run: the setup covers the app at once, before anything behind it has a chance to show.
+    if (state.agentCfg && !state.agentCfg.onboarded) openSetup();
     await loadProjects();
     restoreView();
     await loadModels();
-    state.agentCfg = await api("/api/config").catch(() => null);
     await loadGrants();
     await loadConnect();
     await loadJobs();
+    renderJobDock();
     await Promise.all([loadSessions(), loadOverview()]);
     connectSocket();
-    if (state.agentCfg && !state.agentCfg.onboarded) openSetup();
     if (state.agentCfg?.auto_update_check !== false) checkForUpdate().then(renderUpdateBanner);
   } catch (err) {
     toast(`Could not start: ${err.message}`, true);
@@ -3079,6 +3461,7 @@ function openImport(folder = "") {
   closeProjects();
   hideScene($("#onboarding"));
   state.imp = { step: "pick", folder, preview: null, target: "new", name: "", describe: state.models.some((m) => m.ready), log: [], phase: "", result: null };
+  spawnPetals($("#importView"));
   showScene($("#importView"));
   renderImport();
   if (folder) scanImport();
@@ -3346,25 +3729,114 @@ async function storageSettings() {
 
 // ----- first-run setup -----
 
-const SETUP_STEPS = 5;
+const SETUP_STEPS = 4;
+const AGENT_BUSY = new Set(["checking", "installing", "login"]);
+const AGENT_STATUS = { missing: "Not installed · Install", idle: "Installed · Connect", checking: "Checking…", installing: "Finish installing in Terminal…", login: "Sign in in the Terminal window…", ok: "Connected", error: "Couldn't connect · Retry" };
 
 async function openSetup() {
-  state.setup = { step: 0 };
+  state.setup = { step: 0, agents: {} };
+  spawnPetals($("#setup"));
   showScene($("#setup"));
   // Seen once is enough: a reload mid-setup shouldn't bring it back (Settings can rerun it).
   if (state.agentCfg && !state.agentCfg.onboarded) {
     state.agentCfg.onboarded = true;
     api("/api/config", { method: "PUT", body: { onboarded: true } }).catch(() => {});
   }
-  const petals = $("#setup .petals");
-  if (!petals.childElementCount) petals.innerHTML = $("#onboarding .petals").innerHTML || Array.from({ length: 18 }, () => `<i style="--x:${Math.random() * 100}%;--d:${8 + Math.random() * 10}s;--delay:${-Math.random() * 18}s;--s:${0.5 + Math.random() * 0.9};--r:${Math.random() * 360}deg;--sway:${20 + Math.random() * 60}px"></i>`).join("");
   await renderSetup();
 }
 
+function stopAgentPolls() {
+  for (const a of Object.values(state.setup?.agents || {})) clearTimeout(a.timer);
+}
+
 async function closeSetup(done = true) {
+  stopAgentPolls();
   hideScene($("#setup"));
   state.setup = null;
   if (done) await api("/api/config", { method: "PUT", body: { onboarded: true } }).catch(() => {});
+}
+
+// ----- setup: coding agents, plug and play -----
+
+function agentCardsHTML() {
+  const st = state.setup;
+  return (state.modelInfo?.clis || []).map((c) => {
+    const a = (st.agents[c.id] ||= { status: c.installed ? "idle" : "missing" });
+    const mark = a.status === "ok" ? "✓" : AGENT_BUSY.has(a.status) ? `<i class="agent-spin"></i>` : "→";
+    return `<button type="button" class="agent-card ${a.status}" data-setup-agent="${c.id}" title="${esc(a.error || (c.installed ? c.login : c.install))}">
+      <span class="agent-logo"><img src="${AGENT_LOGO[c.id]}" alt=""></span>
+      <span class="agent-text"><strong>${esc(c.label)}</strong><small>${AGENT_STATUS[a.status]}</small></span>
+      <span class="agent-mark">${mark}</span></button>`;
+  }).join("");
+}
+
+function renderAgentCards() {
+  const box = $("#agentCards");
+  if (!box) return;
+  box.innerHTML = agentCardsHTML();
+  const next = $("#setupStage [data-setup-next]");
+  if (next) next.textContent = Object.values(state.setup.agents).some((a) => a.status === "ok") ? "Continue" : "Skip for now";
+}
+
+async function openAgentTerminal(id) {
+  try { await api(`/api/agent/cli/${id}/login`, { method: "POST" }); } catch (err) { toast(err.message, true); }
+}
+
+// Checks whether an agent answers. `interactive` (a click) opens the Terminal to install it or sign in,
+// then keeps checking until it's connected.
+async function checkAgent(id, interactive = false) {
+  const st = state.setup;
+  const a = st?.agents[id];
+  if (!a) return;
+  clearTimeout(a.timer);
+  const waiting = a.status === "installing" || a.status === "login";
+  if (!waiting) a.status = "checking";
+  renderAgentCards();
+  let r;
+  try { r = await api(`/api/agent/cli/${id}/check`, { method: "POST" }); } catch (err) { r = { installed: true, ok: false, error: err.message }; }
+  if (state.setup !== st || st.step !== 1) return;
+  a.error = r.error || "";
+  if (r.ok) {
+    a.status = "ok";
+    renderAgentCards();
+    return agentConnected(id);
+  }
+  if (!r.installed) {
+    if (interactive && !waiting) await openAgentTerminal(id); // the install command
+    a.status = interactive || a.status === "installing" ? "installing" : "missing";
+  } else if (interactive || waiting) {
+    if (a.status !== "login") await openAgentTerminal(id); // just installed, or a click: sign in
+    a.status = "login";
+  } else {
+    a.status = "idle";
+  }
+  if (AGENT_BUSY.has(a.status)) {
+    a.tries = (a.tries || 0) + 1;
+    if (a.tries <= 45) a.timer = setTimeout(() => checkAgent(id), 4000);
+    else { a.tries = 0; a.status = r.installed ? "error" : "missing"; }
+  }
+  renderAgentCards();
+}
+
+async function agentConnected(id) {
+  playFistbump(AGENT_LOGO[id], state.modelInfo?.clis?.find((c) => c.id === id)?.label || "Your agent");
+  await loadModels();
+  const st = state.setup;
+  // The first agent that connects runs the Glob chat, unless a model was already picked here.
+  const pick = state.models.find((m) => m.id === `cli:${id}/`);
+  if (st && pick && !st.pickedModel) { st.pickedModel = true; await pickModel(pick.id); }
+}
+
+function playFistbump(logo, label, box = $("#fistbump")) {
+  if (!box) return toast(`${label} is connected`);
+  box.innerHTML = `<div class="fb-row"><div class="fb-side left"><img class="fb-glob" src="/ui/glob-face.svg" alt="Glob"><span class="fb-fist">🤜</span></div>
+    <div class="fb-burst">${Array.from({ length: 10 }, (_, i) => `<i style="--a:${i * 36}deg"></i>`).join("")}</div>
+    <div class="fb-side right"><span class="fb-fist">🤛</span><span class="fb-logo"><img src="${logo}" alt="${esc(label)}"></span></div></div>
+    <p class="fb-text"><b>${esc(label)}</b> and Glob are connected</p>`;
+  box.hidden = false;
+  box.classList.remove("play");
+  void box.offsetWidth; // restart the animation
+  box.classList.add("play");
 }
 
 async function renderSetup() {
@@ -3375,44 +3847,44 @@ async function renderSetup() {
   let body = "";
   if (st.step === 0) {
     body = `<div class="ob-step intro enter"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">Welcome to Glob</p><h1>Your game's<br><em>asset studio</em>.</h1>
-      <p class="ob-sub">Glob makes the art, 3D models and sounds your game needs. Code with any agent you like: it orders assets, you shape them here, Glob delivers them into the game. Three quick, optional steps.</p>
+      <p class="ob-sub">Glob makes the art, 3D models and sounds your game needs. Code with any agent you like: it orders assets, you shape them here, Glob delivers them into the game. Two quick steps.</p>
       <button class="ob-next" data-setup-next>Start setup</button></div>`;
   } else if (st.step === 1) {
-    const cfg = await api("/api/config");
-    body = `<div class="ob-step enter"><p class="ob-kicker">1 / 3 · Generators</p><h1>Keys for art,<br><em>3D</em> and sound.</h1>
-      <p class="ob-sub">Glob is free; generation runs on your own provider accounts, so you only pay them for what you make. One key is enough to start. Keys stay on this computer.</p>
-      <form id="setupKeys" class="setup-keys">${KEY_PROVIDERS.map((k) => `<label><span><b>${k.name}</b> ${k.use} · <a href="${k.url}" target="_blank" rel="noopener">Get a key ↗</a></span>
-        <input name="${k.key}_api_key" type="password" autocomplete="off" placeholder="${cfg[`${k.key}_configured`] ? "Connected. Paste to replace" : k.hint}"></label>`).join("")}</form>
-      ${nav()}</div>`;
-  } else if (st.step === 2) {
-    const cn = await loadConnect();
-    body = `<div class="ob-step enter"><p class="ob-kicker">2 / 3 · Coding agent</p><h1>Bring your<br><em>coding agent</em>.</h1>
-      <p class="ob-sub">Code with Claude Code, Codex, Cursor, Copilot or any other agent? Connect your game folder and it orders the art it needs from Glob on its own, and finds the finished files in <code>glob_delivery/</code>. You can do this later for each project.</p>
-      ${cn?.connected ? `<div class="setup-list"><div><span class="dot live"></span>${esc(cn.game_name)}<small>${esc(cn.game_folder)}</small></div></div>`
-        : `<div class="setup-actions"><button class="ob-chip on" data-setup-settings="connect">Connect a game folder…</button></div>`}
-      ${nav(cn?.connected ? "Continue" : "Skip for now")}</div>`;
-  } else if (st.step === 3) {
     await loadModels();
-    const ready = state.models.filter((m) => m.ready);
-    const info = state.modelInfo || {};
-    body = `<div class="ob-step enter"><p class="ob-kicker">3 / 3 · Glob chat <small>optional</small></p><h1>Talk to Glob<br>right <em>here</em>?</h1>
-      <p class="ob-sub">Glob can also run in a chat next to your project, on any model: Anthropic, OpenAI, OpenRouter, Gemini, Ollama, LM Studio or a custom URL. Skip this if your coding agent does that work.</p>
-      <div class="setup-list">${ready.length ? ready.slice(0, 6).map((m) => `<div><span class="dot live"></span>${esc(m.label)}<small>${esc(m.group || m.provider || "")}</small></div>`).join("") + (ready.length > 6 ? `<div><small>+ ${ready.length - 6} more</small></div>` : "") : `<div class="empty">No chat model yet.</div>`}</div>
-      <div class="setup-actions">${info.vscode_importable ? `<button class="ob-chip on" data-setup-vscode>⇣ Import ${plural(info.vscode_importable, "model")} from VS Code</button>` : ""}<button class="ob-chip" data-setup-settings="models">Connect a model…</button></div>
-      ${nav(ready.length ? "Continue" : "Skip")}</div>`;
+    const connected = Object.values(st.agents).some((a) => a.status === "ok");
+    body = `<div class="ob-step enter"><p class="ob-kicker">1 / 2 · Your AI</p><h1>Plug in your<br><em>coding agent</em>.</h1>
+      <p class="ob-sub">Glob runs on the AI you already pay for. Pick yours and sign in once: no API key needed.</p>
+      <div class="agent-cards" id="agentCards">${agentCardsHTML()}</div>
+      <div class="fistbump" id="fistbump" hidden></div>
+      <p class="setup-alt">No coding agent? <button type="button" class="link-btn" data-setup-settings="models">Use an API key instead</button>${state.modelInfo?.vscode_importable ? ` · <button type="button" class="link-btn" data-setup-vscode>Import from VS Code</button>` : ""}</p>
+      ${nav(connected ? "Continue" : "Skip for now")}</div>`;
+  } else if (st.step === 2) {
+    const cfg = await api("/api/config");
+    body = `<div class="ob-step enter"><p class="ob-kicker">2 / 2 · Generators</p><h1>Keys for art,<br><em>3D</em> and sound.</h1>
+      <p class="ob-sub">Glob is free; generation runs on your own provider accounts, so you only pay them for what you make. Sign in to one, or paste a key. Everything stays on this computer.</p>
+      ${(await loadServices(), serviceCardsHTML())}
+      <div class="fistbump" id="serviceFistbump" hidden></div>
+      <details class="setup-more"><summary>Or paste API keys</summary>
+      <form id="setupKeys" class="setup-keys">${KEY_PROVIDERS.map((k) => `<label><span><b>${k.name}</b> ${k.use} · <a href="${k.url}" target="_blank" rel="noopener">Get a key ↗</a></span>
+        <input name="${k.key}_api_key" type="password" autocomplete="off" placeholder="${cfg[`${k.key}_configured`] ? "Connected. Paste to replace" : k.hint}"></label>`).join("")}</form></details>
+      ${nav((state.services || []).some((sv) => sv.connected) || KEY_PROVIDERS.some((k) => cfg[`${k.key}_configured`]) ? "Continue" : "Skip for now")}</div>`;
   } else {
-    const info = await api("/api/storage").catch(() => ({}));
     body = `<div class="ob-step enter"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">All set</p><h1>What are we<br><em>forging</em>?</h1>
       <div class="setup-actions big"><button class="ob-next forge" data-setup-finish="new">Start a new project</button><button class="ob-next" data-setup-finish="import">Import a game project</button>
       ${state.project ? `<button class="ob-back" data-setup-finish="open">Open ${esc(humanize(state.project))}</button>` : ""}</div>
-      ${info.projects_dir ? `<p class="ob-sub small">Projects are saved in <code>${esc(info.projects_dir)}</code> · <button class="link-btn" data-st-move>Change</button></p>` : ""}</div>`;
+      <p class="ob-sub small">Each project lives in its game's folder, in <code>glob/</code>.</p></div>`;
   }
   $("#setupStage").innerHTML = dots + body;
+  $("#setup .ob-skip").hidden = st.step === SETUP_STEPS - 1; // the last step is the way out
+  if (st.step === 1 && !st.checked) {
+    st.checked = true; // installed agents that are already signed in connect on their own
+    for (const c of state.modelInfo?.clis || []) if (c.installed) checkAgent(c.id);
+  }
 }
 
 async function setupNext() {
   const st = state.setup;
-  if (st.step === 1) {
+  if (st.step === 2) {
     const form = $("#setupKeys");
     const updates = {};
     for (const input of form.querySelectorAll("input")) if (input.value.trim()) updates[input.name] = input.value.trim();
@@ -3420,6 +3892,7 @@ async function setupNext() {
       try { await api("/api/config", { method: "PUT", body: updates }); toast("Keys saved"); } catch (err) { return toast(err.message, true); }
     }
   }
+  stopAgentPolls();
   st.step = Math.min(SETUP_STEPS - 1, st.step + 1);
   await renderSetup();
 }
@@ -3427,7 +3900,7 @@ async function setupNext() {
 // ----- events -----
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh]");
+  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh],[data-setup-agent]");
   if (!t) return;
   const d = t.dataset;
   if (d.accessAllow) return answerAccess(d.accessAllow, true, d.write === "1");
@@ -3477,7 +3950,13 @@ document.addEventListener("click", async (event) => {
   }
   if (d.setupOpen !== undefined) { closeSettings(); return openSetup(); }
   if (d.setupNext !== undefined) return setupNext();
-  if (d.setupBack !== undefined) { state.setup.step = Math.max(0, state.setup.step - 1); return renderSetup(); }
+  if (d.setupBack !== undefined) { stopAgentPolls(); state.setup.step = Math.max(0, state.setup.step - 1); return renderSetup(); }
+  if (d.setupAgent) {
+    const a = state.setup?.agents[d.setupAgent];
+    if (!a || AGENT_BUSY.has(a.status)) return;
+    if (a.status === "ok") return agentConnected(d.setupAgent);
+    return checkAgent(d.setupAgent, true);
+  }
   if (d.setupSkip !== undefined) return closeSetup();
   if (d.setupRefresh !== undefined) return renderSetup();
   if (d.setupVscode !== undefined) {
@@ -3492,9 +3971,17 @@ document.addEventListener("click", async (event) => {
     return settingsDialog(d.setupSettings);
   }
   if (d.setupFinish) {
+    if (d.setupFinish === "new") {
+      // Same backdrop: fade out setup's text, then the new-project questions take over in place.
+      $("#setupStage").classList.add("stage-out");
+      await new Promise((r) => setTimeout(r, 260));
+      startOnboarding(true);
+      await closeSetup();
+      setTimeout(() => $("#setupStage").classList.remove("stage-out"), 900);
+      return;
+    }
     // Open the next scene first so it fades in over setup.
     if (d.setupFinish === "import") openImport();
-    if (d.setupFinish === "new") startOnboarding();
     await closeSetup();
   }
 });
@@ -3549,6 +4036,7 @@ document.addEventListener("paste", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && event.target.id === "impPath") { event.preventDefault(); syncImport(); scanImport(); }
   if (event.key === "Escape" && state.imp && ["pick", "preview"].includes(state.imp.step)) closeImport();
+  if (event.key === "Escape" && !$("#onboarding").hidden && !$("#onboarding").classList.contains("forging")) cancelOnboarding();
 });
 
 // Images pasted into the message box are attached like dropped ones.
@@ -3644,4 +4132,564 @@ document.addEventListener("change", async (event) => {
     await api("/api/config", { method: "PUT", body: { auto_update_check: event.target.checked } });
     state.agentCfg = { ...(state.agentCfg || {}), auto_update_check: event.target.checked };
   } catch (err) { toast(err.message, true); }
+});
+
+// ---------- whole-project tools: board, batch runs, key art, sample, press kit ----------
+
+const KIND_HEIGHT = { character: 1.7, creature: 2.5, vehicle: 2, prop: 1, item: 0.4, weapon: 1 };
+
+// api() for another project than the open one: the URL is built before api() awaits anything.
+function apiIn(project, path, options) {
+  const open = state.project;
+  state.project = project;
+  try { return api(path, options); } finally { state.project = open; }
+}
+
+async function loadCredits() {
+  if (state.credits && Date.now() - state.credits.loaded < 60000) return state.credits;
+  state.credits = { alerts: {}, ...(await api("/api/studio/credits").catch(() => ({}))), loaded: Date.now() };
+  return state.credits;
+}
+
+function creditAlert(provider) {
+  const hit = provider && state.credits?.alerts?.[provider];
+  return hit ? { ...hit, provider } : null;
+}
+
+async function renderBoard() {
+  const content = $("#content");
+  let data;
+  try { data = await api("/api/board"); } catch (err) { content.innerHTML = `<div class="empty"><h1>Board unavailable</h1><p>${esc(err.message)}</p></div>`; return; }
+  state.board = data;
+  const all = data.groups.flatMap((g) => g.assets);
+  const models = all.filter((a) => /\.(glb|gltf)$/i.test(a.model));
+  const unpicked = all.filter((a) => !a.picked).length;
+  content.innerHTML = `
+    <div class="kicker">Project / ${esc(projectTitle())}</div>
+    <h1 class="title">Board</h1>
+    <p class="lede">Every asset on one canvas, to spot the ones that don't match. Drag to move; zoom with + and −, or ⌘ / Ctrl + scroll.</p>
+    <div class="vault-bar">
+      <div class="zoom-btns"><button class="icon-btn" data-board-zoom="-1" aria-label="Zoom out">−</button><span id="boardZoom">100%</span><button class="icon-btn" data-board-zoom="1" aria-label="Zoom in">+</button><button class="ghost" data-board-zoom="0">Fit</button></div>
+      <span class="hint-line">${plural(all.length, "asset")}${unpicked ? ` · ${unpicked} without a winner` : ""}</span>
+      <span class="grow"></span>
+      ${models.length ? `<button class="ghost" data-lineup>${icon("cube")} 3D lineup · ${models.length}</button>` : ""}
+      <button class="ghost" data-press-kit>${icon("download")} Press kit</button>
+    </div>
+    ${all.length ? `<div class="board" id="board"><div class="board-canvas" id="boardCanvas">${data.groups.map((g) => `
+      <section class="board-col"><h2><small>${esc(g.number)}</small>${esc(g.title)}<span>${g.assets.length}</span></h2>
+        ${g.assets.map((a) => `<button class="board-card${a.picked ? "" : " unpicked"}" data-open="${esc(a.path)}"${a.audio ? ` data-hover-audio="${esc(a.audio)}"` : ""} title="${esc(a.prompt)}">
+          ${a.image ? `<img src="${esc(fileUrl(a.image))}" alt="" loading="lazy" draggable="false">` : a.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : `<span class="asset-empty">No image yet</span>`}
+          <span class="board-label"><strong>${esc(a.title)}</strong><em>${esc(a.kind)}${a.model ? " · 3D" : ""}${a.picked ? "" : " · no winner"}</em></span></button>`).join("")}
+      </section>`).join("")}</div></div>` : `<div class="empty"><h1>Nothing on the board yet</h1><p>Assets appear here as soon as they exist. Add some on a section page, or ask the agent.</p></div>`}`;
+}
+
+// Pan and zoom the board with a CSS transform; the position is kept while the project stays open.
+function mountBoard() {
+  const board = $("#board");
+  const canvas = $("#boardCanvas");
+  if (!board || !canvas) return;
+  const first = !state.boardView;
+  const v = state.boardView ||= { x: 0, y: 0, z: 1 };
+  const apply = () => {
+    canvas.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.z})`;
+    if ($("#boardZoom")) $("#boardZoom").textContent = `${Math.round(v.z * 100)}%`;
+  };
+  const zoomAt = (factor, cx, cy) => {
+    const z = Math.min(2.5, Math.max(0.2, v.z * factor));
+    v.x = cx - ((cx - v.x) * z) / v.z;
+    v.y = cy - ((cy - v.y) * z) / v.z;
+    v.z = z;
+    apply();
+  };
+  board.fit = (tries = 30) => {
+    // Right after a render the canvas may not be laid out yet: wait a frame or two for real sizes.
+    if (!canvas.scrollWidth || !board.clientWidth) { if (tries) requestAnimationFrame(() => board.fit(tries - 1)); return; }
+    const scale = Math.min(1, board.clientWidth / canvas.scrollWidth, board.clientHeight / canvas.scrollHeight);
+    Object.assign(v, { x: 0, y: 0, z: Math.max(0.2, scale) });
+    apply();
+  };
+  board.zoomBy = (dir) => zoomAt(dir > 0 ? 1.25 : 0.8, board.clientWidth / 2, board.clientHeight / 2);
+  board.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const box = board.getBoundingClientRect();
+    if (event.ctrlKey || event.metaKey) zoomAt(Math.exp(-event.deltaY * 0.01), event.clientX - box.left, event.clientY - box.top);
+    else { v.x -= event.deltaX; v.y -= event.deltaY; apply(); }
+  }, { passive: false });
+  board.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const drag = { x: event.clientX, y: event.clientY, ox: v.x, oy: v.y, moved: false };
+    const move = (e) => {
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+      drag.moved = true;
+      board.classList.add("dragging");
+      v.x = drag.ox + dx;
+      v.y = drag.oy + dy;
+      apply();
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      board.classList.remove("dragging");
+      // A drag that ends on a card must not open it.
+      if (drag.moved) board.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); }, { capture: true, once: true });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+  });
+  if (first) board.fit(); // the first look shows every section at once
+  else apply();
+}
+
+async function openLineup() {
+  let data = state.board;
+  if (!data) try { data = state.board = await api("/api/board"); } catch (err) { return toast(err.message, true); }
+  const items = data.groups.flatMap((g) => g.assets).filter((a) => /\.(glb|gltf)$/i.test(a.model));
+  if (!items.length) return toast("No 3D models in this project yet.", true);
+  openDialog(`<div class="dlg wide viewer-dlg">
+    <div class="viewer-head"><h2>${icon("cube")} Lineup · ${plural(items.length, "model")}</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div class="viewer-stage lineup-stage" id="lineupStage"><p class="hint-line">Loading models…</p></div>
+    <p class="hint-line">Each model stands at its height in the game, next to a 1.7 m person (the grey figure). Set an asset's height in its 3D viewer.</p>
+    <div class="lineup-legend">${items.map((a) => `<span class="chip">${esc(a.title)} <b>${esc(String(a.height_m))} m</b></span>`).join("")}</div></div>`);
+  let view;
+  $("#dialog").addEventListener("close", () => view?.dispose(), { once: true });
+  try {
+    const viewer = await viewerModule();
+    const stage = $("#lineupStage");
+    stage.innerHTML = "";
+    view = await viewer.createLineup(stage, items.map((a) => ({ url: fileUrl(a.model), height: a.height_m, label: a.title })));
+  } catch (err) { $("#lineupStage").innerHTML = `<p class="hint-line">Could not load the models: ${esc(err.message)}</p>`; }
+}
+
+async function batchDialog(folder) {
+  let plan;
+  try { [plan] = await Promise.all([api(`/api/studio/batch?folder=${encodeURIComponent(folder)}`), studioOptions()]); } catch (err) { return toast(err.message, true); }
+  const where = folder ? humanize(folder.split("/").pop()) : "the project";
+  if (!plan.assets.length) return toast(`Every asset in ${where} already has something to pick from.`);
+  const images = plan.assets.filter((a) => !a.audio);
+  const sounds = plan.assets.filter((a) => a.audio);
+  const price = images.reduce((sum, a) => sum + (state.studio.models.find((m) => m.id === a.model)?.price || 0) * a.count, 0);
+  const viaService = images.some((a) => String(a.model).startsWith("svc:"));
+  const count = (list) => list.reduce((n, a) => n + a.count, 0);
+  openDialog(`<form class="dlg" id="batchForm">
+    <h2>${icon("sparkle")} Generate ${plural(plan.assets.length, "asset")}</h2>
+    <p>Candidates for every asset in <b>${esc(where)}</b> that has nothing to pick from yet. Each uses its own prompt and pillars; two run at a time. Nothing is picked for you.</p>
+    <div class="batch-list">${plan.assets.map((a) => `<label><input type="checkbox" name="asset" value="${esc(a.asset)}" checked><span>${esc(humanize(a.asset.split("/").pop()))}</span><small>${esc(dirOf(a.asset) || "root")} · ${a.count} ${a.audio ? "take" : "image"}${a.count === 1 ? "" : "s"}</small></label>`).join("")}</div>
+    <p class="st-note">${[images.length ? `${plural(count(images), "image")}${state.agentCfg?.demo_mode ? "" : price ? ` · ≈ $${price.toFixed(2)}` : viaService ? " · paid in your signed-in service's credits" : ""}` : "", sounds.length ? plural(count(sounds), "sound") : ""].filter(Boolean).join(" · ")}${state.agentCfg?.demo_mode ? " · demo mode: placeholders, no cost" : ""}</p>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">${icon("sparkle")} Generate</button></div></form>`);
+  $("#batchForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const assets = [...event.target.querySelectorAll("input[name=asset]:checked")].map((i) => i.value);
+    if (!assets.length) return toast("Tick at least one asset.", true);
+    event.submitter && (event.submitter.disabled = true);
+    try {
+      const res = await api("/api/studio/batch", { method: "POST", body: { assets } });
+      res.jobs.forEach((j) => { state.jobs[j.id] ||= j; });
+      closeDialog();
+      state.dockOpen = true;
+      renderJobDock();
+      toast(`Generating ${plural(res.jobs.length, "asset")}${res.skipped.length ? ` · ${res.skipped.length} skipped: ${res.skipped[0].reason}` : ""}`, Boolean(res.skipped.length));
+    } catch (err) { toast(err.message, true); event.submitter && (event.submitter.disabled = false); }
+  });
+}
+
+async function makeKeyArt(project, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await apiIn(project, "/api/overview/key-art", { method: "POST" });
+    if (project === state.project) { state.jobs[res.job.id] = res.job; renderJobDock(); }
+    toast("Painting the key art… it becomes the cover when it lands. Pick another candidate on its page to change it.");
+    if (project === state.project) renderView();
+  } catch (err) { toast(err.message, true); if (btn) btn.disabled = false; }
+}
+
+async function installSample(btn) {
+  if (btn) { btn.disabled = true; btn.classList.add("busy"); }
+  try {
+    const res = await api("/api/projects/sample", { method: "POST", body: {} });
+    if (!$("#onboarding").hidden) hideScene($("#onboarding"));
+    closeProjects();
+    await switchProject(res.project);
+    toast("Pocket Kaiju is yours to explore. Looking around costs nothing; generating spends credits as usual.");
+  } catch (err) { toast(err.message, true); if (btn) { btn.disabled = false; btn.classList.remove("busy"); } }
+}
+
+function downloadPressKit() {
+  const a = Object.assign(document.createElement("a"), { href: `/api/press-kit?project=${encodeURIComponent(state.project)}`, download: `${state.project}-press-kit.zip` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  toast("Press kit downloading: unzip and open index.html, or upload the folder to itch.io or any static host.");
+}
+
+// Live and waiting generation jobs, bottom right, on every page.
+function renderJobDock() {
+  let dock = $("#jobDock");
+  if (!dock) { dock = Object.assign(document.createElement("div"), { id: "jobDock", className: "job-dock" }); document.body.append(dock); }
+  const live = Object.values(state.jobs).filter((j) => j.status === "running" || j.status === "queued");
+  dock.hidden = !live.length;
+  if (!live.length) { state.dockOpen = false; return; }
+  const running = live.filter((j) => j.status === "running").length;
+  const waiting = live.length - running;
+  dock.innerHTML = `<button type="button" class="dock-head" data-dock-toggle aria-expanded="${Boolean(state.dockOpen)}"><span class="spinner"></span>${running} running${waiting ? ` · ${waiting} waiting` : ""}<span class="caret${state.dockOpen ? " open" : ""}"></span></button>
+    ${state.dockOpen ? `<ul>${live.map((j) => `<li><button type="button" class="link-btn" data-open="${esc(j.asset)}">${esc(humanize(String(j.asset).split("/").pop()))}</button>
+      <small>${j.status === "queued" ? "waiting" : esc(ACTION_LABEL[j.action] || j.action)}</small>${j.status === "queued" ? `<button type="button" class="chip-del" data-job-cancel="${esc(j.id)}" title="Don't run this one" aria-label="Cancel">×</button>` : ""}</li>`).join("")}</ul>` : ""}`;
+}
+
+// ---------- candidate lightbox: arrows to step, Enter to pick, the prompt each image came from ----------
+
+function openLightbox(path) {
+  const list = [...document.querySelectorAll("#content [data-lightbox]")].map((a) => a.dataset.lightbox);
+  if (!list.length) return;
+  state.lb = { list: [...new Set(list)], index: 0, history: null, asset: state.view.path };
+  state.lb.index = Math.max(0, state.lb.list.indexOf(path));
+  renderLightbox();
+  api(`/api/studio/history?path=${encodeURIComponent(state.view.path)}`).then((d) => { if (state.lb) { state.lb.history = d.history; renderLightbox(); } }).catch(() => {});
+}
+
+function renderLightbox() {
+  const lb = state.lb;
+  let box = $("#lightbox");
+  if (!box) { box = Object.assign(document.createElement("div"), { id: "lightbox", className: "lightbox" }); box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true"); document.body.append(box); }
+  if (!lb) { box.hidden = true; return; }
+  const path = lb.list[lb.index];
+  const winner = document.querySelector("#content .out.winner [data-lightbox]")?.dataset.lightbox === path;
+  const made = lb.history?.[path];
+  const model = made?.model ? String(made.model).replace(/^svc:/, "").split("/").pop() : "";
+  box.hidden = false;
+  box.innerHTML = `<button type="button" class="lb-close" data-lb-close aria-label="Close">✕</button>
+    <button type="button" class="lb-nav prev" data-lb-step="-1" aria-label="Previous"${lb.index ? "" : " disabled"}>‹</button>
+    <figure><img src="${esc(fileUrl(path))}" alt="">
+      <figcaption>
+        <span class="lb-count">${lb.index + 1} / ${lb.list.length}</span>
+        ${winner ? `<span class="out-badge win static">${icon("star")}Winner</span>` : `<button type="button" class="primary" data-lb-pick>${icon("star")} Pick winner <kbd>↵</kbd></button>`}
+        <span class="grow"></span>
+        <a class="ghost btn-link" href="${esc(fileUrl(path))}" target="_blank" rel="noopener">Open full size</a>
+      </figcaption>
+      ${made ? `<details class="lb-prompt"><summary>${made.asset_prompt ? "Prompt it came from" : "Prompt sent"}${model ? ` · ${esc(model)}` : ""}${made.created_at ? ` · ${esc(timeAgo(made.created_at).toLowerCase())}` : ""}</summary>
+        <p>${esc(made.asset_prompt || made.prompt || "")}</p>
+        ${made.asset_prompt ? `<button type="button" class="ghost" data-use-prompt="${esc(path)}">Use this prompt again</button>` : ""}</details>` : ""}
+    </figure>
+    <button type="button" class="lb-nav next" data-lb-step="1" aria-label="Next"${lb.index < lb.list.length - 1 ? "" : " disabled"}>›</button>`;
+}
+
+function closeLightbox() { state.lb = null; renderLightbox(); }
+
+async function usePrompt(path) {
+  const made = state.lb?.history?.[path];
+  if (!made?.asset_prompt) return;
+  const box = $("#assetPrompt");
+  const before = box?.value ?? "";
+  try {
+    await api("/api/studio/asset", { method: "PATCH", body: { path: state.view.path, fields: { prompt: made.asset_prompt } } });
+    closeLightbox();
+    await renderView();
+    toast("Prompt brought back. Generate 2D to try it again.", false, { label: "Undo", run: async () => { await api("/api/studio/asset", { method: "PATCH", body: { path: state.view.path, fields: { prompt: before } } }); renderView(); } });
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- sound tools: waveform, selection, loop check, trimmed take ----------
+
+let wave = null;
+
+async function mountWave() {
+  const host = $("#content [data-wave-src]");
+  if (!host) { wave = null; return; }
+  const src = host.dataset.waveSrc;
+  const canvas = host.querySelector("canvas");
+  if (wave?.src === src && wave.buffer) { drawWave(canvas); return; }
+  wave = { src, buffer: null, sel: null };
+  try {
+    const ctx = wave.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const data = await (await fetch(fileUrl(src))).arrayBuffer();
+    const buffer = await ctx.decodeAudioData(data);
+    if (wave?.src !== src) return;
+    wave.buffer = buffer;
+    drawWave($("#content [data-wave-src] canvas"));
+  } catch { /* the plain player still works */ }
+}
+
+function drawWave(canvas) {
+  if (!canvas || !wave?.buffer) return;
+  const w = canvas.width = canvas.clientWidth * devicePixelRatio;
+  const h = canvas.height = 120 * devicePixelRatio;
+  const g = canvas.getContext("2d");
+  const data = wave.buffer.getChannelData(0);
+  const step = Math.max(1, Math.floor(data.length / w));
+  const css = getComputedStyle(canvas);
+  g.clearRect(0, 0, w, h);
+  if (wave.sel) {
+    const [a, b] = wave.sel.map((t) => (t / wave.buffer.duration) * w);
+    g.fillStyle = css.getPropertyValue("--wave-sel") || "rgba(255,126,182,.18)";
+    g.fillRect(Math.min(a, b), 0, Math.abs(b - a), h);
+  }
+  g.fillStyle = css.getPropertyValue("--wave") || "#ff7eb6";
+  for (let x = 0; x < w; x += 2) {
+    let peak = 0;
+    for (let i = x * step; i < (x + 1) * step && i < data.length; i += 4) peak = Math.max(peak, Math.abs(data[i]));
+    const bar = Math.max(1, peak * h * 0.92);
+    g.fillRect(x, (h - bar) / 2, 1.5 * devicePixelRatio, bar);
+  }
+  const host = canvas.closest("[data-wave-src]");
+  const label = host?.querySelector(".wave-sel");
+  const trim = host?.querySelector("[data-wave-trim]");
+  const len = wave.sel ? Math.abs(wave.sel[1] - wave.sel[0]) : 0;
+  if (label) { label.hidden = len < 0.05; label.textContent = wave.sel ? `${Math.min(...wave.sel).toFixed(2)}–${Math.max(...wave.sel).toFixed(2)} s` : ""; }
+  if (trim) trim.disabled = len < 0.05;
+}
+
+function waveTime(event, canvas) {
+  const box = canvas.getBoundingClientRect();
+  return Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)) * wave.buffer.duration;
+}
+
+document.addEventListener("pointerdown", (event) => {
+  const canvas = event.target.closest?.(".wave-canvas");
+  if (!canvas || !wave?.buffer) return;
+  const start = waveTime(event, canvas);
+  wave.sel = [start, start];
+  const move = (e) => { wave.sel[1] = waveTime(e, canvas); drawWave(canvas); };
+  const up = (e) => {
+    window.removeEventListener("pointermove", move);
+    if (Math.abs(wave.sel[1] - wave.sel[0]) < 0.05) {
+      // A click (no drag) seeks the player there.
+      wave.sel = null;
+      const audio = canvas.parentElement.querySelector("audio");
+      if (audio) { audio.currentTime = waveTime(e, canvas); audio.play().catch(() => {}); }
+    }
+    drawWave(canvas);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up, { once: true });
+});
+
+function playLoopSeam() {
+  if (!wave?.buffer) return toast("The sound is still loading.", true);
+  const ctx = wave.ctx;
+  ctx.resume?.();
+  const d = wave.buffer.duration;
+  const tail = Math.min(2, d / 2);
+  const play = (offset, at, len) => { const n = ctx.createBufferSource(); n.buffer = wave.buffer; n.connect(ctx.destination); n.start(ctx.currentTime + at, offset, len); };
+  play(d - tail, 0, tail);
+  play(0, tail, tail);
+  toast("Playing the end into the start: listen for a click or a jump at the seam.");
+}
+
+// 16-bit PCM WAV of a stretch of the decoded sound.
+function wavBlob(buffer, from, to) {
+  const rate = buffer.sampleRate;
+  const a = Math.floor(from * rate);
+  const frames = Math.max(1, Math.floor(to * rate) - a);
+  const channels = buffer.numberOfChannels;
+  const view = new DataView(new ArrayBuffer(44 + frames * channels * 2));
+  const text = (o, str) => [...str].forEach((c, i) => view.setUint8(o + i, c.charCodeAt(0)));
+  text(0, "RIFF"); view.setUint32(4, 36 + frames * channels * 2, true); text(8, "WAVEfmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * channels * 2, true); view.setUint16(32, channels * 2, true); view.setUint16(34, 16, true);
+  text(36, "data"); view.setUint32(40, frames * channels * 2, true);
+  const data = [...Array(channels)].map((_, c) => buffer.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < frames; i += 1) for (let c = 0; c < channels; c += 1) { view.setInt16(o, Math.max(-1, Math.min(1, data[c][a + i])) * 0x7fff, true); o += 2; }
+  return new Blob([view], { type: "audio/wav" });
+}
+
+async function saveTrim() {
+  if (!wave?.buffer || !wave.sel) return;
+  const [from, to] = [Math.min(...wave.sel), Math.max(...wave.sel)];
+  const stem = wave.src.split("/").pop().replace(/\.[^.]+$/, "");
+  await uploadAudio([new File([wavBlob(wave.buffer, from, to)], `${stem}-trim-${from.toFixed(1)}s.wav`, { type: "audio/wav" })]);
+}
+
+// ---------- hover previews: sounds play, models turn ----------
+
+let hoverTimer = 0;
+let hoverAudio = null;
+let hoverModel = null;
+
+function stopHover() {
+  clearTimeout(hoverTimer);
+  hoverAudio?.pause();
+  hoverAudio = null;
+  if (hoverModel) { hoverModel.view?.dispose(); hoverModel.host.remove(); hoverModel = null; }
+}
+
+document.addEventListener("pointerover", (event) => {
+  const tile = event.target.closest?.("[data-hover-audio],[data-hover-model]");
+  if (!tile || tile.contains(event.relatedTarget)) return;
+  stopHover();
+  if (event.pointerType === "touch") return;
+  hoverTimer = setTimeout(async () => {
+    if (tile.dataset.hoverAudio) {
+      hoverAudio = new Audio(fileUrl(tile.dataset.hoverAudio));
+      hoverAudio.volume = 0.6;
+      hoverAudio.play().catch(() => {});
+      return;
+    }
+    const slot = tile.querySelector(".asset-img");
+    const h = hoverModel = { host: Object.assign(document.createElement("div"), { className: "hover-stage" }), view: null };
+    slot.append(h.host);
+    try {
+      const view = await (await viewerModule()).createViewer(h.host, fileUrl(tile.dataset.hoverModel), { autoRotate: true, grid: false });
+      if (hoverModel !== h) return view.dispose();
+      h.view = view;
+      h.host.classList.add("live");
+    } catch { /* the picture stays */ }
+  }, tile.dataset.hoverAudio ? 250 : 450);
+});
+
+document.addEventListener("pointerout", (event) => {
+  const tile = event.target.closest?.("[data-hover-audio],[data-hover-model]");
+  if (tile && !tile.contains(event.relatedTarget)) stopHover();
+});
+
+// ---------- gallery mode and command palette ----------
+
+function setGallery(on) {
+  document.body.classList.toggle("gallery-mode", on);
+  storeSet("forge.gallery", on ? "1" : "");
+  const btn = $("#galleryBtn");
+  if (btn) { btn.classList.toggle("on", on); btn.title = on ? "Leave gallery mode (G)" : "Gallery mode: dark, art first (G)"; }
+}
+setGallery(storeGet("forge.gallery") === "1");
+
+async function paletteItems() {
+  if (!state.palette) {
+    const board = await api("/api/board").catch(() => ({ groups: [] }));
+    state.palette = board.groups.flatMap((g) => g.assets.map((a) => ({ label: a.title, hint: `${g.title} · ${a.kind}`, icon: a.audio ? "play" : a.model ? "cube" : "star", run: () => go({ type: "doc", path: a.path }) })));
+  }
+  const ov = state.overview || { sections: [] };
+  const folders = [];
+  const walk = (nodes, trail) => nodes.forEach((n) => { folders.push({ label: n.title, hint: trail, icon: "folder", run: () => go({ type: "folder", path: n.path }) }); walk(n.children || [], `${trail} / ${n.title}`); });
+  ov.sections.forEach((s) => { folders.push({ label: s.title, hint: `Section ${s.number}`, icon: "folder", run: () => go({ type: "folder", path: s.path }) }); walk(s.children || [], s.title); });
+  const onAsset = state.view.type === "doc" && $("#content #assetPrompt");
+  const here = state.view.type === "folder" ? state.view.path : "";
+  const actions = [
+    ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")]] : []),
+    ["Overview", "layers", () => go({ type: "home" })], ["Board", "grid", () => go({ type: "board" })], ["Agent orders", "inbox", () => go({ type: "orders" })], ["Final vault", "box", () => go({ type: "vault" })],
+    [here ? `Generate missing in ${humanize(here.split("/").pop())}` : "Generate all missing", "sparkle", () => batchDialog(here)],
+    ...(here ? [["New asset here", "sparkle", () => newAssetDialog(here)]] : []),
+    ["3D lineup", "cube", openLineup], ["Download press kit", "download", downloadPressKit],
+    [document.body.classList.contains("gallery-mode") ? "Leave gallery mode" : "Gallery mode", "eye", () => setGallery(!document.body.classList.contains("gallery-mode"))],
+    ["All projects", "grid", openProjects], ["New project", "sparkle", () => startOnboarding()], ["Settings", "edit", () => settingsDialog()],
+  ].map(([label, ic, run]) => ({ label, hint: "Action", icon: ic, run }));
+  return [...actions, ...folders, ...state.palette];
+}
+
+// Subsequence match: every typed letter in order; earlier, tighter matches score higher.
+function fuzzy(query, text) {
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  if (!q) return 1;
+  const at = t.indexOf(q);
+  if (at >= 0) return 100 - at;
+  let i = 0;
+  let gaps = 0;
+  for (let j = 0; j < t.length && i < q.length; j += 1) { if (t[j] === q[i]) i += 1; else if (i) gaps += 1; }
+  return i === q.length ? 50 - gaps : 0;
+}
+
+async function openPalette() {
+  if ($("#palette")) return;
+  const items = await paletteItems();
+  const box = Object.assign(document.createElement("div"), { id: "palette", className: "palette" });
+  box.innerHTML = `<div class="palette-card" role="dialog" aria-label="Go to"><input id="paletteInput" placeholder="Jump to an asset or folder, or run an action…" autocomplete="off" spellcheck="false"><ul id="paletteList" role="listbox"></ul><footer><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>↵</kbd> open · <kbd>esc</kbd> close</footer></div>`;
+  document.body.append(box);
+  let shown = [];
+  let index = 0;
+  const draw = () => {
+    const q = $("#paletteInput").value.trim();
+    shown = items.map((it) => ({ it, score: Math.max(fuzzy(q, it.label), fuzzy(q, `${it.label} ${it.hint}`) - 5) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 40).map((x) => x.it);
+    index = Math.min(index, Math.max(0, shown.length - 1));
+    $("#paletteList").innerHTML = shown.map((it, i) => `<li role="option" aria-selected="${i === index}" class="${i === index ? "on" : ""}" data-pal="${i}">${icon(it.icon)}<span>${esc(it.label)}</span><small>${esc(it.hint)}</small></li>`).join("") || `<li class="none">Nothing matches.</li>`;
+    $("#paletteList .on")?.scrollIntoView({ block: "nearest" });
+  };
+  const close = () => box.remove();
+  const run = (it) => { close(); it?.run(); };
+  box.addEventListener("click", (e) => { const li = e.target.closest("[data-pal]"); if (li) run(shown[Number(li.dataset.pal)]); else if (e.target === box) close(); });
+  $("#paletteInput").addEventListener("input", () => { index = 0; draw(); });
+  $("#paletteInput").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); index = Math.min(shown.length - 1, index + 1); draw(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); index = Math.max(0, index - 1); draw(); }
+    else if (e.key === "Enter") { e.preventDefault(); run(shown[index]); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+  });
+  draw();
+  $("#paletteInput").focus();
+}
+
+// ---------- events for the tools above ----------
+
+document.addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-board],[data-board-zoom],[data-lineup],[data-batch],[data-press-kit],[data-key-art],[data-install-sample],[data-job-cancel],[data-dock-toggle],[data-lightbox],[data-lb-close],[data-lb-step],[data-lb-pick],[data-use-prompt],[data-wave-loop],[data-wave-trim],[data-viewer-export],[data-height-save],#galleryBtn,#paletteBtn");
+  if (!t) return;
+  const d = t.dataset;
+  if (d.lightbox) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey) return; // still opens in a new tab
+    event.preventDefault();
+    return openLightbox(d.lightbox);
+  }
+  if (d.board !== undefined) return go({ type: "board" });
+  if (d.boardZoom !== undefined) { const b = $("#board"); return Number(d.boardZoom) ? b?.zoomBy(Number(d.boardZoom)) : b?.fit(); }
+  if (d.lineup !== undefined) { if (t.closest("#dialog")) closeDialog(); return openLineup(); }
+  if (d.batch !== undefined) return batchDialog(d.batch);
+  if (d.pressKit !== undefined) return downloadPressKit();
+  if (d.keyArt) { event.stopPropagation(); return makeKeyArt(d.keyArt, t); }
+  if (d.installSample !== undefined) return installSample(t);
+  if (d.dockToggle !== undefined) { state.dockOpen = !state.dockOpen; return renderJobDock(); }
+  if (d.lbClose !== undefined) return closeLightbox();
+  if (d.lbStep) { state.lb.index = Math.max(0, Math.min(state.lb.list.length - 1, state.lb.index + Number(d.lbStep))); return renderLightbox(); }
+  if (d.lbPick !== undefined) return pickWinner(state.lb.list[state.lb.index]);
+  if (d.usePrompt) return usePrompt(d.usePrompt);
+  if (d.waveLoop !== undefined) return playLoopSeam();
+  if (d.waveTrim !== undefined) return saveTrim();
+  if (t.id === "galleryBtn") return setGallery(!document.body.classList.contains("gallery-mode"));
+  if (t.id === "paletteBtn") return openPalette();
+  try {
+    if (d.jobCancel) {
+      state.jobs[d.jobCancel] = await api(`/api/studio/jobs/${encodeURIComponent(d.jobCancel)}/cancel`, { method: "POST" });
+      renderJobDock();
+    }
+    if (d.viewerExport) {
+      const blob = await state.viewer.view.exportAs(d.viewerExport);
+      const name = `${state.viewer.path.split("/").pop().replace(/\.[^.]+$/, "")}.${d.viewerExport}`;
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }
+    if (d.heightSave !== undefined) {
+      const value = Number($("#viewerHeight").value);
+      await api("/api/studio/asset", { method: "PATCH", body: { path: state.view.path, fields: { height_m: value > 0 ? value : "" } } });
+      state.board = null;
+      toast(value > 0 ? `Height set to ${value} m` : "Height reset to the default for its kind");
+    }
+  } catch (err) { toast(err.message, true); }
+});
+
+document.addEventListener("change", async (event) => {
+  if (!event.target.matches?.("[data-pillar-strength]")) return;
+  const value = event.target.value;
+  try {
+    await api("/api/studio/asset", { method: "PATCH", body: { path: state.view.path, fields: { pillars: value === "normal" ? "" : value } } });
+    toast({ off: "Pillars off for this asset", light: "Pillars: palette only", normal: "Pillars back to normal", strong: "Pillars: match closely" }[value]);
+  } catch (err) { toast(err.message, true); }
+});
+
+document.addEventListener("keydown", (event) => {
+  const typing = event.target.closest?.("input, textarea, select, [contenteditable]");
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); return $("#palette") ? $("#palette").remove() : openPalette(); }
+  if (state.lb) {
+    if (event.key === "Escape") { event.preventDefault(); return closeLightbox(); }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); state.lb.index = Math.max(0, Math.min(state.lb.list.length - 1, state.lb.index + (event.key === "ArrowRight" ? 1 : -1))); return renderLightbox(); }
+    if (event.key === "Enter" && !typing) { event.preventDefault(); return pickWinner(state.lb.list[state.lb.index]); }
+    return;
+  }
+  if (typing || event.metaKey || event.ctrlKey || event.altKey || $("#dialog").open || $("#palette")) return;
+  if (!$("#projectsView").hidden || !$("#settingsView").hidden || !$("#onboarding").hidden) return;
+  if (event.key === "g" || event.key === "G") return setGallery(!document.body.classList.contains("gallery-mode"));
+  // 1–9 on an asset page opens that candidate big.
+  if (/^[1-9]$/.test(event.key) && state.view.type === "doc") {
+    const list = [...document.querySelectorAll("#content [data-lightbox]")];
+    const hit = list[Number(event.key) - 1];
+    if (hit) { event.preventDefault(); openLightbox(hit.dataset.lightbox); }
+  }
 });

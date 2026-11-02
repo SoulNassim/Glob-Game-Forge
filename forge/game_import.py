@@ -211,7 +211,8 @@ def _walk(root: Path) -> tuple[list[Path], dict[str, int]]:
     files: list[Path] = []
     skipped = {"engine_files": 0, "archives": 0, "too_large": 0, "unreal_binary": 0}
     for current, dirs, names in os.walk(root):
-        dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS and not d.startswith(".")]
+        # Also skip Glob's own home in the game (`glob/` with its manifest), so imports never copy it into itself.
+        dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS and not d.startswith(".") and not (Path(current) / d / "manifest.db").is_file()]
         for name in names:
             path = Path(current) / name
             suffix = path.suffix.lower()

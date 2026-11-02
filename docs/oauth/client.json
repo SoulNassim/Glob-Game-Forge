@@ -1,0 +1,12 @@
+{
+  "client_id": "https://soulnassim.github.io/Glob-Game-Forge/oauth/client.json",
+  "client_name": "Glob",
+  "client_uri": "https://soulnassim.github.io/Glob-Game-Forge/",
+  "logo_uri": "https://soulnassim.github.io/Glob-Game-Forge/landing/icon.png",
+  "redirect_uris": [
+    "http://127.0.0.1:8420/api/services/callback"
+  ],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}

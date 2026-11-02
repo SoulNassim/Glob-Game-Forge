@@ -42,3 +42,14 @@ async def test_server_settings_cannot_be_changed_over_http():
         assert r.status_code == 403
         r = await c.put("/api/config", json={"allowed_proxy_hosts": ["internal.example"]})
         assert r.status_code == 403
+
+
+def test_oauth_callback_may_arrive_from_the_sign_in_site() -> None:
+    from forge.server.security import LocalOnlyGuard
+
+    guard = LocalOnlyGuard(app=None)  # type: ignore[arg-type]
+    headers = {"host": "127.0.0.1:8420", "sec-fetch-site": "cross-site"}
+    callback = {"type": "http", "method": "GET", "path": "/api/services/callback"}
+    assert guard.reject_reason(callback, headers) is None
+    assert guard.reject_reason(callback | {"method": "POST"}, headers) == "cross-site request"
+    assert guard.reject_reason(callback | {"path": "/api/services"}, headers) == "cross-site request"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,21 @@ _ARCHETYPES = {"character", "prop", "weapon_item", "vehicle", "environment", "ui
 _STATUSES = {"concept", "2d_locked", "3d_ready", "engine_integrated"}
 
 
+_PLAIN_LINE_RE = re.compile(r"^(?P<key>[A-Za-z_][\w-]*):[ \t]+(?P<value>[^'\"\[{|>&*!#\s].*?)\s*$")
+
+
+def _quote_plain_values(header: str) -> str:
+    """Quote top-level `key: value` lines, so a prompt like `prompt: A roar: high and squeaky` still reads.
+
+    Agents and people write colons in prompts all the time, and strict YAML rejects them.
+    """
+    return "\n".join(
+        f"{m.group('key')}: {json.dumps(m.group('value'), ensure_ascii=False)}"
+        if (m := _PLAIN_LINE_RE.match(line)) and (": " in m.group("value") or " #" in m.group("value")) else line
+        for line in header.splitlines()
+    )
+
+
 def split_frontmatter(content: str) -> tuple[dict[str, Any], str, bool]:
     match = _FRONTMATTER_RE.match(content)
     if not match:
@@ -22,7 +38,10 @@ def split_frontmatter(content: str) -> tuple[dict[str, Any], str, bool]:
     try:
         loaded = yaml.safe_load(match.group("header")) or {}
     except yaml.YAMLError:
-        return {}, content, False
+        try:
+            loaded = yaml.safe_load(_quote_plain_values(match.group("header"))) or {}
+        except yaml.YAMLError:
+            return {}, content, False
     if not isinstance(loaded, dict):
         return {}, content, False
     return loaded, content[match.end():].lstrip("\r\n"), True

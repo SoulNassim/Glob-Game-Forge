@@ -209,8 +209,11 @@ def _write_skill(path: Path, project: str, keep: bool) -> None:
 
 
 def detect_targets(game: Path) -> list[str]:
-    """Agents that look set up in this folder, plus the defaults."""
+    """Agents that look set up in this folder or are installed on this computer, plus the defaults."""
+    from forge.agent import cli_models
+
     found = [tid for tid, meta in TARGETS.items() if (game / meta["hint"]).exists()]
+    found += [c["id"] for c in cli_models.detect() if c["installed"] and c["id"] in TARGETS]
     return sorted(set(found) | set(DEFAULT_TARGETS), key=list(TARGETS).index)
 
 
