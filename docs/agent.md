@@ -12,23 +12,24 @@ If you already have a tool called `open_glob` (MCP server `glob`), call it and s
 
 ## 2. Install Glob
 
-Installing takes about a minute. It adds [uv](https://docs.astral.sh/uv/) if it is missing, then Glob as a uv tool. Tell the user what you are about to install before you run it.
+Glob installs as a [uv](https://docs.astral.sh/uv/) tool and takes about a minute. Before you run anything, tell the user in one sentence what you are about to install (Glob, the free open-source asset studio, from its GitHub repository) and that they may be asked to approve it.
 
-**Windows** (works from PowerShell, cmd or Git Bash):
-
-```
-powershell -ExecutionPolicy ByPass -NoProfile -c "irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.ps1 | iex"
-```
-
-**macOS / Linux:**
+**If `uv` is installed** (check with `uv --version`), install Glob with one plain package install. It works the same on Windows, macOS and Linux:
 
 ```
-curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh
+uv tool install --python 3.12 "forge-assets @ https://github.com/SoulNassim/Glob-Game-Forge/archive/refs/heads/main.zip"
 ```
+
+**If `uv` is missing**, the installer script adds uv first, then Glob:
+
+- Windows (PowerShell, cmd or Git Bash): `powershell -ExecutionPolicy ByPass -NoProfile -c "irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.ps1 | iex"`
+- macOS / Linux: `curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh`
+
+**If your permission system blocks or denies the install, that is expected:** installing software is the user's call. Don't look for another way to run it. Stop, show the user the exact command, and ask them to approve it or run it themselves in a terminal in the game folder. Continue with step 3 once they say it's done.
 
 ## 3. Connect this game and open Glob
 
-Run this in the game folder. Your shell may not see the new `glob` command yet, so use its full path:
+Run this in the game folder. Your shell may not see the new `glob` command yet, so use its full path (`uv tool dir --bin` prints the folder it is in):
 
 - Windows: `"%USERPROFILE%\.local\bin\glob.exe" connect` (PowerShell: `& "$env:USERPROFILE\.local\bin\glob.exe" connect`, Git Bash: `"$USERPROFILE/.local/bin/glob.exe" connect`)
 - macOS / Linux: `~/.local/bin/glob connect`

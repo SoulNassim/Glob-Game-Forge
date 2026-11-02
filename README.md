@@ -85,7 +85,7 @@ Paste this into your coding agent (Claude Code, Codex, Cursor, Copilot, OpenCode
 Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md
 ```
 
-Your agent follows [`docs/agent.md`](docs/agent.md): it installs Glob with [uv](https://docs.astral.sh/uv/) and runs `glob connect` in your game folder, which
+Your agent follows [`docs/agent.md`](docs/agent.md). It asks you to approve one install command (a plain [uv](https://docs.astral.sh/uv/) package install, or the installer script when uv is missing; if your agent's safety settings block it, it shows you the command to run yourself). Then it runs `glob connect` in your game folder, which
 
 - makes the game's Glob project (in `<game>/glob/`), or finds the one made before;
 - connects your coding agents to it (the MCP server `glob`, a note in `AGENTS.md`, a `glob` skill);
@@ -97,6 +97,11 @@ A short setup asks for generator keys (one is enough; without any, Glob makes pl
 
 <details>
 <summary><b>Rather do it yourself?</b> Install, then <code>glob connect</code></summary>
+
+```bash
+# Already have uv (any OS)
+uv tool install --python 3.12 "forge-assets @ https://github.com/SoulNassim/Glob-Game-Forge/archive/refs/heads/main.zip"
+```
 
 ```powershell
 # Windows (PowerShell)

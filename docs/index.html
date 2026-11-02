@@ -274,7 +274,7 @@ footer .wrap > :last-child{margin-left:auto}
     </div>
     <div class="then rv">The first time · about two minutes</div>
     <div class="first">
-      <div class="rv"><h3>Paste the sentence</h3><p>Your agent reads Glob's setup page, installs Glob and runs <span class="mono">glob connect</span> in your game folder.</p></div>
+      <div class="rv"><h3>Paste the sentence, OK the install</h3><p>Your agent reads Glob's setup page and asks you to approve one install command. Then it runs <span class="mono">glob connect</span> in your game folder.</p></div>
       <div class="rv"><h3>Finish setup in the browser</h3><p>Glob opens on your game. Pick a model and paste your image and 3D keys there: they stay on your computer, never in the agent's chat.</p></div>
       <div class="rv"><h3>Restart your agent</h3><p>It now has Glob's tools and a note in <span class="mono">AGENTS.md</span>. Ask it for art, or just say “open Glob”.</p></div>
     </div>
@@ -453,19 +453,21 @@ footer .wrap > :last-child{margin-left:auto}
         <div class="ask" style="margin-top:28px">
           <div class="lab">The easy way: paste this into your coding agent</div>
           <p id="ask2">Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md</p>
-          <div class="row"><button class="btn pri" type="button" data-copy="ask2">Copy</button><small>Run it from your game's folder.</small></div>
+          <div class="row"><button class="btn pri" type="button" data-copy="ask2">Copy</button><small>Run it from your game's folder. Your agent will ask you to approve the install.</small></div>
         </div>
         <div class="alt">
           <div class="kicker" style="margin-bottom:10px">Or do it yourself</div>
           <div class="ostabs" role="tablist">
+            <button type="button" role="tab" data-tab="t-uv" aria-selected="false">Have uv</button>
             <button type="button" role="tab" data-tab="t-win" aria-selected="false">Windows</button>
             <button type="button" role="tab" data-tab="t-mac" aria-selected="true">macOS / Linux</button>
             <button type="button" role="tab" data-tab="t-src" aria-selected="false">From source</button>
           </div>
+          <div class="cmd" id="t-uv" hidden><span>$</span><code id="c-uv">uv tool install --python 3.12 &quot;forge-assets @ https://github.com/SoulNassim/Glob-Game-Forge/archive/refs/heads/main.zip&quot;</code><button type="button" data-copy="c-uv">Copy</button></div>
           <div class="cmd" id="t-win" hidden><span>&gt;</span><code id="c-win">irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.ps1 | iex</code><button type="button" data-copy="c-win">Copy</button></div>
           <div class="cmd" id="t-mac"><span>$</span><code id="c-mac">curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh</code><button type="button" data-copy="c-mac">Copy</button></div>
           <div class="cmd" id="t-src" hidden><span>$</span><code id="c-src">git clone https://github.com/SoulNassim/Glob-Game-Forge &amp;&amp; cd Glob-Game-Forge &amp;&amp; uv run forge</code><button type="button" data-copy="c-src">Copy</button></div>
-          <p class="note">The one-liners install <a href="https://docs.astral.sh/uv/">uv</a> if needed, then Glob. Then, in a new terminal in your game folder, run <code>glob connect</code>: it connects your coding agents and opens Glob in your browser.</p>
+          <p class="note">Already have <a href="https://docs.astral.sh/uv/">uv</a>? One plain package install does it. Otherwise the installer scripts add uv first, then Glob. Then, in a new terminal in your game folder, run <code>glob connect</code>: it connects your coding agents and opens Glob in your browser.</p>
         </div>
       </div>
       <img class="forge pixel" src="landing/glob-forge.svg" alt="Glob hammering on an anvil">
