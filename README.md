@@ -37,15 +37,8 @@ Making the game is fun. Making the art is usually chaos:
 2. **Connect the game once.** Settings → Coding agent. The agent now knows about Glob. You never have to say "use Glob".
 3. **Glob delivers.** You shape the assets in the app. Finished files land in `glob_delivery/` in your game. The agent swaps its placeholder.
 
-```text
- your coding agent                 Glob                          your game
- -----------------                 ----                          ---------
- place_order  ───────────────▶  Agent Orders board
-                                 file, generate, pick winner
-                                 order is ready  ───────────▶  glob_delivery/<order>/
- swap placeholder  ◀───────────────────────────────────────────  + manifest.json (SHA-256)
- update_order status=integrated ─▶  integrated
-```
+<p align="center"><img src="docs/diagrams/how-it-works.svg" alt="How Glob works: you and your coding agent share one Agent Orders board; Glob files, generates and delivers into your game, and the agent swaps its placeholder" width="100%"></p>
+
 
 <table>
 <tr>
