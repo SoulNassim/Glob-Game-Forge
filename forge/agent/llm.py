@@ -5,6 +5,7 @@ Model ids are prefixed by provider:
   ``openai:<model>``     — OpenAI Chat Completions (key from Settings or OPENAI_API_KEY)
   ``vscode:<id>``        — a model configured in VS Code Copilot's chatLanguageModels.json
   ``ep:<endpoint>/<id>`` — a model from an endpoint added in the app (see ``forge.agent.endpoints``)
+  ``cli:<agent>/<model>`` — a coding-agent CLI on the user's own login (see ``forge.agent.cli_models``)
 An empty id picks the first provider that has credentials.
 """
 
@@ -15,7 +16,7 @@ from typing import Any
 import anthropic
 import httpx
 
-from forge.agent import endpoints
+from forge.agent import cli_models, endpoints
 from forge.config import load_config
 from forge.providers.auth_manager import call_vscode_copilot_model, discover_vscode_copilot_models
 
@@ -39,6 +40,7 @@ def list_agent_models() -> list[dict[str, Any]]:
     models = [{"id": mid, "label": label, "provider": "anthropic", "group": "Anthropic", "ready": has_anthropic, "efforts": list(endpoints.EFFORTS)} for mid, label in ANTHROPIC_MODELS]
     models += [{"id": mid, "label": label, "provider": "openai", "group": "OpenAI", "ready": has_openai, "efforts": []} for mid, label in OPENAI_MODELS]
     models += endpoints.list_models()
+    models += cli_models.list_models()
     imported = {m["id"] for e in endpoints.load_endpoints() if e.get("source") == "vscode" for m in e.get("models", [])}
     try:
         vscode = discover_vscode_copilot_models()
@@ -55,13 +57,13 @@ def list_agent_models() -> list[dict[str, Any]]:
 def resolve_model(selector: str | None) -> str:
     """Turn a stored selector into a concrete, prefixed model id."""
     selector = (selector or "").strip()
-    if selector.startswith(("anthropic:", "openai:", "vscode:", "ep:")):
+    if selector.startswith(("anthropic:", "openai:", "vscode:", "ep:", "cli:")):
         return selector
     if selector.startswith("claude-"):
         return f"anthropic:{selector}"
     ready = [m for m in list_agent_models() if m["ready"]]
     if not ready:
-        raise RuntimeError("No AI model is connected. Open Settings and paste an Anthropic or OpenAI API key.")
+        raise RuntimeError("No AI model is connected. Open Settings and paste an Anthropic or OpenAI API key, or install a coding agent such as Claude Code.")
     return ready[0]["id"]
 
 
@@ -133,4 +135,6 @@ async def call_agent_model(
         return await _call_openai(name or DEFAULT_OPENAI_MODEL, prompt, system_prompt, images)
     if provider == "ep":
         return await endpoints.call(model_id, prompt, system_prompt, images, effort)
+    if provider == "cli":
+        return await cli_models.call(model_id, prompt, system_prompt, images, effort)
     return await call_vscode_copilot_model(prompt=prompt, system_prompt=system_prompt, model_selector=model_id, images_b64=images or None)

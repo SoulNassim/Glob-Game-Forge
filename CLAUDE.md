@@ -1,14 +1,10 @@
-# CLAUDE.md — Instructions for Claude Code & Coding Agents
+# CLAUDE.md — Instructions for Claude Code
 
-Read `AGENTS.md` and `.claude/skills/forge-asset-maker/SKILL.md` for full details on operating the Forge 2D/3D Asset Studio.
+Read `AGENTS.md` for the codebase map and conventions. It covers working on Glob itself.
+
+Glob is your game's asset studio. Your coding agent stays where it is: it orders, Glob delivers. The flow is order → file → generate → deliver → integrate. See the `README.md` and `.claude/skills/forge-asset-maker/SKILL.md`.
 
 ## Quick Commands
-- **Run Forge Studio Server**: `uv run forge` (hosts UI and HTTP API at `http://127.0.0.1:8420`)
-- **Run Forge MCP Server (stdio)**: `uv run forge --mcp`
-- **Run Tests**: `uv run --extra dev pytest -v`
-
-## Collaborating on Game Assets via Markdown Workspace
-- Game definition lives in `projects/default/workspace/GAME.md`.
-- Asset task checklist lives in `projects/default/workspace/ASSET_REQUIREMENTS.md`.
-- Handoff communication log lives in `projects/default/workspace/HANDOFFS.md`.
-- SHA-256 delivery receipts live in `projects/default/workspace/DELIVERY_MANIFEST.json`.
+- **Run Glob Studio**: `uv run forge` (UI and HTTP API at `http://127.0.0.1:8420`)
+- **Run the MCP server (stdio)**: `uv run forge --mcp --project <name>`
+- **Run tests**: `uv run --extra dev pytest -v`

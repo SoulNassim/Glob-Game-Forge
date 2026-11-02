@@ -37,14 +37,67 @@ def sanitize_project_name(name: str) -> str:
     return cleaned or "default"
 
 
+# A project can live in its game's folder (`<game>/glob/`). Its entry `<projects>/<name>/` then keeps
+# this file pointing there, next to game_link.json; everything else is in the game folder.
+HOME_FILE = "home.json"
+GAME_HOME = "glob"
+
+
+def project_home(project_name: str, root_dir: Path | None = None) -> Path:
+    """Where a project's files are: its game folder's `glob/` when it has one, else `<projects>/<name>/`."""
+    entry = (root_dir or get_projects_root()) / project_name
+    try:
+        folder = Path(json.loads((entry / HOME_FILE).read_text(encoding="utf-8"))["folder"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return entry
+    # A game folder that is gone (moved, unplugged drive) is never recreated.
+    return folder if folder.is_dir() else entry
+
+
+def home_owner(game_folder: Path, root_dir: Path | None = None) -> str | None:
+    """The project already made for this game: living in its `glob/` folder, or linked to it from elsewhere."""
+    from forge.game_link import game_folder as linked_game
+
+    target, game = (game_folder / GAME_HOME).resolve(), game_folder.resolve()
+    for name in list_all_projects(root_dir):
+        linked = linked_game(name, root_dir)
+        if project_home(name, root_dir).resolve() == target or (linked and linked.resolve() == game):
+            return name
+    return None
+
+
+def home_for(project_name: str, game_folder: Path, home_folder: Path | None = None) -> Path:
+    """Where a new project's files go: `<game>/glob/` by default. A chosen folder holds them in a `<name>` subfolder,
+    unless it already is a Glob project folder (it has a manifest.db), which is then used as it is."""
+    if home_folder is None:
+        return game_folder / GAME_HOME
+    return home_folder if (home_folder / "manifest.db").exists() else home_folder / project_name
+
+
+def make_home(project_name: str, game_folder: Path, root_dir: Path | None = None, home_folder: Path | None = None) -> Path:
+    """Put a project's files in its home (see `home_for`) and point its entry there."""
+    home = home_for(project_name, game_folder, home_folder)
+    home.mkdir(parents=True, exist_ok=True)
+    if home.resolve().is_relative_to(game_folder.resolve()):
+        # Godot imports every file under res:// unless the folder has a .gdignore.
+        (home / ".gdignore").touch()
+    ignore = home / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("# Glob's own records; workspace/ and assets/ are your project.\nmanifest.db*\nlogs/\ninbox_watch/\n", encoding="utf-8")
+    entry = (root_dir or get_projects_root()) / project_name
+    entry.mkdir(parents=True, exist_ok=True)
+    (entry / HOME_FILE).write_text(json.dumps({"folder": str(home.resolve())}, indent=2), encoding="utf-8")
+    return home
+
+
 class ProjectStore:
     def __init__(self, project_name: str = "default", root_dir: Path | None = None) -> None:
         self.project_name = sanitize_project_name(project_name)
         self.base_root = root_dir or get_projects_root()
-        self.project_dir = (self.base_root / self.project_name).resolve()
-        # Security: ensure project_dir is inside base_root
-        if not str(self.project_dir).startswith(str(self.base_root.resolve())):
+        # Security: the entry must sit directly in base_root; its home may be a game folder.
+        if (self.base_root / self.project_name).resolve().parent != self.base_root.resolve():
             raise ValueError("Invalid project path traversal attempt.")
+        self.project_dir = project_home(self.project_name, self.base_root).resolve()
 
         self.assets_dir = self.project_dir / "assets"
         self.exports_dir = self.project_dir / "exports"

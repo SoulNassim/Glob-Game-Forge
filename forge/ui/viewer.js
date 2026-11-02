@@ -143,7 +143,9 @@ export async function createViewer(container, url, { autoRotate = false, grid: s
   });
   return {
     clips: clips.map((c) => c.name || "Clip"),
-    stats: { ...stats, triangles: Math.round(stats.triangles), height: size.y },
+    stats: { ...stats, triangles: Math.round(stats.triangles), height: size.y, size: { x: size.x, y: size.y, z: size.z } },
+    // OBJ, STL or USDZ of what is on screen, made in the browser (FBX has no exporter).
+    exportAs(format) { return exportObject(object, format); },
     play(index) {
       action?.stop();
       action = index >= 0 && clips[index] ? mixer.clipAction(clips[index]).play() : null;
@@ -162,6 +164,83 @@ export async function createViewer(container, url, { autoRotate = false, grid: s
       renderer.dispose();
       renderer.domElement.remove();
     },
+  };
+}
+
+const EXPORTERS = {
+  obj: ["OBJExporter", (E, o) => new E().parse(o), "text/plain"],
+  stl: ["STLExporter", (E, o) => new E().parse(o, { binary: true }), "model/stl"],
+  usdz: ["USDZExporter", (E, o) => new E().parseAsync(o), "model/vnd.usdz+zip"],
+};
+
+export async function exportObject(object, format) {
+  const [name, run, type] = EXPORTERS[format];
+  const mod = await import(`three/addons/exporters/${name}.js`);
+  const data = await run(mod[name], object);
+  return new Blob([data], { type });
+}
+
+// Every model of a project side by side on one floor, each scaled to its height in metres, with a
+// 1.7 m figure at the left for scale. `items`: [{ url, height, label }].
+export async function createLineup(container, items) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  container.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  lights(scene);
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 1000);
+  const human = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.26, 6, 12), new THREE.MeshStandardMaterial({ color: 0x8a8aa0, roughness: 0.9, transparent: true, opacity: 0.55 }));
+  human.position.y = 0.85;
+  scene.add(human);
+  let x = 0.6;
+  const placed = [{ label: "1.7 m person", x: 0, height: 1.7 }];
+  for (const item of items) {
+    try {
+      const { object } = await loadModel(item.url);
+      const raw = normalise(object);
+      const scale = (item.height || 1) / Math.max(raw.y, 0.0001);
+      object.scale.multiplyScalar(scale);
+      const width = Math.max(raw.x, raw.z) * scale;
+      const holder = new THREE.Group();
+      holder.add(object);
+      holder.position.x = x + width / 2;
+      scene.add(holder);
+      placed.push({ label: item.label, x: x + width / 2, height: item.height });
+      x += width + 0.4;
+    } catch { /* a model that fails to load is left out of the line */ }
+  }
+  const tallest = Math.max(...placed.map((p) => p.height), 1.7);
+  const centre = new THREE.Vector3(x / 2, tallest / 2, 0);
+  const grid = new THREE.GridHelper(Math.max(x, tallest) * 2, 20, 0x3f3f46, 0x27272a);
+  grid.position.x = centre.x;
+  scene.add(grid);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.copy(centre);
+  controls.enableDamping = true;
+  const resize = () => {
+    const { clientWidth: w, clientHeight: h } = container;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / Math.max(1, h);
+    const fit = Math.max(x / camera.aspect, tallest) * 1.25;
+    camera.position.set(centre.x, centre.y + fit * 0.25, fit / (2 * Math.tan(THREE.MathUtils.degToRad(15))));
+    camera.near = 0.01; camera.far = fit * 20;
+    camera.updateProjectionMatrix();
+    controls.update();
+  };
+  const observer = new ResizeObserver(resize);
+  observer.observe(container);
+  resize();
+  let running = true;
+  (function loop() {
+    if (!running) return;
+    requestAnimationFrame(loop);
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+  return {
+    placed,
+    dispose() { running = false; observer.disconnect(); controls.dispose(); renderer.dispose(); renderer.domElement.remove(); },
   };
 }
 

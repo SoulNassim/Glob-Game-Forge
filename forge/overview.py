@@ -171,9 +171,13 @@ def _asset_meta(path: Path) -> dict[str, Any] | None:
     if not kind:
         return None
     # `winner` is workspace-relative; otherwise fall back to the newest output (absolute path).
-    thumb: str | Path | None = str(meta.get("winner") or "") or None
+    winner = str(meta.get("winner") or "")
+    outputs = path.parent / path.stem
+    # A sound's winner is its take and a model can turn on hover, so tiles get both alongside the picture.
+    audio = winner if Path(winner).suffix.lower() in {".mp3", ".wav", ".ogg", ".flac"} else ""
+    model = next((m for sub in ("animations", "rig", "3d") for m in sorted((outputs / sub).glob("*.glb"), reverse=True)), None) if outputs.is_dir() else None
+    thumb: str | Path | None = winner if winner and not audio else None
     if not thumb:
-        outputs = path.parent / path.stem
         for sub in ("candidates", "variants", "edits"):
             folder = outputs / sub
             if folder.is_dir():
@@ -189,7 +193,7 @@ def _asset_meta(path: Path) -> dict[str, Any] | None:
             if previews:
                 thumb = previews[0]
                 break
-    return {"kind": kind, "thumb": thumb}
+    return {"kind": kind, "thumb": thumb, "audio": audio, "model": model}
 
 
 def _folder_summary(ws_dir: Path, directory: Path, limit: int = 400) -> dict[str, Any]:
@@ -264,6 +268,8 @@ def describe_folder(ws_dir: Path, rel: str = "") -> dict[str, Any]:
                     entry["asset_kind"] = asset["kind"]
                     thumb = asset["thumb"]
                     entry["thumb"] = to_rel(thumb) if isinstance(thumb, Path) else thumb
+                    entry["audio"] = asset["audio"]
+                    entry["model"] = to_rel(asset["model"]) if asset["model"] else ""
             files.append(entry)
     page_meta = read_markdown_meta(page) if page else {"title": humanize(directory.name), "excerpt": ""}
     return {
@@ -324,6 +330,8 @@ def project_card(ws_dir: Path, project: str) -> dict[str, Any]:
                 previews.append((thumb.stat().st_mtime, thumb.relative_to(ws_dir).as_posix()))
             elif isinstance(thumb, str) and thumb and (ws_dir / thumb).is_file():
                 previews.append(((ws_dir / thumb).stat().st_mtime, thumb))
+    cover = _cover(ws_dir)
+    card["cover"] = cover.relative_to(ws_dir).as_posix() if cover else None
     card["sections"] = sum(1 for c in ws_dir.iterdir() if c.is_dir() and _visible(c) and c.name != PILLAR_DIR)
     chosen = [rel for _, rel in sorted(previews, key=lambda t: t[0], reverse=True)]
     chosen += [p.relative_to(ws_dir).as_posix() for _, p in sorted(images, key=lambda t: t[0], reverse=True)]
@@ -335,10 +343,12 @@ def build_overview(ws_dir: Path, project: str) -> dict[str, Any]:
     root = describe_folder(ws_dir)
     if not root["page"]:
         root["title"] = humanize(project)
-    sections = [
-        {"number": f"{index:02d}", **folder, "children": folder_tree(ws_dir, ws_dir / folder["path"])}
-        for index, folder in enumerate(root["folders"], start=1)
-    ]
+    # A folder named "08-vfx" is section 08 even when 07 doesn't exist; unnumbered ones count on from the last.
+    sections, last = [], 0
+    for folder in root["folders"]:
+        match = _ORDER_RE.match(folder["name"])
+        last = int(match.group(1)) if match else last + 1
+        sections.append({"number": f"{last:02d}", **folder, "children": folder_tree(ws_dir, ws_dir / folder["path"])})
     return {"project": project, **root, "sections": sections, "empty": not root["page"] and not sections and not root["files"]}
 
 

@@ -20,8 +20,9 @@ SKIP_PARTS = {".trash", "__pycache__"}
 MAX_IMPORT_BYTES = 8 * 1024 * 1024 * 1024
 
 
-def export_project(project_dir: Path, dest: Path, progress: Callable[[int, int], None] | None = None) -> dict[str, int | str]:
+def export_project(project_dir: Path, dest: Path, progress: Callable[[int, int], None] | None = None, name: str = "") -> dict[str, int | str]:
     project_dir = project_dir.resolve()
+    name = name or project_dir.name  # a project in its game folder lives in `glob/`
     if not project_dir.is_dir():
         raise FileNotFoundError(f"No project folder '{project_dir.name}'.")
     files = [
@@ -33,7 +34,7 @@ def export_project(project_dir: Path, dest: Path, progress: Callable[[int, int],
     total = 0
     with zipfile.ZipFile(temporary, "w", allowZip64=True) as archive:
         for index, path in enumerate(files):
-            arcname = f"{project_dir.name}/{path.relative_to(project_dir).as_posix()}"
+            arcname = f"{name}/{path.relative_to(project_dir).as_posix()}"
             method = zipfile.ZIP_STORED if path.suffix.lower() in STORED_SUFFIXES else zipfile.ZIP_DEFLATED
             archive.write(path, arcname, compress_type=method)
             total += path.stat().st_size

@@ -22,6 +22,9 @@ class ProviderCapability(str, Enum):
     TEXT_TO_VIDEO = "text_to_video"
     IMAGE_TO_VIDEO = "image_to_video"
     VISION_CRITIC = "vision_critic"
+    SOUND_EFFECT = "sound_effect"
+    TEXT_TO_SPEECH = "text_to_speech"
+    TEXT_TO_MUSIC = "text_to_music"
 
 
 class ProviderError(Exception):

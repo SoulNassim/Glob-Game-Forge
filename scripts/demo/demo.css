@@ -1,0 +1,17 @@
+/* Live demo pill, shown over the real Glob UI. */
+.demo-pill {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9999;
+  display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; max-width: calc(100vw - 32px);
+  border-radius: 999px; border: 1px solid rgba(255, 122, 156, .45); background: rgba(13, 13, 16, .88);
+  backdrop-filter: blur(12px); box-shadow: 0 12px 40px -12px rgba(255, 122, 156, .55);
+  font: 500 13px/1.2 Inter, system-ui, sans-serif; color: #f4f4f5; white-space: nowrap;
+}
+.demo-pill b { color: #ff7a9c; font-weight: 700; }
+.demo-pill span { color: #a1a1aa; overflow: hidden; text-overflow: ellipsis; }
+.demo-pill a { padding: 7px 14px; border-radius: 999px; background: #ff7a9c; color: #2a0612; font-weight: 700; text-decoration: none; }
+@media (max-width: 700px) {
+  .demo-pill { left: auto; right: 12px; transform: none; bottom: 140px; padding: 6px 6px 6px 12px; }
+  .demo-pill span { display: none; }
+}
+/* There is no model to connect in the demo. */
+.banner:has([data-settings]) { display: none; }

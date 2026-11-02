@@ -49,7 +49,7 @@ SKIP_DIRS = {
     ".git", ".godot", ".import", ".vs", ".vscode", ".idea", "node_modules", "__pycache__", ".venv", "venv",
     "build", "builds", "dist", "export", "exports", "addons", "plugins", "demo", "demos", "_retired", "retired",
     "library", "temp", "logs", "obj", "packages", "projectsettings", "usersettings", "intermediate", "binaries",
-    "saved", "deriveddatacache", ".agent-out", ".kilo", ".claude",
+    "saved", "deriveddatacache", ".agent-out", ".kilo", ".claude", ".codex", ".cursor", ".gemini", ".agents", "glob_delivery",
 }
 # Folders that only say what format is inside; their files belong to the parent folder's asset.
 GENERIC_DIRS = {
@@ -211,7 +211,8 @@ def _walk(root: Path) -> tuple[list[Path], dict[str, int]]:
     files: list[Path] = []
     skipped = {"engine_files": 0, "archives": 0, "too_large": 0, "unreal_binary": 0}
     for current, dirs, names in os.walk(root):
-        dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS and not d.startswith(".")]
+        # Also skip Glob's own home in the game (`glob/` with its manifest), so imports never copy it into itself.
+        dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS and not d.startswith(".") and not (Path(current) / d / "manifest.db").is_file()]
         for name in names:
             path = Path(current) / name
             suffix = path.suffix.lower()
@@ -460,7 +461,7 @@ def _split_mixed(units: dict[str, Unit]) -> None:
 
 def _unit_summary(target: Unit) -> dict[str, Any]:
     return {
-        "title": target.title, "shape": target.shape, "kind": target.kind, "source": target.source,
+        "id": target.key, "title": target.title, "shape": target.shape, "kind": target.kind, "source": target.source,
         "models": target.count("model"), "animations": target.count("anim"), "textures": target.count("texture"),
         "variants": target.count("variant"), "images": target.count("image"), "audio": target.count("audio"),
         "description": (target.data.get("description") or "")[:200] if target.data else "",
@@ -720,12 +721,26 @@ def import_game(
     *,
     title: str | None = None,
     progress: Callable[[str], None] | None = None,
+    plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Copy a game's assets into the workspace as sections, assets, kits and galleries."""
+    """Copy a game's assets into the workspace as sections, assets, kits and galleries.
+
+    `plan` is what the user approved in the import preview: {"exclude": [unit ids], "move": {unit id: section key},
+    "sections": {section key: {"include": bool, "title": str}}, "orders": bool}. With "orders", everything the game
+    defines without art also becomes a filed agent order, so it shows up in Agent Orders.
+    """
     say = progress or (lambda _message: None)
     say("Scanning the game folder…")
     result = analyze(folder)
     summary, units, root, engine = result["summary"], result["units"], result["root"], result["engine"]
+    plan = plan or {}
+    excluded = set(plan.get("exclude") or [])
+    moves = {uid: key for uid, key in (plan.get("move") or {}).items() if key in SECTION}
+    section_plan = plan.get("sections") or {}
+    titles = {key: str(v.get("title")).strip()[:60] for key, v in section_plan.items() if isinstance(v, dict) and str(v.get("title") or "").strip()}
+    for target in units:
+        target.section = moves.get(target.key, target.section)
+    units = [u for u in units if u.key not in excluded and (section_plan.get(u.section) or {}).get("include", True) is not False]
     ws = Path(ws_dir)
     ws.mkdir(parents=True, exist_ok=True)
     writer = _Writer(ws, root, engine, say)
@@ -735,10 +750,12 @@ def import_game(
     def section_dir(key: str) -> Path:
         nonlocal number
         if key not in sections:
-            sections[key] = ws / f"{number:02d}-{key}"
+            sections[key] = ws / f"{number:02d}-{_slug(titles[key]) if key in titles else key}"
             number += 1
-            _readme(sections[key], SECTION[key][0], SECTION_INTRO.get(key, ""))
+            _readme(sections[key], titles.get(key) or SECTION[key][0], SECTION_INTRO.get(key, ""))
         return sections[key]
+
+    needs_art: list[tuple[Unit, Path]] = []
 
     assets_written: list[str] = []
     order = [key for key, *_ in SECTIONS]
@@ -768,9 +785,26 @@ def import_game(
                 body += "The game defines this, but it has no model or image yet.\n\n" + "\n".join(_data_table(target.data)) + "\n"
                 md.write_text(serialize_frontmatter(meta, body), encoding="utf-8")
             assets_written.append(writer.rel(md))
+            needs_art.append((target, md))
             continue
         md = _write_asset(writer, folder_path, target, target.files, existing=existing)
         assets_written.append(writer.rel(md))
+
+    ordered = 0
+    if plan.get("orders") and needs_art:
+        from forge import orders
+
+        for target, md in needs_art:
+            kind = target.kind if target.kind in orders.KINDS else "prop"
+            try:
+                order = orders.place(ws, target.title, kind, (target.data.get("description") or "")[:600],
+                                     writer.res(target.data["file"]), requested_by="game import")
+                if not order.get("asset"):
+                    orders.file_order(ws, order["id"], writer.rel(md))
+                ordered += 1
+            except (ValueError, KeyError, OSError):
+                continue
+        say(f"Added {ordered} 'needs art' entries to Agent Orders.")
 
     _write_front_page(ws, summary, title or summary["title"], sections)
     manifest = ws / "inbox" / "import.json"
@@ -784,7 +818,7 @@ def import_game(
     manifest.write_text(json.dumps({"imports": [*previous[-4:], record]}, indent=1), encoding="utf-8")
     say(f"Copied {len(writer.copied)} files ({writer.bytes / 1_048_576:.0f} MB).")
     return {"summary": summary, "assets": assets_written, "copied": len(writer.copied), "bytes": writer.bytes,
-            "sections": {key: writer.rel(path) for key, path in sections.items()}}
+            "sections": {key: writer.rel(path) for key, path in sections.items()}, "orders": ordered}
 
 
 def _find_existing(folder: Path, title: str) -> Path | None:

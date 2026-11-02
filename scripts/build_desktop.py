@@ -27,7 +27,11 @@ def main() -> None:
         "import os\n"
         "from pathlib import Path\n"
         "os.environ.setdefault('FORGE_PROJECTS_DIR', str(Path.home() / 'Glob' / 'projects'))\n"
-        "from forge.desktop import main\n"
+        "import sys\n"
+        "if '--mcp' in sys.argv:\n"
+        "    from forge.cli import main\n"
+        "else:\n"
+        "    from forge.desktop import main\n"
         "main()\n",
         encoding="utf-8",
     )

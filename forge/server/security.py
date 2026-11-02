@@ -2,14 +2,18 @@
 
 Glob listens on 127.0.0.1 and has no login, so any web page the user visits could otherwise
 talk to it: a cross-site form POST (CSRF) or a DNS-rebinding page whose domain resolves to
-127.0.0.1. Several endpoints write files, spend provider credits or start coding agents and
-terminals, so every request passes this guard first:
+127.0.0.1. Several endpoints write files, spend provider credits or write into connected game folders,
+so every request passes this guard first:
 
 * the Host header must name a loopback address (or the host the user explicitly bound to),
   which defeats DNS rebinding;
 * /api and /ws requests coming from another site are refused: a browser marks them with
   ``Sec-Fetch-Site: cross-site`` or an ``Origin`` that differs from the Host. Clients
   without an Origin (MCP agents, curl, tests) keep working.
+
+One exception: the OAuth sign-in callback is a plain GET the browser makes when a service's sign-in page sends
+the user back, so it always comes from another site. It does nothing without the one-time `state` that Glob
+itself handed out for that sign-in, which is what protects it.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 GUARDED_PREFIXES = ("/api", "/ws")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+OAUTH_CALLBACKS = {"/api/services/callback"}
 
 
 def is_loopback(host: str) -> bool:
@@ -62,6 +67,8 @@ class LocalOnlyGuard:
             return "unexpected Host header (Glob only answers on localhost)"
         path = scope.get("path", "")
         if not path.startswith(GUARDED_PREFIXES):
+            return None
+        if path in OAUTH_CALLBACKS and scope["type"] == "http" and scope.get("method") == "GET":
             return None
         if headers.get("sec-fetch-site") == "cross-site":
             return "cross-site request"

@@ -21,6 +21,7 @@ class AssetType(str, Enum):
     PART = "part"
     ICON = "icon"
     TURNAROUND = "turnaround"
+    AUDIO = "audio"
 
 
 class AssetStatus(str, Enum):

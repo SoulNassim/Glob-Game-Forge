@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Glob — the game-asset forge</title>
-<meta name="description" content="Glob is a free, open-source game-asset forge for Windows and macOS. Describe your game; Glob turns prompts into consistent 2D art and 3D models on your own machine. Plug in Claude Code, Codex or any MCP agent.">
+<meta name="description" content="Glob is a free, open-source game-asset forge for Windows and macOS. Describe your game; Glob turns prompts into consistent 2D art, 3D models and sounds on your own machine. Plug in Claude Code, Codex or any MCP agent.">
 <meta property="og:title" content="Glob — the game-asset forge">
-<meta property="og:description" content="Describe your game. Glob builds the project and forges consistent 2D art and 3D models — locally.">
-<meta property="og:image" content="landing/promo-poster.jpg">
+<meta property="og:description" content="Describe your game. Glob builds the project and forges consistent 2D art, 3D models and sounds — locally.">
+<meta property="og:image" content="landing/key-art.webp">
 <meta name="theme-color" content="#0b0710">
 <link rel="icon" href="landing/icon.png">
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800;900&family=JetBrains+Mono:wght@400;600&family=Pixelify+Sans:wght@600;700&display=swap" rel="stylesheet">
@@ -112,7 +113,9 @@ h2 em{font-style:normal;color:var(--pink)}
 .cands{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px;width:100%}
 .cands img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:2px solid transparent;opacity:.55}
 .cands img.win{border-color:var(--lime);opacity:1;box-shadow:0 0 22px -4px var(--lime)}
-.step video{height:190px;width:auto}
+.step model-viewer{width:100%;height:190px;--poster-color:transparent;background:radial-gradient(circle at 50% 60%,rgba(255,122,156,.18),transparent 65%)}
+.step .vis.mv{background:#120c12;position:relative}
+.step .drag{position:absolute;right:10px;bottom:8px;font:500 11px "JetBrains Mono";color:var(--dim)}
 
 /* showcase */
 .show{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;margin-top:48px}
@@ -123,7 +126,21 @@ h2 em{font-style:normal;color:var(--pink)}
 .gallery figure{margin:0;border-radius:16px;overflow:hidden;background:#0e090e;border:1px solid var(--line);aspect-ratio:1;display:grid;place-items:center}
 .gallery img{width:100%;height:100%;object-fit:cover;transition:transform .4s}
 .gallery figure:hover img{transform:scale(1.06)}
+.gallery figcaption{position:absolute;left:10px;bottom:8px;font:600 12px Inter;color:#fff;text-shadow:0 1px 6px #000}
+.gallery figure{position:relative}
 .locked{display:inline-flex;margin-top:16px;padding:8px 14px;border-radius:10px;background:var(--lime);color:#1a2600;font:800 14px Inter;letter-spacing:.04em;transform:rotate(-2deg)}
+
+/* live demo */
+.demo{position:relative;border-radius:28px;overflow:hidden;border:1px solid var(--line2);min-height:440px;display:flex;align-items:flex-end;box-shadow:0 40px 90px -40px rgba(255,122,156,.5)}
+.demo>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.demo::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,7,16,.95) 0%,rgba(11,7,16,.75) 45%,rgba(11,7,16,.1) 80%)}
+.demo .in{position:relative;z-index:1;padding:48px;max-width:600px}
+.demo h2{margin-top:10px}
+.demo ul.ticks{margin-bottom:28px}
+.shots{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}
+.shots figure{margin:0}
+.shots img{border-radius:16px;border:1px solid var(--line2);width:100%}
+.shots figcaption{font-size:14px;color:var(--dim);margin-top:8px}
 
 /* features */
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:48px}
@@ -190,6 +207,9 @@ footer .wrap > :last-child{margin-left:auto}
   .hero .wrap,.show,.agent,.install{grid-template-columns:1fr}
   .steps{grid-template-columns:1fr 1fr}
   .grid,.pains{grid-template-columns:1fr 1fr}
+  .shots{grid-template-columns:1fr}
+  .demo::after{background:linear-gradient(0deg,rgba(11,7,16,.96) 30%,rgba(11,7,16,.4) 100%)}
+  .demo .in{padding:28px 22px}
   .phone .mascot{left:auto;right:-6px;bottom:-30px;width:130px}
   nav .links{display:none}
   nav .btn{margin-left:auto}
@@ -212,7 +232,7 @@ footer .wrap > :last-child{margin-left:auto}
   <div class="wrap">
     <a class="brand" href="#top"><img class="pixel" src="landing/glob-face.svg" alt=""><b>GLOB</b></a>
     <div class="links">
-      <a href="#problem">Why</a><a href="#how">How it works</a><a href="#features">Features</a><a href="#agents">For agents</a><a href="#install">Download</a>
+      <a href="#problem">Why</a><a href="#how">How it works</a><a href="#demo">Live demo</a><a href="#features">Features</a><a href="#agents">For agents</a><a href="#install">Download</a>
     </div>
     <a class="btn ghost sm" href="https://github.com/SoulNassim/Glob-Game-Forge">★ GitHub</a>
   </div>
@@ -223,10 +243,10 @@ footer .wrap > :last-child{margin-left:auto}
     <div>
       <span class="eyebrow"><i></i>Open source · free forever · runs on your machine</span>
       <h1>Your game’s art,<br><em>forged</em> <span class="y">locally.</span></h1>
-      <p class="lede">Glob is a tiny slime blacksmith with a very big hammer. Describe your game and it builds the project, keeps every asset organized, and turns prompts into <b>consistent</b> 2D art and real 3D models.</p>
+      <p class="lede">Glob is a tiny slime blacksmith with a very big hammer. Describe your game and it builds the project, keeps every asset organized, and turns prompts into <b>consistent</b> 2D art, real 3D models and sounds.</p>
       <div class="cta">
         <a class="btn pri" href="#install" id="hero-dl">Download free</a>
-        <a class="btn ghost" href="#how">See how it works</a>
+        <a class="btn ghost" href="demo/">▶ Try the live demo</a>
       </div>
       <div class="cmd"><span>$</span><code id="cmd">curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh</code><button type="button" data-copy="cmd">Copy</button></div>
       <div class="works">Plug &amp; play with <b>Claude Code</b> · <b>Codex</b> · <b>Gemini CLI</b> · <b>OpenCode</b> · any MCP agent</div>
@@ -280,41 +300,65 @@ footer .wrap > :last-child{margin-left:auto}
       <div class="step rv">
         <h3>Describe your game</h3>
         <p>Three questions. Glob writes a style bible and designs the folders, pages and first assets.</p>
-        <div class="vis"><div class="chat"><div class="me">a grim chess game, dark fantasy pieces</div><div class="bot">Made 5 sections, 12 assets and a style bible ✦</div></div></div>
+        <div class="vis"><div class="chat"><div class="me">a tiny pastel kaiju defending a neon toy Tokyo</div><div class="bot">Made 7 sections, 16 assets and a style bible ✦</div></div></div>
       </div>
       <div class="step rv">
         <h3>Generate 2D</h3>
         <p>Candidates from Gemini, GPT Image, Seedream or Meshy — with your style in every prompt.</p>
-        <div class="vis"><img src="landing/knight.webp" alt="Generated knight chess piece" loading="lazy"></div>
+        <div class="vis"><img src="landing/mochi.webp" alt="Mochi, the pastel kaiju, generated in the project style" loading="lazy"></div>
       </div>
       <div class="step rv">
         <h3>Pick a winner</h3>
         <p>Keep the best one, make a variant or edit it. Drop in your own art any time.</p>
-        <div class="vis"><div class="cands"><img src="landing/axe.webp" alt="" loading="lazy"><img class="win" src="landing/knight.webp" alt="Winning candidate" loading="lazy"><img src="landing/demon.webp" alt="" loading="lazy"></div></div>
+        <div class="vis"><div class="cands"><img src="landing/scout-3.webp" alt="" loading="lazy"><img class="win" src="landing/scout-2.webp" alt="Winning tin scout candidate" loading="lazy"><img src="landing/scout-1.webp" alt="" loading="lazy"></div></div>
       </div>
       <div class="step rv">
         <h3>Make 3D</h3>
-        <p>One click to a textured GLB, ready for your engine. Bonk.</p>
-        <div class="vis" style="background:#120c12"><video src="landing/turntable.mp4" autoplay muted loop playsinline preload="metadata" aria-label="Rotating 3D model of the iron knight chess piece"></video></div>
+        <p>One click to a textured GLB, ready for your engine. Bonk. (Go on, drag it.)</p>
+        <div class="vis mv"><model-viewer src="demo/projects/pocket_kaiju/workspace/02-characters/player/mochi/3d/mochi-3d-20261102-105904.glb" poster="demo/projects/pocket_kaiju/workspace/02-characters/player/mochi/3d/mochi-3d-20261102-105904_thumb.png" alt="Mochi as a textured 3D model" camera-controls auto-rotate rotation-per-second="40deg" interaction-prompt="none" shadow-intensity="1" loading="lazy" disable-zoom></model-viewer><span class="drag">GLB · 12k tris</span></div>
       </div>
     </div>
 
     <div class="show">
       <div class="rv">
-        <div class="shot"><img src="screenshots/workspace.png" alt="Glob workspace: chat with Glob on the left, live project overview on the right" loading="lazy"></div>
-        <div class="cap">Chat with Glob on the left; your project, built straight from its folders, on the right.</div>
+        <div class="shot"><img src="screenshots/workspace.webp" alt="Glob with Pocket Kaiju open: chat with Glob on the left, the project overview with its key art on the right" loading="lazy"></div>
+        <div class="cap">Pocket Kaiju, a sample project made entirely in Glob. Chat on the left; the project, built straight from its folders, on the right.</div>
       </div>
       <div class="rv">
         <div class="gallery">
-          <figure><img src="landing/knight.webp" alt="Knight" loading="lazy"></figure>
-          <figure><img src="landing/axe.webp" alt="Axe knight" loading="lazy"></figure>
-          <figure><img src="landing/archer.webp" alt="Archer" loading="lazy"></figure>
-          <figure><img src="landing/minotaur.webp" alt="Minotaur" loading="lazy"></figure>
-          <figure><img src="landing/demon.webp" alt="Demon" loading="lazy"></figure>
-          <figure><img src="landing/cavalry.webp" alt="Cavalry" loading="lazy"></figure>
+          <figure><img src="landing/mochi.webp" alt="Mochi" loading="lazy"><figcaption>Mochi</figcaption></figure>
+          <figure><img src="landing/tin-titan.webp" alt="Tin titan" loading="lazy"><figcaption>Tin titan</figcaption></figure>
+          <figure><img src="landing/tin-brute.webp" alt="Tin brute" loading="lazy"><figcaption>Tin brute</figcaption></figure>
+          <figure><img src="landing/vending-machine.webp" alt="Vending machine" loading="lazy"><figcaption>Vending machine</figcaption></figure>
+          <figure><img src="landing/paper-lantern.webp" alt="Paper lantern" loading="lazy"><figcaption>Paper lantern</figcaption></figure>
+          <figure><img src="landing/neon-block.webp" alt="Neon city block" loading="lazy"><figcaption>Neon block</figcaption></figure>
         </div>
         <span class="locked">✓ ONE STYLE BIBLE · EVERY PIECE MATCHES</span>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="wrap">
+    <div class="demo rv">
+      <img src="landing/key-art.webp" alt="Pocket Kaiju key art: Mochi breathing a rainbow over a neon toy Tokyo" loading="lazy">
+      <div class="in">
+        <div class="kicker">Live demo</div>
+        <h2>Click through a <em>finished</em> project.</h2>
+        <p class="sub">Pocket Kaiju runs in the real Glob app, right in your browser. Nothing to install and no keys; it just can't generate anything.</p>
+        <ul class="ticks">
+          <li><span><b>16 assets</b> in 7 sections, each with its prompt, candidates and winner.</span></li>
+          <li><span><b>3D models</b> you can spin, measure and line up at game scale.</span></li>
+          <li><span><b>Sounds</b> with waveforms, and the board with every asset on one canvas.</span></li>
+        </ul>
+        <a class="btn pri" href="demo/">▶ Open the live demo</a>
+      </div>
+    </div>
+    <div class="shots">
+      <figure class="rv"><img src="screenshots/send-sheet.webp" alt="Generate sheet: source, model, price, final prompt and pillar images" loading="lazy"><figcaption>See model, price and the exact prompt before anything is sent.</figcaption></figure>
+      <figure class="rv"><img src="screenshots/board.webp" alt="Board: every Pocket Kaiju asset on one canvas, grouped by section" loading="lazy"><figcaption>The board: every asset on one canvas, to spot what doesn't match.</figcaption></figure>
+      <figure class="rv"><img src="screenshots/viewer.webp" alt="3D viewer with triangle count, size, game height and OBJ, STL and USDZ export" loading="lazy"><figcaption>3D viewer with poly count, game height and OBJ, STL or USDZ export.</figcaption></figure>
     </div>
   </div>
 </section>
@@ -331,6 +375,9 @@ footer .wrap > :last-child{margin-left:auto}
       <div class="feat rv"><div class="ic">◎</div><h3>See the prompt before you pay</h3><p>Model, price, final prompt and every attached image — editable before each run.</p></div>
       <div class="feat rv"><div class="ic">⚙</div><h3>Bring any model</h3><p>Anthropic, OpenAI, Gemini, OpenRouter, Ollama, LM Studio or any OpenAI-compatible URL.</p></div>
       <div class="feat rv"><div class="ic">›_</div><h3>Coding agents as tabs</h3><p>Claude Code, Codex, OpenCode and Gemini CLI run inside the project with your own login.</p></div>
+      <div class="feat rv"><div class="ic">♪</div><h3>Sounds, music &amp; voices</h3><p>Sound effects in up to 6 takes, music and voice lines. Trim on the waveform and check a loop by ear.</p></div>
+      <div class="feat rv"><div class="ic">▦</div><h3>Board &amp; press kit</h3><p>Every asset on one canvas, a 3D lineup at game scale, and a press-kit page you can upload to itch.io.</p></div>
+      <div class="feat rv"><div class="ic">⌘</div><h3>Fast to drive</h3><p>Pick winners with 1–9 and Enter, jump anywhere with ⌘K, and generate every missing asset in one go.</p></div>
       <div class="feat rv"><div class="ic">⌂</div><h3>Local &amp; private</h3><p>Runs on 127.0.0.1. Keys stay in <span class="mono">~/.forge</span>, never in a project or export. Demo Mode costs nothing.</p></div>
     </div>
   </div>
@@ -342,25 +389,23 @@ footer .wrap > :last-child{margin-left:auto}
       <div class="rv">
         <div class="kicker">For your coding agent</div>
         <h2>No more <em>placeholder</em> cubes.</h2>
-        <p class="sub">Plug in the agent you already use: Claude Code, Codex, Gemini CLI, OpenCode or any MCP client. It asks Glob for an asset instead of faking one; Glob forges it, delivers it into the game and writes a receipt.</p>
+        <p class="sub">Plug in the agent you already use: Claude Code, Codex, Gemini CLI, OpenCode or any MCP client. It orders the real asset instead of faking one; you shape it in Glob, and it lands in your game folder with a receipt.</p>
         <ul class="ticks">
-          <li><span><b>Requirements as a checklist</b> — one Markdown line per asset, ticked when delivered.</span></li>
-          <li><span><b>SHA-256 receipts</b> in <span class="mono">DELIVERY_MANIFEST.json</span>.</span></li>
-          <li><span><b>Preview before writing</b> into a Godot, Unity or Unreal project.</span></li>
+          <li><span><b>Orders, not prompts</b> — the agent writes a brief and keeps its placeholder until the asset is ready.</span></li>
+          <li><span><b>Connect once</b> in Settings → Coding agent. You never have to say “use Glob”.</span></li>
+          <li><span><b>SHA-256 receipts</b> in <span class="mono">glob_delivery/manifest.json</span>; Glob never writes anywhere else.</span></li>
         </ul>
         <div class="engines"><span>GODOT</span><span>UNITY</span><span>UNREAL</span></div>
       </div>
       <div class="term rv">
         <div class="bar"><i></i><i></i><i></i><span>coding agent ⇄ glob (MCP)</span></div>
-<pre><span class="c-d"># .mcp.json</span>
-{ "mcpServers": { "forge": {
-    "command": "uv", "args": ["run", "forge", "--mcp"] } } }
-
-<span class="c-d">&gt;</span> agent: need art for crypt_scout
-<span class="c-p">→ add_asset_requirement("crypt_scout", "3D Mesh")</span>
-<span class="c-g">✓ delivered res://assets/models/crypt_scout.glb</span>
-<span class="c-y">  sha256 9f3c…a71e  receipt ✓</span>
-<span class="c-g">  ASSET_REQUIREMENTS.md  [x]</span></pre>
+<pre><span class="c-d">&gt;</span> agent: the tin scout is still a grey capsule
+<span class="c-p">→ place_order("Tin scout", kind="creature", needs=["image", "model"],
+    placeholder="res://enemies/tin_scout.tscn")</span>
+<span class="c-d">  … you pick a winner and Make 3D in Glob …</span>
+<span class="c-g">✓ ready: glob_delivery/tin_scout/tin_scout.glb</span>
+<span class="c-y">  sha256 9f3c…a71e  manifest.json ✓</span>
+<span class="c-p">→ update_order("tin_scout", status="integrated")</span></pre>
       </div>
     </div>
   </div>

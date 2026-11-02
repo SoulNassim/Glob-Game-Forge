@@ -148,7 +148,9 @@ def canonical_image_model(model: str) -> str:
 
 
 def resolve_image_provider(provider_id: str, params: dict[str, Any]) -> str:
-    """Route `elevenlabs:*` image selections off the Gemini adapter."""
+    """Route `elevenlabs:*` image selections off the Gemini adapter, and `svc:*` to the signed-in services."""
+    if str(params.get("model") or "").startswith("svc:"):
+        return "service"
     if provider_id != "gemini":
         if provider_id == "elevenlabs" and params.get("model"):
             # Rewrite removed/unsupported ids (e.g. gemini-nano-banana-2.1) to API tags.
