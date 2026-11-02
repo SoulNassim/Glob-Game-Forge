@@ -18,7 +18,7 @@ projects/*/inbox_watch/
 projects/Fear_and_Hunger_3D/assets/ast_2cbb762b09.obj
 
 # Your game projects live here and stay on your machine (keys never go in them, but art and DBs are large)
-projects/
+/projects/
 
 # Local tool state
 .gemini/

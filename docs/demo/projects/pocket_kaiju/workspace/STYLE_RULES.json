@@ -1,0 +1,100 @@
+{
+  "categories": {
+    "character": {
+      "label": "Character / Figurine",
+      "folder": "characters",
+      "prompt_rule": "Full-body dark fantasy tabletop figurine on a carved circular stone pedestal base, readable chunky proportions, dramatic top-down dungeon rim lighting, clean isolated background, no cropped limbs.",
+      "default_workflow": "make_3d_figurine"
+    },
+    "item": {
+      "label": "Item / Weapon / Prop",
+      "folder": "items",
+      "prompt_rule": "Standalone game prop or item with a high-contrast silhouette, centered isometric 3/4 view, clean transparent background, materials matching the project's art style.",
+      "default_workflow": "make_3d_prop"
+    },
+    "card_art": {
+      "label": "Card / Flat Art",
+      "folder": "cards",
+      "prompt_rule": "Illustrated card art with dramatic painterly lighting, dynamic focal subject framed for vertical card portrait, rich atmospheric background matching the project's art style.",
+      "default_workflow": "approve_2d"
+    },
+    "ui": {
+      "label": "UI Frame / Orb / Icon",
+      "folder": "ui",
+      "prompt_rule": "Game UI element or icon in the project's art style, crisp orthographic front view, clean alpha channel.",
+      "default_workflow": "approve_2d"
+    },
+    "environment": {
+      "label": "Board / Environment Tile",
+      "folder": "environments",
+      "prompt_rule": "Dark candlelit stone dungeon tactical chessboard environment, cracked obsidian and limestone tiles with glowing orange rune inlays, warm torchlight bounce.",
+      "default_workflow": "make_3d_prop"
+    }
+  },
+  "materials": {
+    "Weathered Iron": "hammered dark iron with battle scratches and oiled steel highlights",
+    "Mossy Castle Stone": "cracked ancient fortress masonry overgrown with damp dungeon moss and glowing magma seams",
+    "Crimson Royal": "deep burgundy velvet drapery with tarnished silver filigree and dark plate armor",
+    "Amber Runes": "incandescent carved orange-gold runes pulsing with arcane heat",
+    "Aged Parchment & Wood": "candlelit medieval war-table oak, tarnished brass coins, and ink-stained parchment"
+  },
+  "workflows": {
+    "make_3d_figurine": {
+      "id": "make_3d_figurine",
+      "label": "Make 3D Figurine (GLB)",
+      "description": "Convert winning 2D image into a 3D mesh on a tabletop pedestal (Meshy 7.1, 12k tris, PBR textures).",
+      "params": {
+        "ai_model": "meshy-7.1",
+        "target_polycount": 12000,
+        "should_texture": true,
+        "enable_pbr": true
+      }
+    },
+    "make_3d_prop": {
+      "id": "make_3d_prop",
+      "label": "Make 3D Prop / Weapon (GLB)",
+      "description": "Convert winning 2D image into a game-ready low/mid-poly 3D prop (smart-topology, 6k tris).",
+      "params": {
+        "ai_model": "meshy-t2.5",
+        "model_type": "smart-topology",
+        "target_polycount": 6000,
+        "should_texture": true
+      }
+    },
+    "split_body_parts": {
+      "id": "split_body_parts",
+      "label": "Split Character into Rig Parts",
+      "description": "Isolate Head, Torso, Arms, Legs, and Weapon into separate clean assets for modular rigging or 3D.",
+      "parts": [
+        "Head & Helmet",
+        "Armored Torso",
+        "Left & Right Arms",
+        "Greaves & Boots",
+        "Primary Weapon / Shield"
+      ]
+    },
+    "slice_lineup_sheet": {
+      "id": "slice_lineup_sheet",
+      "label": "Slice Concept Lineup into 4 Assets",
+      "description": "Split a horizontal multi-character concept sheet (e.g. Pawn, Knight, Rook, Queen) into 4 standalone assets.",
+      "slices": [
+        "Pawn Footman",
+        "Armored Knight Destrier",
+        "Rook Castle Golem",
+        "Crimson Queen"
+      ]
+    },
+    "make_variants": {
+      "id": "make_variants",
+      "label": "Make Material / Faction Variants",
+      "description": "Generate sibling variations (Iron, Mossy Stone, Crimson, Gold) with locked silhouette."
+    },
+    "approve_2d": {
+      "id": "approve_2d",
+      "label": "Approve 2D Asset Directly",
+      "description": "Finalize this 2D illustration/card/icon and mark it ready for the coding agent."
+    }
+  },
+  "linked_game_folder": "",
+  "pinned": false
+}
