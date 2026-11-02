@@ -1,126 +1,80 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="410" viewBox="0 0 960 410" role="img" aria-labelledby="t d">
   <title id="t">How Glob works</title>
-  <desc id="d">You see and shape every order on one Glob board. Your coding agent places orders, Glob delivers finished files into your game, and the agent swaps its placeholder.</desc>
-  <defs>
-    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0,0 L8,4 L0,8 z" fill="#57606a"/>
-    </marker>
-    <marker id="arrBlue" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0,0 L8,4 L0,8 z" fill="#0969da"/>
-    </marker>
-  </defs>
+  <desc id="d">1. Tell your coding agent "open glob". 2. Glob opens in your browser on the project the agent works on, with every order on one board. 3. Finished assets land in your game's glob_delivery folder and the agent swaps its placeholder.</desc>
   <style>
-    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #24292f; }
-    .muted { fill: #57606a; font-size: 11px; }
-    .small { font-size: 9px; fill: #57606a; }
-    .mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; fill: #0969da; }
-    .card { fill: #ffffff; stroke: #d0d7de; stroke-width: 1; }
-    .arrow { fill: none; stroke: #57606a; stroke-width: 1.6; marker-end: url(#arr); }
-    .arrowBlue { fill: none; stroke: #0969da; stroke-width: 1.6; marker-end: url(#arrBlue); }
+    .sans { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .mono { font-family: "JetBrains Mono", Consolas, Menlo, monospace; }
+    .step { font-size: 12px; letter-spacing: 2px; font-weight: 700; fill: #ff7a9c; }
+    .cmd { font-size: 16px; fill: #f6eef3; font-weight: 700; }
+    .call { font-size: 14px; fill: #ff7a9c; }
+    .ok { font-size: 14px; fill: #c6f432; }
+    .dim { font-size: 13px; fill: #7d6a77; }
+    .file { font-size: 14px; fill: #f6eef3; }
+    .dir { font-size: 14px; fill: #ffb3c6; font-weight: 700; }
+    .url { font-size: 11px; fill: #b6a3b0; }
+    .col { font-size: 9px; letter-spacing: 1px; fill: #7d6a77; font-weight: 700; }
+    .chip { font-size: 12px; letter-spacing: 1.5px; font-weight: 700; fill: #b6a3b0; }
+    .chip-on { font-size: 12px; letter-spacing: 1.5px; font-weight: 700; fill: #0b0710; }
+    .note { font-size: 13px; fill: #b6a3b0; }
   </style>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#ff7a9c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
 
-  <!-- background -->
-  <rect x="0" y="0" width="960" height="520" rx="16" fill="#f6f8fa"/>
+  <rect width="960" height="410" rx="24" fill="#0b0710"/>
+  <rect x="0.5" y="0.5" width="959" height="409" rx="24" fill="none" stroke="#2a1a26"/>
 
-  <!-- You -->
-  <rect class="card" x="24" y="40" width="190" height="130" rx="12"/>
-  <circle cx="119" cy="66" r="13" fill="#0969da"/>
-  <path d="M98 106 Q98 84 119 84 Q140 84 140 106 Z" fill="#0969da"/>
-  <text x="119" y="132" text-anchor="middle" font-size="16" font-weight="700">You</text>
-  <text class="muted" x="119" y="152" text-anchor="middle">say “open Glob” · pick winners</text>
+  <!-- 1 · tell your agent -->
+  <text class="mono step" x="32" y="50">01  TELL YOUR AGENT</text>
+  <rect x="32" y="66" width="256" height="240" rx="16" fill="#08060a" stroke="#3a2433"/>
+  <circle cx="54" cy="88" r="5" fill="#ff5a6a"/><circle cx="70" cy="88" r="5" fill="#fde047"/><circle cx="86" cy="88" r="5" fill="#c6f432"/>
+  <line x1="32" y1="108" x2="288" y2="108" stroke="#2a1a26"/>
+  <text class="mono dim" x="52" y="150">&gt;</text><text class="mono cmd" x="70" y="150">open glob</text>
+  <text class="mono call" x="52" y="192">→ open_glob()</text>
+  <text class="mono ok" x="52" y="230">✓ Glob is up</text>
+  <text class="mono dim" x="52" y="256">  on your project</text>
 
-  <!-- Coding agent -->
-  <rect class="card" x="24" y="200" width="190" height="130" rx="12"/>
-  <text x="119" y="228" text-anchor="middle" font-size="14" font-weight="700">Your coding agent</text>
-  <text class="muted" x="119" y="248" text-anchor="middle">Claude Code · Codex · Cursor</text>
-  <text class="mono" x="119" y="272" text-anchor="middle">place_order</text>
-  <text class="mono" x="119" y="290" text-anchor="middle">update_order</text>
-  <text class="mono" x="119" y="308" text-anchor="middle">open_glob</text>
+  <path d="M300 186 H340" stroke="#ff7a9c" stroke-width="2.5" stroke-linecap="round" marker-end="url(#arr)"/>
 
-  <!-- Your game -->
-  <rect class="card" x="24" y="380" width="190" height="120" rx="12"/>
-  <text x="119" y="408" text-anchor="middle" font-size="14" font-weight="700">Your game</text>
-  <text class="mono" x="119" y="430" text-anchor="middle">glob_delivery/&lt;order&gt;/</text>
-  <text class="muted" x="119" y="450" text-anchor="middle">+ manifest.json · SHA-256</text>
-
-  <!-- Glob board -->
-  <rect class="card" x="280" y="40" width="650" height="400" rx="14"/>
-  <text x="300" y="66" font-size="16" font-weight="700">Glob · Agent Orders board</text>
-  <text class="muted" x="300" y="84">Every order in one place. You see all of it here.</text>
-  <!-- generation mode switch -->
-  <rect x="700" y="52" width="210" height="26" rx="13" fill="#f6f8fa" stroke="#d0d7de"/>
-  <rect x="772" y="54" width="66" height="22" rx="11" fill="#0969da"/>
-  <g font-size="11" text-anchor="middle">
-    <text x="735" y="69">Manual</text>
-    <text x="805" y="69" style="fill:#ffffff" font-weight="700">2D auto</text>
-    <text x="875" y="69">Full auto</text>
-  </g>
-  <rect x="300" y="96" width="620" height="28" rx="14" fill="#ddf4ff" stroke="#54aeff"/>
-  <text x="310" y="114" font-size="11" style="fill:#0969da">Glob agent · sorts drafts · rearranges sections · files orders · just ask it</text>
-
-  <!-- columns -->
-  <g font-size="11" font-weight="700" text-anchor="middle">
-    <rect x="296" y="138" width="96" height="24" rx="6" fill="#eaeef2"/><text x="344" y="154">Drafts</text>
-    <rect x="400" y="138" width="96" height="24" rx="6" fill="#eaeef2"/><text x="448" y="154">Filed</text>
-    <rect x="504" y="138" width="96" height="24" rx="6" fill="#eaeef2"/><text x="552" y="154">In progress</text>
-    <rect x="608" y="138" width="96" height="24" rx="6" fill="#eaeef2"/><text x="656" y="154">Ready</text>
-    <rect x="712" y="138" width="96" height="24" rx="6" fill="#eaeef2"/><text x="760" y="154">Delivered</text>
-    <rect x="816" y="138" width="96" height="24" rx="6" fill="#eaeef2"/><text x="864" y="154">Integrated</text>
-  </g>
-  <g fill="#f6f8fa">
-    <rect x="296" y="168" width="96" height="232" rx="6"/>
-    <rect x="400" y="168" width="96" height="232" rx="6"/>
-    <rect x="504" y="168" width="96" height="232" rx="6"/>
-    <rect x="608" y="168" width="96" height="232" rx="6"/>
-    <rect x="712" y="168" width="96" height="232" rx="6"/>
-    <rect x="816" y="168" width="96" height="232" rx="6"/>
+  <!-- 2 · Glob opens on the project -->
+  <text class="mono step" x="352" y="50">02  GLOB OPENS</text>
+  <rect x="352" y="66" width="256" height="240" rx="16" fill="#150d15" stroke="#3a2433"/>
+  <rect x="368" y="80" width="224" height="26" rx="13" fill="#0b0710" stroke="#2a1a26"/>
+  <text class="mono url" x="384" y="97">127.0.0.1:8420/?project=kaiju</text>
+  <g transform="translate(440 92) scale(4)" shape-rendering="crispEdges"><rect x="7" y="7" width="1" height="1" fill="#3b0a1e"/><rect x="8" y="7" width="1" height="1" fill="#3b0a1e"/><rect x="9" y="7" width="1" height="1" fill="#3b0a1e"/><rect x="10" y="7" width="1" height="1" fill="#3b0a1e"/><rect x="11" y="7" width="1" height="1" fill="#3b0a1e"/><rect x="12" y="7" width="1" height="1" fill="#3b0a1e"/><rect x="5" y="8" width="1" height="1" fill="#3b0a1e"/><rect x="6" y="8" width="1" height="1" fill="#3b0a1e"/><rect x="7" y="8" width="1" height="1" fill="#ffb3c6"/><rect x="8" y="8" width="1" height="1" fill="#ffb3c6"/><rect x="9" y="8" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="8" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="8" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="8" width="1" height="1" fill="#ff7a9c"/><rect x="13" y="8" width="1" height="1" fill="#3b0a1e"/><rect x="14" y="8" width="1" height="1" fill="#3b0a1e"/><rect x="4" y="9" width="1" height="1" fill="#3b0a1e"/><rect x="5" y="9" width="1" height="1" fill="#ffb3c6"/><rect x="6" y="9" width="1" height="1" fill="#ffffff"/><rect x="7" y="9" width="1" height="1" fill="#ffb3c6"/><rect x="8" y="9" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="9" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="9" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="9" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="9" width="1" height="1" fill="#ff7a9c"/><rect x="13" y="9" width="1" height="1" fill="#ff7a9c"/><rect x="14" y="9" width="1" height="1" fill="#ff7a9c"/><rect x="15" y="9" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="10" width="1" height="1" fill="#3b0a1e"/><rect x="4" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="5" y="10" width="1" height="1" fill="#ffb3c6"/><rect x="6" y="10" width="1" height="1" fill="#ffffff"/><rect x="7" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="8" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="13" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="14" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="15" y="10" width="1" height="1" fill="#ff7a9c"/><rect x="16" y="10" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="11" width="1" height="1" fill="#3b0a1e"/><rect x="4" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="5" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="6" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="7" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="8" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="13" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="14" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="15" y="11" width="1" height="1" fill="#ff7a9c"/><rect x="16" y="11" width="1" height="1" fill="#3b0a1e"/><rect x="2" y="12" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="4" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="5" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="6" y="12" width="1" height="1" fill="#1a0610"/><rect x="7" y="12" width="1" height="1" fill="#1a0610"/><rect x="8" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="12" width="1" height="1" fill="#1a0610"/><rect x="13" y="12" width="1" height="1" fill="#1a0610"/><rect x="14" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="15" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="16" y="12" width="1" height="1" fill="#ff7a9c"/><rect x="17" y="12" width="1" height="1" fill="#3b0a1e"/><rect x="2" y="13" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="4" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="5" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="6" y="13" width="1" height="1" fill="#1a0610"/><rect x="7" y="13" width="1" height="1" fill="#ffffff"/><rect x="8" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="13" width="1" height="1" fill="#1a0610"/><rect x="13" y="13" width="1" height="1" fill="#ffffff"/><rect x="14" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="15" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="16" y="13" width="1" height="1" fill="#ff7a9c"/><rect x="17" y="13" width="1" height="1" fill="#3b0a1e"/><rect x="2" y="14" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="4" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="5" y="14" width="1" height="1" fill="#ff4f7b"/><rect x="6" y="14" width="1" height="1" fill="#ff4f7b"/><rect x="7" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="8" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="13" y="14" width="1" height="1" fill="#ff4f7b"/><rect x="14" y="14" width="1" height="1" fill="#ff4f7b"/><rect x="15" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="16" y="14" width="1" height="1" fill="#ff7a9c"/><rect x="17" y="14" width="1" height="1" fill="#3b0a1e"/><rect x="2" y="15" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="4" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="5" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="6" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="7" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="8" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="15" width="1" height="1" fill="#3b0a1e"/><rect x="10" y="15" width="1" height="1" fill="#3b0a1e"/><rect x="11" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="13" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="14" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="15" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="16" y="15" width="1" height="1" fill="#ff7a9c"/><rect x="17" y="15" width="1" height="1" fill="#3b0a1e"/><rect x="2" y="16" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="16" width="1" height="1" fill="#e0436b"/><rect x="4" y="16" width="1" height="1" fill="#7c2d12"/><rect x="5" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="6" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="7" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="8" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="13" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="14" y="16" width="1" height="1" fill="#ff7a9c"/><rect x="15" y="16" width="1" height="1" fill="#7c2d12"/><rect x="16" y="16" width="1" height="1" fill="#e0436b"/><rect x="17" y="16" width="1" height="1" fill="#3b0a1e"/><rect x="2" y="17" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="17" width="1" height="1" fill="#e0436b"/><rect x="4" y="17" width="1" height="1" fill="#e0436b"/><rect x="5" y="17" width="1" height="1" fill="#7c2d12"/><rect x="6" y="17" width="1" height="1" fill="#7c2d12"/><rect x="7" y="17" width="1" height="1" fill="#ff7a9c"/><rect x="8" y="17" width="1" height="1" fill="#ff7a9c"/><rect x="9" y="17" width="1" height="1" fill="#ff7a9c"/><rect x="10" y="17" width="1" height="1" fill="#ff7a9c"/><rect x="11" y="17" width="1" height="1" fill="#ff7a9c"/><rect x="12" y="17" width="1" height="1" fill="#ff7a9c"/><rect x="13" y="17" width="1" height="1" fill="#7c2d12"/><rect x="14" y="17" width="1" height="1" fill="#7c2d12"/><rect x="15" y="17" width="1" height="1" fill="#e0436b"/><rect x="16" y="17" width="1" height="1" fill="#e0436b"/><rect x="17" y="17" width="1" height="1" fill="#3b0a1e"/><rect x="3" y="18" width="1" height="1" fill="#3b0a1e"/><rect x="4" y="18" width="1" height="1" fill="#e0436b"/><rect x="5" y="18" width="1" height="1" fill="#e0436b"/><rect x="6" y="18" width="1" height="1" fill="#e0436b"/><rect x="7" y="18" width="1" height="1" fill="#7c2d12"/><rect x="8" y="18" width="1" height="1" fill="#7c2d12"/><rect x="9" y="18" width="1" height="1" fill="#7c2d12"/><rect x="10" y="18" width="1" height="1" fill="#7c2d12"/><rect x="11" y="18" width="1" height="1" fill="#7c2d12"/><rect x="12" y="18" width="1" height="1" fill="#7c2d12"/><rect x="13" y="18" width="1" height="1" fill="#e0436b"/><rect x="14" y="18" width="1" height="1" fill="#e0436b"/><rect x="15" y="18" width="1" height="1" fill="#e0436b"/><rect x="16" y="18" width="1" height="1" fill="#3b0a1e"/><rect x="4" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="5" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="6" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="7" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="8" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="9" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="10" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="11" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="12" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="13" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="14" y="19" width="1" height="1" fill="#3b0a1e"/><rect x="15" y="19" width="1" height="1" fill="#3b0a1e"/></g>
+  <g>
+    <rect x="368" y="190" width="68" height="100" rx="8" fill="#0b0710"/>
+    <rect x="446" y="190" width="68" height="100" rx="8" fill="#0b0710"/>
+    <rect x="524" y="190" width="68" height="100" rx="8" fill="#0b0710"/>
+    <text class="mono col" x="402" y="206" text-anchor="middle">ORDERS</text>
+    <text class="mono col" x="480" y="206" text-anchor="middle">MAKING</text>
+    <text class="mono col" x="558" y="206" text-anchor="middle">READY</text>
+    <rect x="376" y="214" width="52" height="18" rx="5" fill="#3a2433"/>
+    <rect x="376" y="238" width="52" height="18" rx="5" fill="#3a2433"/>
+    <rect x="454" y="214" width="52" height="18" rx="5" fill="#ff7a9c"/>
+    <rect x="454" y="238" width="52" height="18" rx="5" fill="#ffb3c6"/>
+    <rect x="532" y="214" width="52" height="18" rx="5" fill="#fde047"/>
   </g>
 
-  <!-- order cards -->
-  <g class="card">
-    <rect x="302" y="180" width="84" height="44" rx="6"/>
-    <rect x="302" y="232" width="84" height="44" rx="6"/>
-    <rect x="302" y="284" width="84" height="44" rx="6"/>
-    <rect x="406" y="180" width="84" height="44" rx="6"/>
-    <rect x="510" y="180" width="84" height="44" rx="6"/>
-    <rect x="614" y="180" width="84" height="44" rx="6"/>
-    <rect x="718" y="180" width="84" height="44" rx="6"/>
-    <rect x="822" y="180" width="84" height="44" rx="6"/>
-  </g>
-  <g font-size="11" font-weight="700">
-    <text x="310" y="198">Ash hound</text>
-    <text x="310" y="250">Iron axe</text>
-    <text x="310" y="302">Moss gate</text>
-    <text x="414" y="198">Gate tiles</text>
-    <text x="518" y="198">Mochi</text>
-    <text x="622" y="198">Hero run</text>
-    <text x="726" y="198">Coin pickup</text>
-    <text x="830" y="198">Lantern</text>
-  </g>
-  <g class="small">
-    <text x="310" y="212">ordered</text>
-    <text x="310" y="264">ordered</text>
-    <text x="310" y="316">ordered</text>
-    <text x="414" y="212">filed · prompt set</text>
-    <text x="518" y="212">generating</text>
-    <text x="622" y="212">pick winner</text>
-    <text x="726" y="212">copied to game</text>
-    <text x="830" y="212">swapped in</text>
-  </g>
+  <path d="M620 186 H660" stroke="#ff7a9c" stroke-width="2.5" stroke-linecap="round" marker-end="url(#arr)"/>
 
-  <!-- you can shape the board yourself -->
-  <text class="muted" x="300" y="422">You: drag cards to rearrange, rename, or ask Glob to do it.</text>
+  <!-- 3 · assets land in the game -->
+  <text class="mono step" x="672" y="50">03  LANDS IN YOUR GAME</text>
+  <rect x="672" y="66" width="256" height="240" rx="16" fill="#08060a" stroke="#3a2433"/>
+  <text class="mono dim" x="692" y="110">your-game/</text>
+  <text class="mono dir" x="708" y="142">glob_delivery/</text>
+  <text class="mono file" x="724" y="174">tin_scout.glb</text>
+  <text class="mono file" x="724" y="202">tin_scout.png</text>
+  <text class="mono ok" x="724" y="230">manifest.json ✓</text>
+  <rect x="692" y="252" width="216" height="34" rx="17" fill="none" stroke="#fde047"/>
+  <text class="mono" x="800" y="274" text-anchor="middle" style="font-size:12px;fill:#fde047;font-weight:700">✓ placeholder swapped</text>
 
-  <!-- arrows -->
-  <path class="arrow" d="M214 100 H278"/>
-  <text class="small" x="247" y="92" text-anchor="middle">see it all</text>
-
-  <path class="arrow" d="M214 260 H294"/>
-  <text class="mono" x="254" y="252" text-anchor="middle" font-size="10">place_order</text>
-
-  <path class="arrowBlue" d="M760 440 V460 H216"/>
-  <text class="small" x="480" y="476" text-anchor="middle">delivered: files + manifest.json land in the game</text>
-
-  <path class="arrow" d="M80 380 V334"/>
-  <text class="small" x="88" y="360">swap placeholder</text>
+  <!-- how far Glob goes on its own -->
+  <rect x="303" y="332" width="110" height="30" rx="15" fill="none" stroke="#3a2433"/>
+  <rect x="425" y="332" width="110" height="30" rx="15" fill="#ff7a9c"/>
+  <rect x="547" y="332" width="110" height="30" rx="15" fill="none" stroke="#3a2433"/>
+  <text class="mono chip" x="358" y="352" text-anchor="middle">MANUAL</text>
+  <text class="mono chip-on" x="480" y="352" text-anchor="middle">2D AUTO</text>
+  <text class="mono chip" x="602" y="352" text-anchor="middle">FULL AUTO</text>
+  <text class="sans note" x="480" y="388" text-anchor="middle">you choose how far Glob goes on its own</text>
 </svg>

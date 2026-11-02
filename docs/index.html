@@ -82,6 +82,8 @@ h1 .y{color:var(--yel)}
 
 /* strips */
 section{padding:96px 0}
+#flow{padding-top:48px}
+.flowimg{width:100%;height:auto;margin-top:36px;border-radius:24px;box-shadow:0 30px 80px rgba(255,122,156,.08)}
 .kicker{font:600 13px "JetBrains Mono";letter-spacing:.14em;color:var(--pink);text-transform:uppercase}
 h2{font-weight:900;font-size:clamp(34px,4.4vw,56px);line-height:1.02;letter-spacing:-.03em;margin:14px 0 18px}
 h2 em{font-style:normal;color:var(--pink)}
@@ -242,8 +244,8 @@ footer .wrap > :last-child{margin-left:auto}
   <div class="wrap">
     <div>
       <span class="eyebrow"><i></i>Open source · free forever · runs on your machine</span>
-      <h1>Your game’s art,<br><em>forged</em> <span class="y">locally.</span></h1>
-      <p class="lede">Glob is a tiny slime blacksmith with a very big hammer. Describe your game and it builds the project, keeps every asset organized, and turns prompts into <b>consistent</b> 2D art, real 3D models and sounds.</p>
+      <h1>Tell your agent<br><em>“open Glob”</em><span class="y">.</span></h1>
+      <p class="lede">Glob is a tiny slime blacksmith with a very big hammer. It opens right on the game your coding agent is building, takes its orders, and forges <b>consistent</b> 2D art, real 3D models and sounds straight into your game folder.</p>
       <div class="cta">
         <a class="btn pri" href="#install" id="hero-dl">Download free</a>
         <a class="btn ghost" href="demo/">▶ Try the live demo</a>
@@ -258,6 +260,17 @@ footer .wrap > :last-child{margin-left:auto}
     </div>
   </div>
 </header>
+
+<section id="flow">
+  <div class="wrap">
+    <div class="rv">
+      <div class="kicker">In one picture</div>
+      <h2>One sentence to your agent.<br>Art in your <em>game folder</em>.</h2>
+      <p class="sub">Connect your game once. After that, your agent starts Glob on this computer and opens it on the project it’s working on. The desktop app is optional: one window for all your projects.</p>
+    </div>
+    <img class="flowimg rv" src="diagrams/how-it-works.svg" alt="1. Tell your agent: open glob. 2. Glob opens on your project, with every order on one board. 3. Finished assets land in your game's glob_delivery folder and the agent swaps its placeholder. You choose Manual, 2D auto or Full auto." loading="lazy">
+  </div>
+</section>
 
 <section id="problem">
   <div class="wrap">

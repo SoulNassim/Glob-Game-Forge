@@ -4,42 +4,32 @@
 
 # Glob
 
-### Your coding agent writes the game. Glob makes the art.
+### Tell your coding agent *"open Glob"*. That's it.
 
-Your agent codes with grey placeholder cubes and **orders** the real assets.<br>
-Glob turns every order into 2D art, 3D models, rigs, animations, icons and sounds,<br>
+Glob opens in your browser, on the game your agent is building.<br>
+The agent orders the art it needs; Glob forges 2D art, 3D models, rigs, animations, icons and sounds<br>
 and drops the finished files straight into your game.
 
-[**⬇ Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [Just say "open Glob"](#just-say-open-glob) · [Generation modes](#generation-modes)
+[**⬇ Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [Generation modes](#generation-modes)
 
 **Free and open source (MIT).** Bring keys for the generators you use. No markup, no subscription.
 
 </div>
 
+<p align="center"><img src="docs/diagrams/how-it-works.svg" alt="1. Tell your agent: open glob. 2. Glob opens on your project, with every order on one board. 3. Finished assets land in your game's glob_delivery folder and the agent swaps its placeholder. You choose Manual, 2D auto or Full auto." width="100%"></p>
+
+## Just say "open Glob"
+
+Connect your game once. After that you never start Glob yourself: say **"open Glob"** to your agent (Claude Code, Codex, Cursor, Copilot, OpenCode, Gemini CLI), or just let it order its first asset. Glob starts on this computer and opens on the project your agent is working on, with every order, prompt, image, model and sound in one place.
+
+- **No app to keep open.** Glob runs on `localhost` while you need it. *Settings → Storage & access → Stop Glob* ends it.
+- **The desktop app is optional:** one window for all your projects, with every game's key art.
+- **Rather start it yourself?** Run `glob`, and set `FORGE_NO_AUTOSTART=1` for your agent.
+
 ![Glob with the Pocket Kaiju sample open: chat on the left, the project overview with its key art on the right](docs/screenshots/workspace.webp)
 
 <p align="center"><b>Pocket Kaiju</b>: a sample game made entirely in Glob, with 16 assets, 3D models and sounds.<br>
 <a href="https://soulnassim.github.io/Glob-Game-Forge/demo/"><b>▶ Click through it in the live demo</b></a>: the real app in your browser, read-only, no keys needed.</p>
-
-## Just say "open Glob"
-
-Once your game is connected, you never start Glob yourself. Tell your agent **"open Glob"**, or just let it order its first asset: Glob starts on this computer and opens **in your browser, on the project your agent is working on**. Every order, prompt, image, model and sound, organized in one place.
-
-```text
-> you: open glob
-→ open_glob()
-✓ Glob is up: http://127.0.0.1:8420/?project=pocket_kaiju      ← your browser opens here
-```
-
-| | **Your coding agent** | **Glob in the browser** | **Glob desktop app** *(optional)* |
-|---|---|---|---|
-| What it is | Claude Code, Codex, Cursor, VS Code / Copilot, OpenCode or Gemini CLI, in your game folder | The studio for the project your agent works on | One window for **all** your projects |
-| Who starts it | You, as today | Your agent (`open_glob`), or `glob` in a terminal | You |
-| What it does | Codes with placeholders, orders the real assets, swaps them in | Files orders, generates, shows the price first, delivers | The same studio, plus the projects page with every game's key art |
-
-Glob started by your agent keeps running in the background after the agent stops; **Settings → Storage & access → Stop Glob** ends it. Set `FORGE_NO_AUTOSTART=1` if you'd rather start it yourself.
-
-<p align="center"><img src="docs/diagrams/how-it-works.svg" alt="How Glob works: you and your coding agent share one Agent Orders board; Glob files, generates and delivers into your game, and the agent swaps its placeholder" width="100%"></p>
 
 ## Generation modes
 
