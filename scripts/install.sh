@@ -15,9 +15,11 @@ fi
 echo "Installing Glob..."
 uv tool install --force --python 3.12 "forge-assets @ $SOURCE"
 uv tool update-shell >/dev/null 2>&1 || true
+"$HOME/.local/bin/glob" shortcut || true
 
 echo
-echo "Glob is installed. In your game folder, run:"
+echo "Glob is installed. Open it any time with the Glob shortcut (desktop on macOS, app menu on Linux) or: glob open"
+echo "To connect a game, run this in its folder:"
 echo "  glob connect     # connect your coding agents and open Glob in the browser"
 echo "(New terminal needed for 'glob' to be found; until then use ~/.local/bin/glob)"
 echo "Or just tell your agent: Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md"

@@ -18,6 +18,7 @@ from forge.config import get_projects_root
 def game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("FORGE_PROJECTS_DIR", str(tmp_path / "projects"))
     monkeypatch.setenv("FORGE_CONFIG_DIR", str(tmp_path / ".forge"))
+    monkeypatch.setattr("forge.shortcut.exists", lambda: True)  # no real desktop shortcuts from tests
     folder = tmp_path / "Pocket Kaiju"
     folder.mkdir()
     return folder

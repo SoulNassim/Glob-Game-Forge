@@ -352,7 +352,39 @@ def build_overview(ws_dir: Path, project: str) -> dict[str, Any]:
         match = _ORDER_RE.match(folder["name"])
         last = int(match.group(1)) if match else last + 1
         sections.append({"number": f"{last:02d}", **folder, "children": folder_tree(ws_dir, ws_dir / folder["path"])})
-    return {"project": project, **root, "sections": sections, "empty": not root["page"] and not sections and not root["files"]}
+    return {"project": project, **root, "sections": sections, "showcase": showcase(ws_dir, sections),
+            "empty": not root["page"] and not sections and not root["files"]}
+
+
+def showcase(ws_dir: Path, sections: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
+    """The project's best face for its front page: assets with a picture, taken in turn from each section so the
+    cast, their weapons and the world all show (section order, so characters lead)."""
+    root = ws_dir.resolve()
+    per_section: list[list[dict[str, Any]]] = []
+    for section in sections:
+        found = []
+        for path in sorted((root / section["path"]).rglob("*.md"))[:300]:
+            if not all(_visible(Path(part)) for part in path.relative_to(root).parts) or PILLAR_DIR in path.parts:
+                continue
+            meta = _asset_meta(path)
+            if not meta or not meta["thumb"]:
+                continue
+            thumb = meta["thumb"]
+            found.append({"path": path.relative_to(root).as_posix(), "title": read_markdown_meta(path)["title"], "kind": meta["kind"],
+                          "thumb": thumb.resolve().relative_to(root).as_posix() if isinstance(thumb, Path) else thumb})
+            if len(found) >= limit:
+                break
+        if found:
+            per_section.append(found)
+    picked: list[dict[str, Any]] = []
+    while per_section and len(picked) < limit:
+        for found in list(per_section):
+            picked.append(found.pop(0))
+            if not found:
+                per_section.remove(found)
+            if len(picked) >= limit:
+                break
+    return picked
 
 
 def slugify(value: str) -> str:

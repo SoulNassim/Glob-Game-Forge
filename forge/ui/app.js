@@ -1603,6 +1603,7 @@ async function renderViewBody() {
         <button class="ghost" data-press-kit>${icon("download")} Press kit</button>
         ${ov.page ? `<button class="ghost" data-open="${esc(ov.page)}">Open ${esc(ov.page)}</button>` : ""}
       </div>
+      ${showcaseStrip(ov.showcase || [])}
       ${body ? `<div class="md">${renderMarkdown(stripLead(body), "")}</div>` : ""}
       ${ov.sections.length ? `<h2 class="block-title">Sections</h2>${folderCards(ov.sections, true)}` : ""}
       ${pillarStrip(ov.pillars || [], "", "Bible pillars", ov.text_pillars || [])}
@@ -2150,6 +2151,50 @@ function audioCard(o, winner) {
       <a class="act wide" href="${esc(fileUrl(o.path))}" download>${icon("download")}Download</a></div></div>`;
 }
 
+// Animation clips as one compact list: the same clip in several files (Walk.fbx and walk.res) is one row, and
+// an FBX clip plays on the model in the hero viewer. Glob's own animated GLBs (mesh included) keep their cards.
+function animationBlock(list, canPlay) {
+  const cards = list.filter((o) => o.type === "model" && /\.glb$/i.test(o.path));
+  const clips = {};
+  for (const o of list.filter((x) => !cards.includes(x))) {
+    const file = o.path.split("/").pop();
+    const stem = file.replace(/\.[^.]+$/, "");
+    (clips[stem.toLowerCase().replace(/[^a-z0-9]+/g, "")] ||= { label: humanize(stem.replace(/[_-]+/g, " ")), files: [] }).files.push(o.path);
+  }
+  const rows = Object.values(clips).sort((x, y) => x.label.localeCompare(y.label)).map((c) => {
+    const playable = canPlay && c.files.find((p) => /\.(fbx|glb|gltf)$/i.test(p));
+    return `<div class="clip">${playable ? `<button type="button" class="clip-play" data-play-clip="${esc(playable)}" title="Play on the model above">${icon("play")}</button>` : `<span class="clip-play off">${icon("film")}</span>`}
+      <span class="clip-name">${esc(c.label)}</span>
+      <span class="clip-files">${c.files.map((p) => `<a href="${esc(fileUrl(p))}" download title="${esc(p.split("/").pop())}">${esc(p.split(".").pop().toUpperCase())}</a>`).join("")}</span></div>`;
+  }).join("");
+  const count = Object.keys(clips).length;
+  return `<h2 class="block-title" id="out-animations">Animations <span class="block-count">${count + cards.length}</span></h2>
+    ${cards.length ? outputGrid(cards, "", "animations") : ""}
+    ${count ? `<div class="clip-list">${rows}</div>${canPlay ? "" : `<p class="hint-line">Add the character's 3D model to play these clips on it here.</p>`}` : ""}`;
+}
+
+// Textures are the model's material maps: a small strip, not a wall of cards.
+function textureStrip(list) {
+  const images = list.filter((o) => o.type === "image");
+  const files = list.filter((o) => o.type !== "image");
+  return `<details class="tex-block"${list.length <= 8 ? " open" : ""}><summary><h2 class="block-title" id="out-textures">Textures <span class="block-count">${list.length}</span></h2></summary>
+    <div class="tex-strip">${images.map((o) => `<a href="${esc(fileUrl(o.path))}" data-lightbox="${esc(o.path)}" title="${esc(o.path.split("/").pop())}"><img src="${esc(fileUrl(o.path))}" alt="" loading="lazy"></a>`).join("")}
+    ${files.map((o) => `<a class="tex-file" href="${esc(fileUrl(o.path))}" download>${esc(o.path.split("/").pop())}</a>`).join("")}</div></details>`;
+}
+
+document.addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-play-clip]");
+  if (!t) return;
+  if (!hero?.view) return toast("The 3D model is still loading.", true);
+  document.querySelectorAll(".clip.playing").forEach((c) => c.classList.remove("playing"));
+  try {
+    if (await hero.view.playFrom(fileUrl(t.dataset.playClip))) {
+      t.closest(".clip").classList.add("playing");
+      $("#content [data-hero-model]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else toast("This clip's bones don't match the model, so it can't play here.", true);
+  } catch { toast("Couldn't load this clip.", true); }
+});
+
 const OUTPUT_SECTIONS = [
   ["audio", "Takes"], ["3d", "3D models"], ["rig", "Rigged"], ["animations", "Animations"], ["sprites", "Sprite sheets"], ["icons", "Icons"],
   ["views", "Turnaround views"], ["candidates", "Candidates"], ["variants", "Variants"], ["edits", "Edits"], ["textures", "Textures"], ["parts", "Parts"],
@@ -2161,8 +2206,9 @@ function renderAssetPage(a) {
   const groups = {};
   for (const p of a.pillars) (groups[p.source] ||= []).push(p);
   const o = a.outputs;
-  // With no winner image, the newest model fills the hero slot: animated first, then rigged, then plain 3D.
-  const heroModel = ["animations", "rig", "3d"].flatMap((k) => o[k] || []).find((m) => m.type === "model");
+  // With no winner image, the newest model fills the hero slot: animated first, then rigged, then plain 3D. An
+  // animation counts only as a GLB (Glob's own, with the mesh): an imported FBX clip is usually bones alone.
+  const heroModel = [...(o.animations || []).filter((m) => /\.glb$/i.test(m.path)), ...(o.rig || []), ...(o["3d"] || [])].find((m) => m.type === "model");
   if (AUDIO_KINDS.includes(a.kind)) return renderAudioAsset(a, title, jobs);
   return `
     <div class="kicker">Asset / ${esc(a.path)}</div>
@@ -2196,7 +2242,8 @@ function renderAssetPage(a) {
         </div>
       </div>
     </div>
-    ${OUTPUT_SECTIONS.map(([kind, label]) => (o[kind] || []).length ? `<h2 class="block-title" id="out-${kind}">${label}</h2>${outputGrid(o[kind], a.winner, kind)}` : "").join("")}
+    ${OUTPUT_SECTIONS.map(([kind, label]) => (o[kind] || []).length ? (kind === "animations" ? animationBlock(o[kind], Boolean(heroModel && !a.winner))
+      : kind === "textures" ? textureStrip(o[kind]) : `<h2 class="block-title" id="out-${kind}">${label}</h2>${outputGrid(o[kind], a.winner, kind)}`) : "").join("")}
     <h2 class="block-title">Notes</h2>
     <div class="doc-bar"><span class="path"><bdi>${esc(a.path)}</bdi></span><button class="ghost" data-edit>Edit document</button></div>
     <div class="md">${renderMarkdown(a.body.replace(/^#\s+.+$/m, ""), dirOf(a.path))}</div>`;
@@ -2991,7 +3038,8 @@ const thumbTried = new Set();
 
 // Models without a preview get one rendered in the browser, once per session.
 async function queueThumbs(asset) {
-  const missing = ["3d", "rig", "animations"].flatMap((k) => asset.outputs[k] || []).filter((o) => o.type === "model" && !o.thumb && !/\.gltf$/i.test(o.path) && !thumbTried.has(o.path));
+  const missing = [...(asset.outputs["3d"] || []), ...(asset.outputs.rig || []), ...(asset.outputs.animations || []).filter((o) => /\.glb$/i.test(o.path))]
+    .filter((o) => o.type === "model" && !o.thumb && !/\.gltf$/i.test(o.path) && !thumbTried.has(o.path));
   if (!missing.length) return;
   missing.forEach((o) => thumbTried.add(o.path));
   let saved = 0;
@@ -3834,7 +3882,7 @@ async function storageSettings() {
     <p class="st-note">Glob's chat agent can read these folders (and write in them, when allowed); coding agents get them as extra working folders. API keys, .env and key files are always off-limits. When Glob needs another folder it asks you in the chat.</p>
     ${updateSettings()}
     <div class="st-label">Setup</div>
-    <div class="row"><button class="ghost" data-setup-open>Run first-time setup again</button></div>
+    <div class="row"><button class="ghost" data-setup-open>Run first-time setup again</button><button class="ghost" data-st-shortcut>Add a Glob shortcut to the desktop</button></div>
     <p class="st-note">Settings and API keys are stored in <code>${esc(info.config_dir)}</code>.</p>`;
 }
 
@@ -4009,7 +4057,7 @@ async function setupNext() {
 // ----- events -----
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-st-quit],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh],[data-setup-agent]");
+  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-st-quit],[data-st-shortcut],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh],[data-setup-agent]");
   if (!t) return;
   const d = t.dataset;
   if (d.accessAllow) return answerAccess(d.accessAllow, true, d.write === "1");
@@ -4045,10 +4093,14 @@ document.addEventListener("click", async (event) => {
   if (d.stMove !== undefined) return moveProjectsFolder();
   if (d.stExport) { event.stopPropagation(); return exportProject(d.stExport); }
   if (d.stImportZip !== undefined) return pickArchive();
+  if (d.stShortcut !== undefined) {
+    try { const { shortcuts } = await api("/api/shortcut", { method: "POST" }); toast(`Glob shortcut added: ${shortcuts.join(", ")}`); } catch (err) { toast(err.message, true); }
+    return;
+  }
   if (d.stQuit !== undefined) {
     if (!confirm("Stop Glob? Your agent starts it again the next time it orders or generates something.")) return;
     try { await api("/api/quit", { method: "POST" }); } catch (err) { return toast(err.message, true); }
-    document.body.innerHTML = `<div class="empty" style="padding:15vh 24px;text-align:center"><h1>Glob stopped</h1><p>Ask your coding agent to open Glob, or run <code>glob</code>, to start it again.</p></div>`;
+    document.body.innerHTML = `<div class="empty" style="padding:15vh 24px;text-align:center"><h1>Glob stopped</h1><p>Double-click the Glob shortcut on your desktop, ask your coding agent to open Glob, or run <code>glob open</code>, to start it again.</p></div>`;
     return;
   }
   if (d.grantAdd !== undefined) {
@@ -4410,6 +4462,14 @@ async function batchDialog(folder) {
 
 // The key art is an ordinary asset: make it, open its page and its Generate sheet, so the prompt, model and
 // framing are on screen before anything is spent. Its first winner becomes the cover.
+// The front page's lineup: the project's assets with a picture, a few from each section, big enough to see.
+function showcaseStrip(items) {
+  if (items.length < 3) return "";
+  return `<div class="showcase">${items.map((s) => `<button type="button" class="show-card" data-open="${esc(s.path)}" title="${esc(s.title)}">
+    <span class="show-img"><img src="${esc(fileUrl(s.thumb))}" alt="" loading="lazy"></span>
+    <span class="show-meta"><strong>${esc(s.title)}</strong><small>${esc(s.kind)}</small></span></button>`).join("")}</div>`;
+}
+
 // The first message that turns an empty game project into a workspace, for Glob's chat or a coding agent.
 function gameBuildPrompt(game, agent = false) {
   return agent

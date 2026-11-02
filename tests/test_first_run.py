@@ -74,3 +74,28 @@ def test_long_pitch_is_cut_at_a_word_but_kept_whole_for_key_art(tmp_path: Path) 
     assert meta["pitch"] == pitch
     assert meta["excerpt"].endswith("…") and len(meta["excerpt"]) <= 221
     assert pitch.startswith(meta["excerpt"][:-1])
+
+
+def test_showcase_takes_turns_between_sections(tmp_path: Path) -> None:
+    from forge.overview import build_overview
+
+    for section, names in (("01-characters", ["ann", "bob", "cy"]), ("02-weapons", ["axe"])):
+        for name in names:
+            (tmp_path / section / name / "candidates").mkdir(parents=True)
+            (tmp_path / section / name / "candidates" / "a.png").write_bytes(b"png")
+            (tmp_path / section / f"{name}.md").write_text(f"---\nkind: character\n---\n# {name.title()}\n", encoding="utf-8")
+    titles = [s["title"] for s in build_overview(tmp_path, "p")["showcase"]]
+    assert titles == ["Ann", "Axe", "Bob", "Cy"]
+
+
+def test_shortcut_points_at_glob_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from forge import shortcut
+
+    target = tmp_path / ("Glob.lnk" if sys.platform == "win32" else "glob.desktop")
+    monkeypatch.setattr(shortcut, "locations", lambda: [target])
+    monkeypatch.setattr(shortcut, "glob_command", lambda: tmp_path / "glob.exe")
+    assert shortcut.create() == [target] and shortcut.exists()
+    if sys.platform != "win32":
+        assert "open" in target.read_text(encoding="utf-8")

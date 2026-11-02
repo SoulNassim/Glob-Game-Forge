@@ -90,6 +90,9 @@ SECTIONS: list[tuple[str, str, str | None, str]] = [
     ("docs", "Design docs", None, r"$^"),
 ]
 SECTION = {key: (title, kind, re.compile(r"(?:^|\s)(?:" + words + ")")) for key, title, kind, words in SECTIONS}
+# How the sections are numbered and shown: the cast first, then what they hold, then the world, then the raw material.
+DISPLAY_ORDER = ["characters", "creatures", "weapons", "items", "first-person", "vehicles", "environment", "props", "ui", "vfx",
+                 "audio", "art", "textures", "docs"]
 
 
 def _tokens(text: str) -> list[str]:
@@ -411,7 +414,7 @@ def analyze(folder: str | Path) -> dict[str, Any]:
     for target in ordered:
         info = sections.setdefault(target.section, {"key": target.section, "title": SECTION[target.section][0], "units": []})
         info["units"].append(_unit_summary(target))
-    order = [key for key, *_ in SECTIONS]
+    order = DISPLAY_ORDER
     summary = {
         "folder": str(root),
         "engine": engine,
@@ -752,13 +755,16 @@ def import_game(
         if key not in sections:
             sections[key] = ws / f"{number:02d}-{_slug(titles[key]) if key in titles else key}"
             number += 1
+            created.add(key)
             _readme(sections[key], titles.get(key) or SECTION[key][0], SECTION_INTRO.get(key, ""))
         return sections[key]
+
+    created: set[str] = set()
 
     needs_art: list[tuple[Unit, Path]] = []
 
     assets_written: list[str] = []
-    order = [key for key, *_ in SECTIONS]
+    order = DISPLAY_ORDER
     for target in sorted(units, key=lambda u: (order.index(u.section), u.title.lower())):
         folder_path = section_dir(target.section)
         say(f"{SECTION[target.section][0]} · {target.title}")
@@ -806,7 +812,15 @@ def import_game(
                 continue
         say(f"Added {ordered} 'needs art' entries to Agent Orders.")
 
-    _write_front_page(ws, summary, title or summary["title"], sections)
+    # A new section's intro opens with what it holds ("Cahara, Elia, Hooded Rogue · 2 still need art"): the
+    # overview shows that line on the section's row.
+    for key in created:
+        line = _section_line([u for u in units if u.section == key])
+        if line:
+            (sections[key] / "README.md").write_text(f"# {titles.get(key) or SECTION[key][0]}\n\n{line}.\n\n{SECTION_INTRO.get(key, '')}\n", encoding="utf-8")
+    docs = next((u for u in units if u.shape == "docs"), None)
+    pitch = game_pitch([Path(f["path"]) for f in docs.files] if docs else [], root)
+    _write_front_page(ws, summary, title or summary["title"], sections, units, pitch)
     manifest = ws / "inbox" / "import.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     previous = []
@@ -855,31 +869,79 @@ SECTION_INTRO = {
 }
 
 
-def _write_front_page(ws: Path, summary: dict[str, Any], title: str, sections: dict[str, Path]) -> None:
+PITCH_HEADINGS = re.compile(r"^#{1,4}\s*(?:the\s+)?(?:vision|pitch|elevator pitch|concept|game concept|overview|about|summary|premise|the game)\b", re.I | re.M)
+
+
+def _paragraph_after(text: str, start: int) -> str:
+    """The first plain paragraph after the line at `start` (skipping lists, tables and quotes before it)."""
+    lines: list[str] = []
+    for line in text[start:].splitlines()[1:]:
+        stripped = line.strip()
+        if not stripped:
+            if lines:
+                break
+            continue
+        if stripped.startswith("#") or (lines and stripped.startswith(("|", "```", "-", "*"))):
+            break
+        if stripped.startswith(("|", "```", "<", "---", "!", "-", "*", ">")):
+            continue
+        lines.append(stripped)
+    return re.sub(r"[*_`]", "", " ".join(lines)).strip()
+
+
+def game_pitch(docs: list[Path], root: Path) -> str:
+    """What the game is, in its own words: the paragraph under a Vision / Pitch / Overview heading in its README or
+    design docs, else the first real paragraph of its README. Empty when the docs say nothing usable."""
+    readme = next((root / name for name in ("README.md", "readme.md", "GAME.md") if (root / name).is_file()), None)
+    ranked = sorted(docs, key=lambda p: (not re.search(r"pitch|vision|concept|overview|status|gdd|design|readme", p.stem, re.I), p.name.lower()))
+    for path in ([readme] if readme else []) + ranked:
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")[:60_000]
+        except OSError:
+            continue
+        match = PITCH_HEADINGS.search(text)
+        found = _paragraph_after(text, match.start()) if match else ""
+        if len(found) >= 60:
+            return found[:900]
+    if readme:
+        text = readme.read_text(encoding="utf-8", errors="ignore")[:20_000]
+        title = re.search(r"^#\s.*$", text, re.M)
+        found = _paragraph_after(text, title.start()) if title else ""
+        if len(found) >= 60:
+            return found[:900]
+    return ""
+
+
+def _section_line(units: list[Unit]) -> str:
+    """'Cahara, Elia, Hooded Rogue · 2 still need art': what a section holds, for the front page."""
+    names = [u.title for u in units if u.shape in ("asset", "kit", "gallery", "audio")]
+    shown = ", ".join(names[:6]) + (f" and {len(names) - 6} more" if len(names) > 6 else "")
+    if not shown and any(u.shape == "docs" for u in units):
+        shown = f"{sum(len(u.files) for u in units)} design documents"
+    needs = sum(1 for u in units if u.shape == "data")
+    if needs:
+        shown += (" · " if shown else "") + f"{needs} still need{'s' if needs == 1 else ''} art"
+    return shown
+
+
+def _write_front_page(ws: Path, summary: dict[str, Any], title: str, sections: dict[str, Path], units: list[Unit] | None = None, pitch: str = "") -> None:
+    # The sections list under the page already says what each section holds (their intros), so this block only
+    # adds what is still missing and where the copies came from.
     counts = summary["counts"]
-    rows = [
-        ("Engine", summary["engine_label"]),
-        ("Game folder", f"`{summary['folder']}`"),
-        ("Characters", counts["characters"]),
-        ("3D models", counts["models"]),
-        ("Animations", counts["animations"]),
-        ("Textures", counts["textures"]),
-        ("Images", counts["images"]),
-        ("Audio", counts["audio"]),
-        ("Needs art", counts["needs_art"]),
-    ]
-    table = "\n".join(f"| {k} | {v} |" for k, v in rows if v not in (0, "0"))
-    links = "\n".join(
-        f"- [{SECTION[key][0]}]({path.name}/README.md)" for key, path in sorted(sections.items(), key=lambda kv: kv[1].name)
-    )
-    block = (
-        f"## Imported from {summary['engine_label']}\n\n| | |\n|---|---|\n{table}\n\n{links}\n\n"
-        f"Imported on {time.strftime('%Y-%m-%d')}. The game folder was not changed; these are copies."
-    )
+    needs = [u.title for u in units or [] if u.shape == "data"]
+    totals = ", ".join(f"{counts[k]} {label}" for k, label in (("models", "3D models"), ("animations", "animations"), ("textures", "textures"),
+                                                               ("images", "images"), ("audio", "sounds")) if counts.get(k))
+    block = ""
+    if needs:
+        more = f" and {len(needs) - 24} more" if len(needs) > 24 else ""
+        block += (f"## Needs art\n\nThe game defines these, but they have no model or image yet: {', '.join(f'**{n}**' for n in needs[:24])}{more}. "
+                  "Open one and press **Generate**, or let your coding agent order them.\n")
+    block += (f"\n---\n\nImported from {summary['engine_label']} (`{summary['folder']}`) on {time.strftime('%Y-%m-%d')}"
+              f"{': ' + totals if totals else ''}. The game folder was not changed; these are copies.")
     front = next((ws / name for name in ("README.md", "GAME.md") if (ws / name).is_file()), None)
     if front is None:
-        engine = summary["engine_label"]
-        (ws / "README.md").write_text(f"# {title}\n\nA {engine} game, imported into Glob with its characters, models, animations and art.\n\n<!-- glob-import -->\n{block}\n", encoding="utf-8")
+        lede = pitch or f"A {summary['engine_label']} game, imported into Glob with its characters, models, animations and art."
+        (ws / "README.md").write_text(f"# {title}\n\n{lede}\n\n<!-- glob-import -->\n{block}\n", encoding="utf-8")
         return
     text = front.read_text(encoding="utf-8", errors="ignore")
     if "<!-- glob-import -->" in text:

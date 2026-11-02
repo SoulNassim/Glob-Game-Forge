@@ -26,6 +26,7 @@ A coding agent works on a game with placeholders. The user connects the game onc
 | `forge/agent/connect.py` | Connect/disconnect a game folder. Writes only Glob's own part (MCP entry per agent, `glob:start`/`glob:end` notes, `glob` skill, `glob_delivery/README.md`). |
 | `forge/game_link.py` | Link between a project and its game folder. |
 | `forge/cli.py`, `forge/launcher.py` | `glob connect` (`connect.connect_game`: make or find the game's project, connect, open) and `glob open`; the launcher starts the studio in the background for `open_glob`. |
+| `forge/shortcut.py` | `glob shortcut`: the desktop / Start menu shortcut (`glob open`) made by the installers and the first `glob connect`, so Glob opens without an agent. |
 | `docs/agent.md` | Setup instructions a new coding agent reads from the website (the sentence on the landing page). Keep it in step with `glob connect`. |
 | `forge/mcp/server.py` | MCP server (stdio + HTTP `/api/mcp`). `advertised_tools()` is the list agents see. Forwards to the running app, else works on files. |
 | `forge/agent/glob_prompt.md` | The Glob role prompt. One source for the chat, the skill and the MCP prompt. Edit it here only. |

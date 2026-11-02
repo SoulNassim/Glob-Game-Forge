@@ -1484,6 +1484,18 @@ async def api_storage(project: str = "default") -> dict[str, Any]:
     }
 
 
+@app.post("/api/shortcut")
+async def api_shortcut() -> dict[str, Any]:
+    """Put a Glob shortcut on the desktop and in the Start menu / app list (see forge/shortcut.py)."""
+    from forge import shortcut
+
+    try:
+        made = await asyncio.to_thread(shortcut.create)
+    except (RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"shortcuts": [str(p) for p in made]}
+
+
 @app.post("/api/storage/open")
 async def api_storage_open(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     target = str(payload.get("target") or "workspace")

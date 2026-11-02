@@ -194,3 +194,25 @@ async def test_grants_and_projects_folder_are_not_settable_through_config() -> N
             response = await client.put("/api/config", json={key: value})
             assert response.status_code == 403
         assert (await client.put("/api/config", json={"onboarded": True})).json()["onboarded"] is True
+
+
+def test_a_fresh_import_leads_with_the_game_and_its_cast(tmp_path: Path) -> None:
+    game = _godot_game(tmp_path)
+    _file(game / "Readmes/STATUS.md", b"# Ashfall status\n\n> Living summary.\n\n## Vision\n\nAshfall is a co-op dungeon crawler where four scouts dive into a burning city and carry out what they can.\n")
+    ws = tmp_path / "ws"
+    result = game_import.import_game(game, ws)
+
+    front = (ws / "README.md").read_text(encoding="utf-8")
+    assert front.startswith("# Ashfall\n\nAshfall is a co-op dungeon crawler where four scouts")
+    assert "## Needs art" in front and "**Iron Mace**" in front and "| Engine |" not in front
+    # Sections are numbered in reading order, and each intro opens with what the section holds.
+    assert result["sections"]["characters"].startswith("01-")
+    characters = (ws / result["sections"]["characters"] / "README.md").read_text(encoding="utf-8")
+    assert characters.splitlines()[2].startswith("Mira")
+
+
+def test_pitch_comes_from_a_vision_heading_before_any_other_paragraph(tmp_path: Path) -> None:
+    doc = tmp_path / "design.md"
+    doc.write_text("# Game\n\nShort.\n\n## Overview\n\n- a list\n\nA long enough paragraph that says what this game is about, in its own words.\n", encoding="utf-8")
+    assert game_import.game_pitch([doc], tmp_path).startswith("A long enough paragraph")
+    assert game_import.game_pitch([], tmp_path) == ""

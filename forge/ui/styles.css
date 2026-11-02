@@ -1218,6 +1218,33 @@ select option:disabled { color: var(--faint); }
 .ob-sub.small { font-size: 13px; }
 .out.file .no-thumb { gap: 6px; word-break: break-all; font-size: 11px; }
 .file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.showcase { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; margin: 22px 0 8px; }
+.show-card { display: flex; flex-direction: column; padding: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--control); text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }
+.show-card:hover { border-color: var(--sakura); transform: translateY(-2px); }
+.show-img { display: block; aspect-ratio: 4 / 5; background: radial-gradient(circle at 50% 35%, rgba(255, 255, 255, .07), transparent 70%); }
+.show-img img { width: 100%; height: 100%; object-fit: contain; padding: 8px; }
+.show-meta { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px 10px; border-top: 1px solid var(--line-soft); }
+.show-meta strong { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.show-meta small { font-size: 11px; color: var(--muted); text-transform: capitalize; }
+.block-count { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 6px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; vertical-align: 2px; }
+.clip-list { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+.clip { display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--control); min-width: 0; }
+.clip.playing { border-color: var(--sakura); background: rgba(255, 122, 156, .08); }
+.clip-play { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; border: 0; background: rgba(255, 122, 156, .14); color: var(--sakura); cursor: pointer; }
+.clip-play.off { background: transparent; color: var(--faint); cursor: default; }
+.clip-play svg { width: 14px; height: 14px; }
+.clip-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; }
+.clip-files { display: flex; gap: 4px; }
+.clip-files a { font-size: 10.5px; letter-spacing: .04em; color: var(--muted); text-decoration: none; padding: 1px 5px; border: 1px solid var(--line); border-radius: 5px; }
+.clip-files a:hover { color: var(--text); border-color: var(--muted); }
+.tex-block > summary { cursor: pointer; list-style: none; margin-bottom: 12px; }
+.tex-block > summary::-webkit-details-marker { display: none; }
+.tex-block > summary h2::after { content: "▾"; margin-left: 8px; color: var(--muted); }
+.tex-block:not([open]) > summary h2::after { content: "▸"; }
+.tex-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.tex-strip a { display: block; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--control); }
+.tex-strip img { width: 100%; height: 100%; object-fit: cover; }
+.tex-strip a.tex-file { width: auto; height: auto; padding: 4px 8px; font-size: 11px; color: var(--muted); text-decoration: none; align-self: center; }
 .file-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: 12px var(--mono); text-decoration: none; }
 .file-chip:hover { color: var(--text); border-color: var(--line-strong); }
 .file-chip svg { width: 14px; height: 14px; }

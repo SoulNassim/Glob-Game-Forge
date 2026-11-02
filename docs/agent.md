@@ -47,7 +47,7 @@ Add `--agents claude,codex,cursor,vscode,opencode,gemini` to choose the agents y
 
 Tell the user, in about these words:
 
-> Glob is open in your browser. Finish the short setup there: pick a model and paste your image/3D keys (they stay on your computer). Then restart me and approve the `glob` MCP server, so I can order art from Glob.
+> Glob is open in your browser (any time later: the Glob shortcut on your desktop). Finish the short setup there: pick a model and paste your image/3D keys (they stay on your computer). Then restart me and approve the `glob` MCP server, so I can order art from Glob.
 
 Stop here and wait. Setup happens in the browser, not in this chat.
 
@@ -63,4 +63,4 @@ You now have Glob's tools, and the note in `AGENTS.md` / `CLAUDE.md` explains th
 - Finished assets land in `glob_delivery/<order_id>/`, listed in `glob_delivery/manifest.json`. Swap your placeholder, then call `update_order` with `status: integrated`.
 - To build or reorganize the workspace itself ("build the Glob workspace for this game"), load the `glob` prompt, call `workspace_overview`, then write it with `workspace_write`: a front page, one folder per part of the game, `pillars/style-bible.md`, and one asset page per character, creature, item, place and sound. Don't generate images unless the user asks: generation spends their credits.
 
-To open Glob yourself, run `glob open` in the game folder.
+To open Glob yourself, run `glob open` in the game folder. The user can also double-click the **Glob** shortcut that `glob connect` put on their desktop and in the Start menu.

@@ -26,7 +26,7 @@ Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/age
 
 ## Just say "open Glob"
 
-Connect your game once (your agent does it with `glob connect`). After that you never start Glob yourself: say **"open Glob"** to your agent (Claude Code, Codex, Cursor, Copilot, OpenCode, Gemini CLI), or just let it order its first asset. Glob starts on this computer and opens on the project your agent is working on, with every order, prompt, image, model and sound in one place.
+Connect your game once (your agent does it with `glob connect`). After that you never start Glob yourself: say **"open Glob"** to your agent (Claude Code, Codex, Cursor, Copilot, OpenCode, Gemini CLI), or just let it order its first asset. Without an agent, double-click the **Glob** shortcut on your desktop or in the Start menu. Glob starts on this computer and opens on the project your agent is working on, with every order, prompt, image, model and sound in one place.
 
 - **No app to keep open.** Glob runs on `localhost` while you need it. *Settings → Storage & access → Stop Glob* ends it.
 - **Rather start it yourself?** Run `glob`, and set `FORGE_NO_AUTOSTART=1` for your agent.
@@ -119,6 +119,7 @@ Then, in a new terminal, in your game folder:
 |---|---|
 | `glob connect` | Makes or finds this game's Glob project, connects its coding agents and opens Glob on it. `--agents claude,codex` picks the agents. |
 | `glob open` | Opens Glob on this game's project, starting it in the background if needed. |
+| `glob shortcut` | Puts a **Glob** shortcut on the desktop and in the Start menu (macOS: `Glob.command` on the desktop, Linux: the app menu). The installers and the first `glob connect` make it for you. |
 | `glob` | Runs Glob in this terminal and opens <http://127.0.0.1:8420>. |
 
 You can also connect from inside Glob: **Settings → Coding agent**. Projects are listed in `~/Glob/projects` (a source checkout uses its own `projects/`); a project made for a game keeps its files in that game's `glob/` folder.

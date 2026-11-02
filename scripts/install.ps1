@@ -14,9 +14,11 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 Write-Host "Installing Glob..."
 uv tool install --force --python 3.12 "forge-assets @ $Source"
 uv tool update-shell | Out-Null
+& "$env:USERPROFILE\.local\bin\glob.exe" shortcut
 
 Write-Host ""
-Write-Host "Glob is installed. In your game folder, run:"
+Write-Host "Glob is installed. Open it any time with the Glob shortcut on your desktop or in the Start menu."
+Write-Host "To connect a game, run this in its folder:"
 Write-Host "  glob connect     # connect your coding agents and open Glob in the browser"
 Write-Host "(Open a new terminal so 'glob' is found; until then use $env:USERPROFILE\.local\bin\glob.exe)"
 Write-Host "Or just tell your agent: Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md"

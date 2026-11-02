@@ -3,6 +3,7 @@
   glob            run the studio at http://127.0.0.1:8420 and open it in the browser
   glob connect    make or find this game folder's Glob project, connect its coding agents, open Glob on it
   glob open       open Glob on this game folder's project (starting it in the background if needed)
+  glob shortcut   put a Glob shortcut on the desktop and in the Start menu / app list
   glob --mcp      the stdio MCP server coding agents start
 """
 
@@ -27,10 +28,11 @@ def main() -> None:
         prog="glob",
         description="Glob: your game's asset studio, driven by your coding agent",
         epilog="glob connect   connect this game folder's coding agents to Glob and open it\n"
-               "glob open      open Glob on this game folder (starting it if needed)",
+               "glob open      open Glob on this game folder (starting it if needed)\n"
+               "glob shortcut  add a Glob shortcut to the desktop and Start menu",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("command", nargs="?", choices=["connect", "open"], help="connect or open (default: run the studio)")
+    parser.add_argument("command", nargs="?", choices=["connect", "open", "shortcut"], help="connect, open or shortcut (default: run the studio)")
     parser.add_argument("--game", default=None, help="connect/open: the game folder (default: the current folder)")
     parser.add_argument("--agents", default="", help="connect: comma-separated agents (claude,codex,cursor,vscode,opencode,gemini)")
     parser.add_argument("--host", default=None, help="Bind host (default: 127.0.0.1)")
@@ -90,6 +92,16 @@ def _launch(args: argparse.Namespace) -> None:
     from forge.agent import connect as connect_agent
     from forge.storage.project_store import home_owner
 
+    from forge import shortcut
+
+    if args.command == "shortcut":
+        try:
+            made = shortcut.create()
+        except (RuntimeError, OSError) as exc:
+            raise SystemExit(f"  !! {exc}") from exc
+        print("\n  Glob shortcut added: " + ", ".join(str(p) for p in made))
+        print("  Double-click it any time to open Glob.\n")
+        return
     game = os.path.abspath(args.game or os.getcwd())
     try:
         if args.command == "connect":
@@ -109,6 +121,13 @@ def _launch(args: argparse.Namespace) -> None:
         raise SystemExit(f"  !! {exc}") from exc
     print(f"\n  Glob is open: {opened['url']}")
     if args.command == "connect":
+        # The first time, a shortcut too: Glob should open without an agent as well.
+        if not shortcut.exists():
+            try:
+                made = shortcut.create()
+                print(f"  -> Shortcut  : {made[0]} (open Glob any time, no agent needed)")
+            except (RuntimeError, OSError):
+                pass
         print("  Finish setup in the browser. Then restart your coding agent so it loads Glob's tools.\n")
 
 

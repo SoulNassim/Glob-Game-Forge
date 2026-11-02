@@ -150,6 +150,23 @@ export async function createViewer(container, url, { autoRotate = false, grid: s
       action?.stop();
       action = index >= 0 && clips[index] ? mixer.clipAction(clips[index]).play() : null;
     },
+    // A clip from another file (an FBX animation exported without its mesh) played on this model. It works when
+    // the bone names match, as they do for clips exported from the same rig (Mixamo, Blender). Returns false if not.
+    async playFrom(clipUrl) {
+      const { clips: extra } = await loadModel(clipUrl);
+      const clip = extra.find((c) => c.tracks.length) || null;
+      if (!clip) return false;
+      const bones = new Set();
+      object.traverse((o) => bones.add(o.name));
+      // Rotations carry the motion. Positions are dropped: a separate clip file may use other units or bone lengths
+      // than this model (and its root motion would walk the model out of frame), so it plays in place.
+      const tracks = clip.tracks.filter((t) => bones.has(t.name.split(".")[0]) && t.name.endsWith(".quaternion"));
+      if (!tracks.length) return false;
+      action?.stop();
+      action = mixer.clipAction(new THREE.AnimationClip(clip.name, clip.duration, tracks)).play();
+      controls.autoRotate = false;
+      return true;
+    },
     still() {
       grid.visible = false;
       renderer.render(scene, camera);
