@@ -12,6 +12,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -62,7 +63,10 @@ def main(port: int | None = None) -> None:
     thread.start()
     _wait_until_up(url)
 
-    webview.create_window("Glob · Game Asset Forge", url, width=1480, height=940, min_size=(1100, 720), background_color="#0b0710")
+    # Started by a coding agent's MCP server: open on the project it works on.
+    project = os.environ.pop("FORGE_OPEN_PROJECT", "")
+    start = f"{url}/?project={urllib.parse.quote(project)}" if project else url
+    webview.create_window("Glob · Game Asset Forge", start, width=1480, height=940, min_size=(1100, 720), background_color="#0b0710")
     try:
         webview.start(icon=str(ICON) if ICON.exists() else None)
     finally:

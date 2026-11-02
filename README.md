@@ -10,7 +10,7 @@ Your agent codes with grey placeholder cubes and **orders** the real assets.<br>
 Glob turns every order into 2D art, 3D models, rigs, animations, icons and sounds,<br>
 and drops the finished files straight into your game.
 
-[**⬇ Download**](#1-get-the-app) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [Connect your agent](#2-connect-your-coding-agent) · [Generation modes](#generation-modes)
+[**⬇ Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [Just say "open Glob"](#just-say-open-glob) · [Generation modes](#generation-modes)
 
 **Free and open source (MIT).** Bring keys for the generators you use. No markup, no subscription.
 
@@ -21,18 +21,23 @@ and drops the finished files straight into your game.
 <p align="center"><b>Pocket Kaiju</b>: a sample game made entirely in Glob, with 16 assets, 3D models and sounds.<br>
 <a href="https://soulnassim.github.io/Glob-Game-Forge/demo/"><b>▶ Click through it in the live demo</b></a>: the real app in your browser, read-only, no keys needed.</p>
 
-## Two parts, one flow
+## Just say "open Glob"
 
-Glob has two halves. You need both.
+Once your game is connected, you never start Glob yourself. Tell your agent **"open Glob"**, or just let it order its first asset: Glob starts on this computer and opens **in your browser, on the project your agent is working on**. Every order, prompt, image, model and sound, organized in one place.
 
-| | **The Glob app** | **Your coding agent** |
-|---|---|---|
-| What it is | The window where you see and shape everything: every order, prompt, image, model and sound, organized by folder | Claude Code, Codex, Cursor, VS Code / Copilot, OpenCode or Gemini CLI, working in your game folder |
-| How you run it | The desktop app, or `glob` in a terminal (opens <http://127.0.0.1:8420>) | However you run it today |
-| What it does | Files orders, generates, shows the price first, delivers finished files | Builds the game with placeholders and orders the real assets over MCP |
-| Talks to the other | Writes Glob's MCP server into your agent's config when you connect the game | Calls `place_order`, picks up `glob_delivery/`, swaps the placeholder |
+```text
+> you: open glob
+→ open_glob()
+✓ Glob is up: http://127.0.0.1:8420/?project=pocket_kaiju      ← your browser opens here
+```
 
-> **Keep the app open while you work.** Your agent reaches Glob through an MCP server that forwards to the running app. With the app closed, the agent can still read and write the workspace files, but nothing is generated.
+| | **Your coding agent** | **Glob in the browser** | **Glob desktop app** *(optional)* |
+|---|---|---|---|
+| What it is | Claude Code, Codex, Cursor, VS Code / Copilot, OpenCode or Gemini CLI, in your game folder | The studio for the project your agent works on | One window for **all** your projects |
+| Who starts it | You, as today | Your agent (`open_glob`), or `glob` in a terminal | You |
+| What it does | Codes with placeholders, orders the real assets, swaps them in | Files orders, generates, shows the price first, delivers | The same studio, plus the projects page with every game's key art |
+
+Glob started by your agent keeps running in the background after the agent stops; **Settings → Storage & access → Stop Glob** ends it. Set `FORGE_NO_AUTOSTART=1` if you'd rather start it yourself.
 
 <p align="center"><img src="docs/diagrams/how-it-works.svg" alt="How Glob works: you and your coding agent share one Agent Orders board; Glob files, generates and delivers into your game, and the agent swaps its placeholder" width="100%"></p>
 
@@ -113,9 +118,9 @@ uv run forge
 
 On first launch a short setup asks for generator keys (one is enough; without any, Glob makes placeholder files so you can try the whole flow) and your game folder.
 
-### 2. Connect your coding agent
+### 2. Connect your game, once
 
-In the app: **Settings → Coding agent**. Pick your game folder and the agents you use. Restart the agent once so it loads Glob. From then on it knows about Glob; you never have to say "use Glob".
+Open Glob this one time (the desktop app, or `glob` in a terminal) and go to **Settings → Coding agent**. Pick your game folder and the agents you use, then restart the agent so it loads Glob. From then on it knows about Glob, and it starts Glob for you.
 
 <details>
 <summary>What connecting writes into your game folder (and removes again on Disconnect)</summary>
@@ -125,7 +130,7 @@ In the app: **Settings → Coding agent**. Pick your game folder and the agents 
 - A `glob` skill in `.claude/skills/glob/` and `.agents/skills/glob/`.
 - `glob_delivery/README.md`.
 
-The agent starts the MCP server itself (`python -m forge.cli --mcp --project <name>`). It forwards to the running app, so jobs and live updates show up there.
+The agent starts the MCP server itself (`python -m forge.cli --mcp --project <name>`). It forwards to the running studio, so jobs and live updates show up there, and starts the studio when it isn't running (`open_glob`, or the first order or generation). The installed app opens its window; a terminal or source install opens your browser. `FORGE_NO_AUTOSTART=1` turns the automatic start off.
 
 </details>
 
@@ -135,7 +140,7 @@ Ask your agent for something that needs art:
 
 > *"Add three enemy types with placeholder models and order the real ones from Glob."*
 
-The orders show up on the **Agent Orders** board. Depending on the [generation mode](#generation-modes), you generate and pick, or watch Glob do it. Finished files land in `<game>/glob_delivery/`, and the agent swaps its placeholders.
+Glob opens in your browser on that project (or say *"open Glob"* any time), and the orders show up on the **Agent Orders** board. Depending on the [generation mode](#generation-modes), you generate and pick, or watch Glob do it. Finished files land in `<game>/glob_delivery/`, and the agent swaps its placeholders.
 
 Already have a game? **Projects → Import game** takes a Godot, Unity or Unreal project, or any folder of art.
 
@@ -244,6 +249,7 @@ Over stdio (`uv run forge --mcp --project <name>`) and HTTP JSON-RPC (`POST http
 
 | Task | Tools |
 |---|---|
+| Show the studio | `open_glob` |
 | Order and track assets | `place_order`, `list_orders`, `get_order`, `file_order`, `update_order` |
 | Deliveries | `get_deliveries`, `deliver_order` |
 | Read and shape the workspace | `workspace_overview`, `workspace_list`, `workspace_read`, `workspace_write`, `workspace_create_folder`, `workspace_move`, `workspace_delete` |
@@ -283,6 +289,7 @@ uv run --extra desktop --with pyinstaller python scripts/build_desktop.py   # st
 | `forge/server/` | FastAPI app and the local-only request guard |
 | `forge/agent/` | Glob chat, model endpoints, `connect.py` (game folder link), `glob_prompt.md` |
 | `forge/orders.py`, `forge/order_mode.py` | Agent Orders, delivery and the generation modes |
+| `forge/launcher.py` | Starting Glob for a coding agent (`open_glob`, auto-start) |
 | `forge/providers/` | Gemini, Meshy, Tripo, ElevenLabs and Stability clients |
 | `forge/mcp/` | MCP server (stdio, forwards to the app when it runs) |
 | `forge/game_import.py` | Importing Godot / Unity / Unreal projects |

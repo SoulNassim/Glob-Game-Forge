@@ -1665,3 +1665,4 @@ body.gallery-mode .asset-tile.add, body.gallery-mode .actions-row { display: non
 .action-row .primary { display: inline-flex; align-items: center; gap: 6px; }
 .action-row .primary svg { width: 15px; height: 15px; }
 @media (max-width: 700px) { #paletteBtn, #galleryBtn { display: none; } .proj-hero-blur { inset: -20px; } }
+.st-bg { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 13px; }

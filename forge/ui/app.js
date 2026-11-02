@@ -220,7 +220,11 @@ function stripLead(md) {
 async function loadProjects(preferred) {
   const data = await api("/api/projects");
   state.projects = data.projects || [];
-  const remembered = preferred || storeGet("forge.project") || data.default_project;
+  // `?project=` comes from a coding agent opening Glob on the project it works on; read it once.
+  const url = new URL(location.href);
+  const linked = url.searchParams.get("project");
+  if (linked) { url.searchParams.delete("project"); history.replaceState(null, "", url); }
+  const remembered = preferred || linked || storeGet("forge.project") || data.default_project;
   state.project = state.projects.includes(remembered) ? remembered : (state.projects[0] || "default");
   $("#projectName").textContent = humanize(state.project);
   storeSet("forge.project", state.project);
@@ -3802,9 +3806,10 @@ function grantRows(grants) {
 }
 
 async function storageSettings() {
-  const [info, grants] = await Promise.all([api("/api/storage"), loadGrants(), state.update ? null : checkForUpdate()]);
+  const [info, grants, health] = await Promise.all([api("/api/storage"), loadGrants(), api("/api/health").catch(() => ({})), state.update ? null : checkForUpdate()]);
   return `
     <h1>Storage & access</h1><p class="st-lede">Where your projects are saved, how to move them between computers, and which folders on this computer Glob may use.</p>
+    ${health.background ? `<div class="st-bg"><span class="grow">Your coding agent started Glob, and it keeps running in the background after the agent stops. It starts again the next time the agent needs it.</span><button class="ghost danger-text" data-st-quit>Stop Glob</button></div>` : ""}
     <div class="st-label">Projects folder</div>
     <div class="path-row"><code>${esc(info.projects_dir)}</code><button class="mini" data-st-open="projects">Open</button><button class="mini" data-st-move>Change…</button></div>
     <p class="st-note">Each project is a folder in here. Its <code>workspace/</code> folder holds the pages, assets, images, models and chats you see in Glob${info.env_override ? ". (Set by FORGE_PROJECTS_DIR for this session.)" : "."}</p>
@@ -3994,7 +3999,7 @@ async function setupNext() {
 // ----- events -----
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh],[data-setup-agent]");
+  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-st-quit],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh],[data-setup-agent]");
   if (!t) return;
   const d = t.dataset;
   if (d.accessAllow) return answerAccess(d.accessAllow, true, d.write === "1");
@@ -4030,6 +4035,12 @@ document.addEventListener("click", async (event) => {
   if (d.stMove !== undefined) return moveProjectsFolder();
   if (d.stExport) { event.stopPropagation(); return exportProject(d.stExport); }
   if (d.stImportZip !== undefined) return pickArchive();
+  if (d.stQuit !== undefined) {
+    if (!confirm("Stop Glob? Your agent starts it again the next time it orders or generates something.")) return;
+    try { await api("/api/quit", { method: "POST" }); } catch (err) { return toast(err.message, true); }
+    document.body.innerHTML = `<div class="empty" style="padding:15vh 24px;text-align:center"><h1>Glob stopped</h1><p>Ask your coding agent to open Glob, or run <code>glob</code>, to start it again.</p></div>`;
+    return;
+  }
   if (d.grantAdd !== undefined) {
     const folder = await chooseFolder("Choose a folder Glob may use");
     if (!folder) return;

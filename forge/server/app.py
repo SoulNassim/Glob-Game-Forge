@@ -103,7 +103,7 @@ async def _agent_model_call(**kwargs: Any) -> dict[str, Any]:
 
 
 workspace_agent = WorkspaceAgent(actions, _agent_model_call)
-mcp_dispatcher = ForgeMCPDispatcher(action_layer=actions, workspace_agent=workspace_agent)
+mcp_dispatcher = ForgeMCPDispatcher(action_layer=actions, workspace_agent=workspace_agent, in_app=True)
 
 
 _order_sync_locks: dict[str, asyncio.Lock] = {}
@@ -318,7 +318,20 @@ class UrlIngestRequest(BaseModel):
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
     # The MCP bridge checks projects_dir so it only forwards to a Glob app that serves the same projects.
-    return {"ok": True, "projects_dir": str((actions.root_dir or get_projects_root()).resolve())}
+    return {"ok": True, "projects_dir": str((actions.root_dir or get_projects_root()).resolve()), "background": _background()}
+
+
+def _background() -> bool:
+    """Started by a coding agent (forge/launcher.py): no window or terminal to close it with."""
+    return os.environ.get("FORGE_BACKGROUND") == "1"
+
+
+@app.post("/api/quit")
+async def api_quit() -> dict[str, Any]:
+    if not _background():
+        raise HTTPException(status_code=400, detail="Close Glob where you started it (its window or terminal).")
+    asyncio.get_running_loop().call_later(0.4, os._exit, 0)
+    return {"stopping": True}
 
 
 @app.get("/api/bootstrap")

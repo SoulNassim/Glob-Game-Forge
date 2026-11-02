@@ -374,7 +374,7 @@ footer .wrap > :last-child{margin-left:auto}
       <div class="feat rv"><div class="ic">▤</div><h3>Your project is just folders</h3><p>Sections, pages and assets are Markdown files. Readable, diffable, yours.</p></div>
       <div class="feat rv"><div class="ic">◎</div><h3>See the prompt before you pay</h3><p>Model, price, final prompt and every attached image — editable before each run.</p></div>
       <div class="feat rv"><div class="ic">⚙</div><h3>Bring any model</h3><p>Anthropic, OpenAI, Gemini, OpenRouter, Ollama, LM Studio or any OpenAI-compatible URL.</p></div>
-      <div class="feat rv"><div class="ic">›_</div><h3>Coding agents as tabs</h3><p>Claude Code, Codex, OpenCode and Gemini CLI run inside the project with your own login.</p></div>
+      <div class="feat rv"><div class="ic">›_</div><h3>Manual, 2D or full auto</h3><p>Per project: Glob only writes the prompts and asks, makes 2D right away, or goes all the way to the 3D model. A spend cap keeps it honest.</p></div>
       <div class="feat rv"><div class="ic">♪</div><h3>Sounds, music &amp; voices</h3><p>Sound effects in up to 6 takes, music and voice lines. Trim on the waveform and check a loop by ear.</p></div>
       <div class="feat rv"><div class="ic">▦</div><h3>Board &amp; press kit</h3><p>Every asset on one canvas, a 3D lineup at game scale, and a press-kit page you can upload to itch.io.</p></div>
       <div class="feat rv"><div class="ic">⌘</div><h3>Fast to drive</h3><p>Pick winners with 1–9 and Enter, jump anywhere with ⌘K, and generate every missing asset in one go.</p></div>
@@ -388,21 +388,27 @@ footer .wrap > :last-child{margin-left:auto}
     <div class="agent">
       <div class="rv">
         <div class="kicker">For your coding agent</div>
-        <h2>No more <em>placeholder</em> cubes.</h2>
-        <p class="sub">Plug in the agent you already use: Claude Code, Codex, Gemini CLI, OpenCode or any MCP client. It orders the real asset instead of faking one; you shape it in Glob, and it lands in your game folder with a receipt.</p>
+        <h2>Say “open Glob”.<br>No more <em>placeholder</em> cubes.</h2>
+        <p class="sub">Plug in the agent you already use: Claude Code, Codex, Gemini CLI, OpenCode or any MCP client. Tell it to open Glob and the studio pops up in your browser, right on the project it’s working on. Nothing else to run.</p>
         <ul class="ticks">
-          <li><span><b>Orders, not prompts</b> — the agent writes a brief and keeps its placeholder until the asset is ready.</span></li>
-          <li><span><b>Connect once</b> in Settings → Coding agent. You never have to say “use Glob”.</span></li>
+          <li><span><b>Your agent starts Glob</b> on localhost when you ask, or the moment it orders its first asset.</span></li>
+          <li><span><b>Orders, not prompts</b>: the agent writes a brief and keeps its placeholder until the asset is ready.</span></li>
+          <li><span><b>You choose how far Glob goes</b>: just the prompts, 2D right away, or the full 3D model, with a spend cap.</span></li>
           <li><span><b>SHA-256 receipts</b> in <span class="mono">glob_delivery/manifest.json</span>; Glob never writes anywhere else.</span></li>
         </ul>
-        <div class="engines"><span>GODOT</span><span>UNITY</span><span>UNREAL</span></div>
+        <div class="engines"><span>MANUAL</span><span>2D AUTO</span><span>FULL AUTO</span></div>
       </div>
       <div class="term rv">
         <div class="bar"><i></i><i></i><i></i><span>coding agent ⇄ glob (MCP)</span></div>
-<pre><span class="c-d">&gt;</span> agent: the tin scout is still a grey capsule
+<pre><span class="c-d">&gt;</span> you: open glob
+<span class="c-p">→ open_glob()</span>
+<span class="c-g">✓ Glob is up: 127.0.0.1:8420/?project=pocket_kaiju</span>
+<span class="c-d">  (your browser opens on the project)</span>
+
+<span class="c-d">&gt;</span> agent: the tin scout is still a grey capsule
 <span class="c-p">→ place_order("Tin scout", kind="creature", needs=["image", "model"],
     placeholder="res://enemies/tin_scout.tscn")</span>
-<span class="c-d">  … you pick a winner and Make 3D in Glob …</span>
+<span class="c-d">  … Glob · full auto: candidates, winner, 3D model …</span>
 <span class="c-g">✓ ready: glob_delivery/tin_scout/tin_scout.glb</span>
 <span class="c-y">  sha256 9f3c…a71e  manifest.json ✓</span>
 <span class="c-p">→ update_order("tin_scout", status="integrated")</span></pre>
@@ -432,7 +438,7 @@ footer .wrap > :last-child{margin-left:auto}
           <div class="cmd" id="t-win" hidden><span>&gt;</span><code id="c-win">irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.ps1 | iex</code><button type="button" data-copy="c-win">Copy</button></div>
           <div class="cmd" id="t-mac"><span>$</span><code id="c-mac">curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh</code><button type="button" data-copy="c-mac">Copy</button></div>
           <div class="cmd" id="t-src" hidden><span>$</span><code id="c-src">git clone https://github.com/SoulNassim/Glob-Game-Forge &amp;&amp; cd Glob-Game-Forge &amp;&amp; uv run forge</code><button type="button" data-copy="c-src">Copy</button></div>
-          <p class="note">The one-liners install <a href="https://docs.astral.sh/uv/">uv</a> if needed, then Glob. Start it with <code>glob-desktop</code> (app window) or <code>glob</code> (browser).</p>
+          <p class="note">The one-liners install <a href="https://docs.astral.sh/uv/">uv</a> if needed, then Glob. Connect your game once (run <code>glob</code>, then Settings → Coding agent); after that your agent opens Glob for you. The desktop app is optional: one window for all your projects.</p>
         </div>
       </div>
       <img class="forge pixel" src="landing/glob-forge.svg" alt="Glob hammering on an anvil">

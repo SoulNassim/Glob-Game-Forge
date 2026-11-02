@@ -940,7 +940,7 @@ async def test_mcp_dispatcher_and_export_security(tmp_path: Path) -> None:
     assert list_resp is not None
     tool_names = {t["name"] for t in list_resp["result"]["tools"]}
     assert {
-        "place_order", "list_orders", "get_order", "file_order", "update_order", "get_deliveries", "deliver_order",
+        "open_glob", "place_order", "list_orders", "get_order", "file_order", "update_order", "get_deliveries", "deliver_order",
         "workspace_overview", "workspace_list", "workspace_read", "workspace_write", "workspace_move",
         "workspace_delete", "workspace_create_folder", "generate", "pick_winner",
         "get_budget", "queue_status", "find_placeholders", "scan_game_project", "import_game",

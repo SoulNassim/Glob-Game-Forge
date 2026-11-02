@@ -56,6 +56,8 @@ final art, 3D models, animations and sounds. Do not draw, download or invent fin
   what it is, its kind, and the placeholder path it will replace. One order per asset, and add as much
   context as you can (role in the game, size, style, faction). Order early: the user produces assets in Glob
   while you keep coding.
+- **"Open Glob" / "run Glob"?** Call `open_glob`: it starts Glob on this computer if needed and opens this
+  project in the browser, where the user sees every order, prompt, image and model.
 - **What's the status?** `list_orders` shows every order: draft, filed, in progress, ready, delivered.
 - **Deliveries** land in `{DELIVERY_DIR}/`, one folder per order (`{DELIVERY_DIR}/<order_id>/`), described in
   `{DELIVERY_DIR}/manifest.json`. Read `{DELIVERY_DIR}/README.md`, swap your placeholder for the delivered

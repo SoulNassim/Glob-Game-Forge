@@ -92,6 +92,13 @@ _NEEDS = {
 # The agent-order loop: the coding agent orders, Glob makes, the files are delivered into the game.
 ORDER_TOOLS_SCHEMA: list[dict[str, Any]] = [
     _ws_tool(
+        "open_glob",
+        "Open Glob, the asset studio, on this project so the user sees every order, prompt, image and model. "
+        "Starts it on this computer first if it isn't running. Call it when the user says 'open Glob' or "
+        "'show me the assets'. Returns the URL.",
+        {}, [],
+    ),
+    _ws_tool(
         "place_order",
         "Order an asset the game needs (art, 3D model, sound). Keep using a placeholder in the game meanwhile. "
         "One order per asset; describe it well and say where it is used. Returns the order with its id.",
@@ -168,6 +175,8 @@ MUTATING_TOOLS = {
 }
 
 SERVER_INSTRUCTIONS = """Glob is the user's game-asset studio (2D art, 3D models, rigs, animations, sounds), running locally.
+- When the user wants to see the assets ("open Glob", "run Glob"), call open_glob: it starts Glob if needed
+  and opens it on this project. Ordering or generating starts it on its own too.
 - When the game needs an asset, keep a placeholder and order the real one with place_order (one order per
   asset, with a good brief and the placeholder path). list_orders shows progress.
 - Finished orders are delivered into the game's glob_delivery/<order_id>/ folder (see glob_delivery/README.md
@@ -178,7 +187,8 @@ SERVER_INSTRUCTIONS = """Glob is the user's game-asset studio (2D art, 3D models
 
 MCP_ADDENDUM = """## Tools in this session
 
-You reach the workspace through the Glob MCP server: workspace_overview (call it first), workspace_list,
+You reach the workspace through the Glob MCP server: open_glob (shows the user this project in Glob, starting
+it if needed), workspace_overview (call it first), workspace_list,
 workspace_read, workspace_write (append=true to append), workspace_create_folder, workspace_move,
 workspace_delete (to .trash/), generate (path + action, see above) and pick_winner. Orders: list_orders,
 get_order, file_order (sort one into the workspace), update_order. All paths are relative to the workspace root. You may also open the workspace files directly at the folder workspace_overview reports;
@@ -583,8 +593,9 @@ MCP_TOOLS_SCHEMA: list[dict[str, Any]] = [
 
 
 class ForgeMCPDispatcher:
-    def __init__(self, action_layer: ForgeActionLayer | None = None, workspace_agent: Any = None) -> None:
+    def __init__(self, action_layer: ForgeActionLayer | None = None, workspace_agent: Any = None, in_app: bool = False) -> None:
         self.actions = action_layer or ForgeActionLayer()
+        self.in_app = in_app  # inside the running studio: open_glob only needs the browser
         if workspace_agent is None:
             from forge.agent.workspace_agent import WorkspaceAgent
 
@@ -662,6 +673,12 @@ class ForgeMCPDispatcher:
 
         if name == "workspace_overview" or name == "workspace_write" or name in WORKSPACE_TOOL_CALLS:
             return self._workspace_tool(name, args, proj)
+        if name == "open_glob":
+            from asyncio import to_thread
+
+            from forge import launcher
+
+            return await to_thread(launcher.open_glob, proj, start=not self.in_app)
         if name in ORDER_TOOLS:
             return self._order_tool(name, args, proj)
 
@@ -873,6 +890,10 @@ class ForgeMCPDispatcher:
             }
 
 
+# Calls that need the studio running; the first one in a session starts it and opens the project.
+AUTOSTART_TOOLS = {"place_order", "generate", "pick_winner", "deliver_order"}
+
+
 def _with_project(request: dict[str, Any]) -> dict[str, Any]:
     """Name this client's project in calls forwarded to the Glob app, which serves every project."""
     params = request.get("params")
@@ -896,17 +917,34 @@ class AppBridge:
         self.base = (os.environ.get("FORGE_APP_URL") or f"http://127.0.0.1:{cfg.port or 8420}").rstrip("/")
         self._local: ForgeMCPDispatcher | None = None
         self._app_ok: bool | None = None
+        self._autostart_failed = False
 
     def local(self) -> ForgeMCPDispatcher:
         if self._local is None:
             self._local = ForgeMCPDispatcher()
         return self._local
 
+    async def _autostart(self, request: dict[str, Any]) -> None:
+        """Ordering or generating needs the studio: start it when it isn't running and show the project."""
+        from forge import launcher
+
+        params = request.get("params") if request.get("method") == "tools/call" else None
+        if not isinstance(params, dict) or params.get("name") not in AUTOSTART_TOOLS or self._autostart_failed:
+            return
+        if not launcher.autostart_enabled() or await asyncio.to_thread(launcher.is_running, self.base):
+            return
+        project = str((params.get("arguments") or {}).get("project") or default_project())
+        try:
+            await asyncio.to_thread(launcher.open_glob, project)
+        except RuntimeError:
+            self._autostart_failed = True  # don't make every call wait for a start that can't work; stay on the files
+
     async def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         if request.get("method") in ("initialize", "ping") or request.get("method", "").startswith("notifications/"):
             return await self.local().handle_jsonrpc(request)
         import httpx
 
+        await self._autostart(request)
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=1.5)) as client:
                 if not self._app_ok:
