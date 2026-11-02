@@ -29,9 +29,11 @@ from forge.models import (
     Asset,
     AssetType,
     AutonomyMode,
+    CriticReport,
     Job,
     JobStatus,
     ProjectBible,
+    QCReport,
     new_id,
 )
 from forge.providers.base import ProviderCapability
@@ -438,12 +440,17 @@ class RecipeExecutor:
                     ),
                     metadata=cached.get("metadata", {}),
                 )
-                asset.qc_report = run_qc_checks(asset, self.store.resolve_safe_path(asset.file_path), bible)
-                asset.critic_report = await REGISTRY.critic.evaluate_asset(
-                    self.store.resolve_safe_path(asset.thumbnail_path or asset.file_path),
-                    prompt_full,
-                    bible,
-                )
+                if asset_type == AssetType.AUDIO:
+                    asset.thumbnail_path = ""
+                    asset.qc_report = QCReport(summary="Audio: image QC skipped")
+                    asset.critic_report = CriticReport(feedback="Audio: visual critic skipped")
+                else:
+                    asset.qc_report = run_qc_checks(asset, self.store.resolve_safe_path(asset.file_path), bible)
+                    asset.critic_report = await REGISTRY.critic.evaluate_asset(
+                        self.store.resolve_safe_path(asset.thumbnail_path or asset.file_path),
+                        prompt_full,
+                        bible,
+                    )
                 self.store.save_asset(asset)
                 return asset
 
@@ -498,10 +505,16 @@ class RecipeExecutor:
                 ),
                 metadata={**res.metadata, "critic_iteration": attempt + 1},
             )
-            abs_file = self.store.resolve_safe_path(asset.file_path)
-            asset.qc_report = run_qc_checks(asset, abs_file, bible)
-            critic_img = self.store.resolve_safe_path(asset.thumbnail_path or asset.file_path)
-            asset.critic_report = await REGISTRY.critic.evaluate_asset(critic_img, prompt_full, bible)
+            if asset_type == AssetType.AUDIO:
+                # Audio has no pixels: skip image QC/critic (the default reports already pass).
+                asset.thumbnail_path = res.thumbnail_path
+                asset.qc_report = QCReport(summary="Audio: image QC skipped")
+                asset.critic_report = CriticReport(feedback="Audio: visual critic skipped")
+            else:
+                abs_file = self.store.resolve_safe_path(asset.file_path)
+                asset.qc_report = run_qc_checks(asset, abs_file, bible)
+                critic_img = self.store.resolve_safe_path(asset.thumbnail_path or asset.file_path)
+                asset.critic_report = await REGISTRY.critic.evaluate_asset(critic_img, prompt_full, bible)
 
             self.store.save_asset(asset)
             self.store.set_cached_result(

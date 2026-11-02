@@ -1,76 +1,48 @@
-# AGENTS.md — Forge Workspace & Game Coding Agent Protocol
+# AGENTS.md — Working on the Glob repo
 
-Welcome, Coding Agent (Claude Code, Codex, Cursor, OpenCode, Antigravity).
+This file is for an AI agent changing **Glob's own code**. If you are coding a *game* that uses Glob, you don't need it: load the `glob` skill that Glob wrote into your game folder instead.
 
-**Forge** is a local-first 2D & 3D game asset pipeline with a chat agent and a live project overview. It is designed so that **an external agent coding a game** and **Forge** communicate through shared, human-readable Markdown files inside each project folder (`projects/<project_name>/workspace/`) as well as MCP tools and HTTP endpoints.
+Glob is your game's asset studio. Your coding agent stays where it is: it orders, Glob delivers. The Python package is still called `forge`; `forge` and `glob` are the same command.
 
----
+## Run and test
 
-## 1. Folder & Workspace Layout
-
-Every project lives in `projects/<project_name>/`:
-
-```text
-projects/<project_name>/
-  project.json                    # Structured Project Bible & budget caps
-  manifest.db / manifest.json     # DAG asset lineage database
-  assets/                         # Generated .png, .glb, .obj, and thumbnails
-  exports/                        # Engine-ready Godot, Unity, and Unreal bundles
-  workspace/                      # Shared Markdown communication files
-    GAME.md                       # Game definition, camera, scale, art style (2-way synced with Project Bible)
-    ASSET_REQUIREMENTS.md         # Live checklist of assets needed by game code ([ ], [~], [x])
-    HANDOFFS.md                   # Bidirectional handoff log between coding agent & Forge
-    KNOWLEDGE.md                  # Reusable art rules, approved prompts, and naming conventions
-    DELIVERY_MANIFEST.json        # SHA-256 verification hashes & QC scores for delivered assets
-    handoffs/                     # Individual timestamped handoff notes
+```bash
+uv run forge                          # studio + HTTP API at http://127.0.0.1:8420
+uv run forge --mcp --project <name>   # MCP server over stdio
+uv run --extra dev pytest -v          # tests (73 pass)
 ```
 
-Every planned asset also has a nested Markdown blueprint, for example
-`workspace/characters/royals/demon_king.md`. Forge keeps these files in sync with
-asset studies. Character blueprints should communicate the creative intent before
-production, using these sections:
+Set `FORGE_PROJECTS_DIR` to point the MCP server and tests at another projects folder.
 
-- **Core Idea** — the character fantasy in one sentence.
-- **Gameplay Identity** — the character's role and what makes their playstyle unique.
-- **Character & World** — personality, motivation, lore, and visual description.
-- **Visual Blueprint** — silhouette, focal details, materials, and gameplay-distance read.
-- **Production Handoff** — workflow, selected concept, generated outputs, and engine path.
+## The flow in one paragraph
 
-The Forge study view presents these as visual, editable design pillars; the Markdown
-file remains the portable source of truth for external coding agents. Its blueprint
-action can use the configured VS Code text model to fill missing pillars, update the
-nested Markdown file, and preserve existing writing unless regeneration is confirmed.
+A coding agent works on a game with placeholders. The user connects the game once (Settings → Coding agent). The agent orders assets with MCP `place_order`. Orders show in the **Agent Orders** board. They are filed into the workspace (`file_order`) with real prompts, generated, and when ready they are copied to `<game>/glob_delivery/<order_id>/` with a SHA-256 `manifest.json`. The agent swaps the placeholder and sets `update_order status=integrated`.
 
----
+## Codebase map
 
-## 2. How a Game Coding Agent Requests & Receives Assets
+| Path | Role |
+|---|---|
+| `forge/orders.py` | Orders. Stored: delivered, integrated, cancelled. Computed live from the workspace: draft, filed, in_progress, ready. Per-kind `DEFAULT_NEEDS`, delivery copy, manifest. |
+| `forge/agent/connect.py` | Connect/disconnect a game folder. Writes only Glob's own part (MCP entry per agent, `glob:start`/`glob:end` notes, `glob` skill, `glob_delivery/README.md`). |
+| `forge/game_link.py` | Link between a project and its game folder. |
+| `forge/mcp/server.py` | MCP server (stdio + HTTP `/api/mcp`). `advertised_tools()` is the list agents see. Forwards to the running app, else works on files. |
+| `forge/agent/glob_prompt.md` | The Glob role prompt. One source for the chat, the skill and the MCP prompt. Edit it here only. |
+| `forge/agent/workspace_agent.py` | Glob chat agent and workspace tools. |
+| `forge/asset_studio.py` | Asset generation: candidates, winner, 3D, rig, animation, audio takes. |
+| `forge/providers/` | Gemini, Meshy, Tripo, ElevenLabs (images, audio), Stability (audio). |
+| `forge/game_import.py` | Game scan and import. Skips Glob's own dirs. |
+| `forge/watcher/workspace_watcher.py` | Pushes live updates when workspace files change. |
+| `forge/server/app.py` | FastAPI routes. `forge/server/security.py` is the local-only request guard. |
+| `forge/ui/app.js` | Plain-JS UI. `connectSettings` is the Coding agent page. |
+| `forge/config.py` | Settings. Keys live in `~/.forge/config.json`, never in projects. |
 
-When you are writing game code (e.g., creating a new weapon, enemy, potion, UI icon, or level prop in Godot/Unity/Unreal) and need art assets:
+## Conventions
 
-### Workflow A: Direct Markdown File Protocol (Zero-Config)
-
-1. **Define or update the game context** in `projects/<project>/workspace/GAME.md`.
-   - Forge parses `GAME.md` and automatically syncs its `ProjectBible` (Genre, Art Style, Camera Perspective, Polycount Budget, Unit Scale, Palette).
-2. **Append required assets** to `projects/<project>/workspace/ASSET_REQUIREMENTS.md` using this exact checklist line format:
-   ```markdown
-   - [ ] `asset_slug` | **Kind** | `res://assets/models/asset_slug.glb` | Clear visual description of the asset
-   ```
-   Supported **Kind** values: `3D Mesh`, `2D Icon`, `2D Sprite`, `2D Texture`, `2D Image`.
-3. **Trigger fulfillment** (or let the human click **Fulfill Open Requirements** in the Forge Workspace UI):
-   - Via CLI / HTTP:
-     ```bash
-     curl -X POST http://127.0.0.1:8420/api/workspace/requirements/fulfill -H "Content-Type: application/json" -d '{"project":"default"}'
-     ```
-   - Or via MCP tool: `fulfill_asset_requirements(project="default")`.
-4. **Verify delivery**:
-   - Forge generates the asset, runs QC & Vision Critic checks, computes the file's **SHA-256 hash**, updates the line in `ASSET_REQUIREMENTS.md` to `[x]` with `asset:<id> sha256:<hash>`, writes the receipt to `workspace/DELIVERY_MANIFEST.json`, and appends a delivery note to `workspace/HANDOFFS.md`.
-
-### Workflow B: MCP Server Tools (`.mcp.json` included)
-
-Forge exposes 26 tools over stdio (`uv run forge --mcp`) and HTTP JSON-RPC (`POST http://127.0.0.1:8420/api/mcp`):
-- **Workspace Docs & Requirements**: `read_workspace_doc`, `write_workspace_doc`, `list_asset_requirements`, `add_asset_requirement`, `fulfill_asset_requirements`, `post_agent_handoff`
-- **Asset & Lineage DAG**: `list_assets`, `get_asset`, `rate_asset`, `undo_action`
-- **Generation Verbs & Recipes**: `run_verb`, `run_recipe`, `create_recipe`, `run_agent_brief`
-- **Import a Game**: `import_game` copies a Godot/Unity/Unreal project's characters, models, animations, textures, variants, kits and docs into the project (the user must grant the folder in Settings → Storage & access; `preview: true` only lists what it would import)
-- **Game Scan & Engine Write-Back**: `scan_game_project`, `get_game_profile`, `update_game_profile`, `list_asset_wishlist`, `find_placeholders`, `propose_assets_for`, `writeback_preview`, `writeback_apply`
-- **Bible & Export**: `get_project_bible`, `update_project_bible`, `list_style_packs`, `queue_status`, `get_budget`, `export`
+- Plain HTML/CSS/JS for the UI. No build step.
+- Keep Glob's writes into a game folder limited to what `connect.py` and `orders.py` own. Never write elsewhere in the game.
+- Computed statuses must stay computed. Don't store them.
+- Receipts are SHA-256 hashes of delivered files. Don't claim checks that didn't run.
+- Keep the advertised MCP tool list small. Legacy tools may still answer but stay unadvertised.
+- Keys, tokens and `.env` never go in projects, exports or API responses.
+- Add or update a test in `tests/` for every behaviour change.
+- Keep `README.md`, this file and the two `forge-asset-maker` skill copies (`.claude/skills/` and `.agents/skills/`, identical) in sync with the code.

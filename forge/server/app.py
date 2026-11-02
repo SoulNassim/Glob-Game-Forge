@@ -28,14 +28,12 @@ from pydantic import BaseModel, Field
 from forge import access, asset_studio, game_import, game_tools, overview as project_overview, updater, vault
 from forge.agent.action_layer import ForgeActionLayer
 from forge.agent.autonomous import execute_agent_brief
-from forge.agent import cli_agents
-from forge.agent import endpoints as model_endpoints
+from forge.agent import cli_models, endpoints as model_endpoints
 from forge.agent.llm import call_agent_model, list_agent_models
 from forge.agent.workspace_agent import WorkspaceAgent
 from forge.server.security import LocalOnlyGuard
-from forge.server.terminal import allowed_origin, resolve_terminal_command, run_terminal
 from forge.config import get_config_dir, get_projects_root, load_config, save_config
-from forge.mcp.server import ForgeMCPDispatcher, MCP_TOOLS_SCHEMA
+from forge.mcp.server import MUTATING_TOOLS, ForgeMCPDispatcher, advertised_tools, default_project
 from forge.models import JobStatus
 from forge.providers.auth_manager import (
     call_vscode_copilot_model,
@@ -60,6 +58,9 @@ from forge.storage import workspace_archive
 from forge.stylepacks.builtins import VARIANT_CHIP_PRESETS, save_custom_style_pack
 from forge.models import StylePack
 from forge.watcher.folder_watcher import WatchFolderService
+from forge.watcher.workspace_watcher import WorkspaceWatcher
+from forge import game_link, orders
+from forge.agent import connect as connect_agent
 
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
@@ -92,7 +93,6 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 actions = ForgeActionLayer(broadcast_cb=ws_manager.broadcast)
-mcp_dispatcher = ForgeMCPDispatcher(action_layer=actions)
 
 
 async def _agent_model_call(**kwargs: Any) -> dict[str, Any]:
@@ -102,6 +102,36 @@ async def _agent_model_call(**kwargs: Any) -> dict[str, Any]:
 
 
 workspace_agent = WorkspaceAgent(actions, _agent_model_call)
+mcp_dispatcher = ForgeMCPDispatcher(action_layer=actions, workspace_agent=workspace_agent)
+
+
+_order_sync_locks: dict[str, asyncio.Lock] = {}
+
+
+async def sync_orders(project: str) -> list[str]:
+    """Deliver orders that just became ready (when the project's game folder wants automatic delivery)."""
+    link = game_link.get_link(project, actions.root_dir)
+    if not link or not link.get("auto_deliver", True):
+        return []
+    lock = _order_sync_locks.setdefault(project, asyncio.Lock())
+    if lock.locked():
+        return []
+    async with lock:
+        delivered = await asyncio.to_thread(orders.auto_deliver, _ws_dir(project), Path(link["game_folder"]), project)
+    if delivered:
+        await ws_manager.broadcast({"type": "orders_delivered", "project": project, "orders": delivered})
+    return delivered
+
+
+async def workspace_changed(project: str) -> None:
+    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    try:
+        await sync_orders(project)
+    except Exception:  # noqa: BLE001 — delivery problems must never break the edit that triggered them
+        pass
+
+
+workspace_watcher = WorkspaceWatcher(lambda project: actions.get_workspace(project).ws_dir, workspace_changed)
 
 
 async def _watcher_run_verb(
@@ -129,10 +159,18 @@ async def lifespan(app: FastAPI):
             job.status = JobStatus.CANCELED
             job.step_label = "Interrupted by server restart (not re-run to protect credits)"
             default_store.save_job(job)
+    for linked in game_link.linked_projects():
+        try:
+            connect_agent.refresh(linked)  # new prompt or app location after an update
+        except (OSError, ValueError):
+            pass
     watch_task = asyncio.create_task(watcher_service.loop(3.0))
+    workspace_task = asyncio.create_task(workspace_watcher.loop(2.0))
     yield
     watcher_service.stop()
+    workspace_watcher.stop()
     watch_task.cancel()
+    workspace_task.cancel()
 
 
 app = FastAPI(
@@ -227,7 +265,8 @@ class UrlIngestRequest(BaseModel):
 
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
-    return {"ok": True}
+    # The MCP bridge checks projects_dir so it only forwards to a Glob app that serves the same projects.
+    return {"ok": True, "projects_dir": str((actions.root_dir or get_projects_root()).resolve())}
 
 
 @app.get("/api/bootstrap")
@@ -256,7 +295,7 @@ async def api_bootstrap(project: str = "default") -> dict[str, Any]:
         "project_cards": actions.list_project_cards(),
         "sample_godot_path": str(SAMPLE_GODOT_DIR) if SAMPLE_GODOT_DIR.exists() else "sample_godot_game",
         "providers": REGISTRY.list_providers(),
-        "mcp_tools_count": len(MCP_TOOLS_SCHEMA),
+        "mcp_tools_count": len(advertised_tools()),
         "config": cfg.masked_dict(),
         "auth": get_all_auth_status(),
     }
@@ -750,7 +789,7 @@ async def api_workspace_inspector(project: str = "default") -> dict[str, Any]:
             "stdio_command": "uv run forge --mcp",
             "http_endpoint": "/api/mcp",
             "config_file": ".mcp.json" if mcp_config.is_file() else None,
-            "tools": [tool.get("name") for tool in MCP_TOOLS_SCHEMA],
+            "tools": [tool.get("name") for tool in advertised_tools()],
         },
     }
 
@@ -1145,6 +1184,38 @@ async def api_choose_folder(payload: dict[str, Any]) -> dict[str, str]:
     return {"folder_path": folder}
 
 
+# --- Connected game: the coding agent in the user's game repo talks to Glob over MCP ---
+
+@app.get("/api/connect")
+async def api_connect_status(project: str = "default", folder: str = "") -> dict[str, Any]:
+    status = connect_agent.status(project)
+    if folder and Path(folder).expanduser().is_dir():
+        status["suggested"] = connect_agent.detect_targets(Path(folder).expanduser())
+    return status
+
+
+@app.post("/api/connect")
+async def api_connect(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(connect_agent.connect, project, str(payload.get("folder") or ""), list(payload.get("targets") or []) or None)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/connect")
+async def api_connect_update(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    try:
+        game_link.update_link(project, {"auto_deliver": bool(payload.get("auto_deliver", True))})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return connect_agent.status(project)
+
+
+@app.delete("/api/connect")
+async def api_disconnect(project: str = "default") -> dict[str, Any]:
+    return await asyncio.to_thread(connect_agent.disconnect, project)
+
+
 # --- Folder access: what Glob's agent may read (and write) outside the projects folder ---
 
 @app.get("/api/access")
@@ -1199,15 +1270,16 @@ async def api_import_start(payload: dict[str, Any]) -> dict[str, Any]:
     job = {"id": f"imp_{int(time.time() * 1000)}", "project": project, "folder": folder, "status": "running", "log": [], "result": None, "error": ""}
     import_jobs[job["id"]] = job
     title = str(payload.get("title") or "").strip() or None
+    plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else None
 
     async def run() -> None:
         try:
-            result = await asyncio.to_thread(game_import.import_game, folder, ws_dir, title=title, progress=job["log"].append)
-            job["result"] = {key: result[key] for key in ("summary", "copied", "bytes", "sections")} | {"assets": len(result["assets"])}
+            result = await asyncio.to_thread(game_import.import_game, folder, ws_dir, title=title, progress=job["log"].append, plan=plan)
+            job["result"] = {key: result[key] for key in ("summary", "copied", "bytes", "sections", "orders")} | {"assets": len(result["assets"])}
             job["status"] = "done"
         except Exception as exc:  # noqa: BLE001 — shown in the import screen
             job["status"], job["error"] = "failed", str(exc)
-        await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+        await workspace_changed(project)
 
     asyncio.create_task(run())
     return job
@@ -1239,7 +1311,7 @@ async def api_import_models(project: str = "default") -> dict[str, Any]:
 async def api_import_describe(project: str = "default") -> dict[str, Any]:
     described = await game_import.describe_assets(_ws_dir(project), _agent_model_call)
     if described:
-        await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+        await workspace_changed(project)
     return {"described": described}
 
 
@@ -1585,7 +1657,69 @@ def _ws_dir(project: str) -> Path:
 
 @app.get("/api/overview")
 async def api_overview(project: str = "default") -> dict[str, Any]:
-    return project_overview.build_overview(_ws_dir(project), project)
+    workspace_watcher.touch(project)
+    overview = project_overview.build_overview(_ws_dir(project), project)
+    overview["orders"] = orders.summary(await asyncio.to_thread(orders.list_orders, _ws_dir(project)))
+    return overview
+
+
+# --- Agent orders ---
+
+def _order_call(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    try:
+        return fn(*args, **kwargs)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'\"")) from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/orders")
+async def api_orders(project: str = "default") -> dict[str, Any]:
+    listed = await asyncio.to_thread(orders.list_orders, _ws_dir(project))
+    return {"orders": listed, "counts": orders.summary(listed), "kinds": list(orders.KINDS), "needs": list(orders.NEEDS)}
+
+
+@app.post("/api/orders")
+async def api_place_order(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    order = _order_call(
+        orders.place, _ws_dir(project), str(payload.get("title") or ""), str(payload.get("kind") or ""),
+        str(payload.get("brief") or ""), str(payload.get("placeholder") or ""), needs=payload.get("needs"),
+        context=str(payload.get("context") or ""), requested_by="you",
+    )
+    await workspace_changed(project)
+    return order
+
+
+@app.patch("/api/orders/{order_id}")
+async def api_update_order(order_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    order = _order_call(orders.update, _ws_dir(project), order_id, payload)
+    await workspace_changed(project)
+    return order
+
+
+@app.post("/api/orders/{order_id}/file")
+async def api_file_order(order_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    order = _order_call(orders.file_order, _ws_dir(project), order_id, str(payload.get("path") or ""))
+    await workspace_changed(project)
+    return order
+
+
+@app.post("/api/orders/{order_id}/deliver")
+async def api_deliver_order(order_id: str, project: str = "default") -> dict[str, Any]:
+    game = game_link.game_folder(project, actions.root_dir)
+    if game is None:
+        raise HTTPException(status_code=400, detail="Connect your game folder first (Settings → Coding agent).")
+    order = _order_call(orders.deliver, _ws_dir(project), game, order_id, project)
+    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    return order
+
+
+@app.delete("/api/orders/{order_id}")
+async def api_delete_order(order_id: str, project: str = "default") -> dict[str, Any]:
+    await asyncio.to_thread(orders.remove, _ws_dir(project), order_id)
+    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    return {"deleted": order_id}
 
 
 @app.get("/api/overview/folder")
@@ -1601,35 +1735,35 @@ async def api_overview_read_file(path: str, project: str = "default") -> dict[st
 @app.put("/api/overview/file")
 async def api_overview_write_file(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     saved = _overview_call(project_overview.write_text_file, _ws_dir(project), str(payload.get("path") or ""), str(payload.get("content") or ""))
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return saved
 
 
 @app.delete("/api/overview/style-text")
 async def api_overview_remove_style_text(path: str, project: str = "default") -> dict[str, Any]:
     _overview_call(project_overview.remove_style_text, _ws_dir(project), path)
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"removed": path}
 
 
 @app.delete("/api/overview/pillar")
 async def api_overview_remove_pillar(path: str, project: str = "default") -> dict[str, Any]:
     _overview_call(project_overview.remove_pillar_image, _ws_dir(project), path)
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"removed": path}
 
 
 @app.post("/api/overview/folder")
 async def api_overview_create_folder(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     path = _overview_call(project_overview.create_folder, _ws_dir(project), str(payload.get("parent") or ""), str(payload.get("title") or ""))
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"path": path}
 
 
 @app.post("/api/overview/to-folder")
 async def api_overview_to_folder(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     path = _overview_call(project_overview.doc_to_folder, _ws_dir(project), str(payload.get("path") or ""))
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"path": path}
 
 
@@ -1658,7 +1792,7 @@ async def api_overview_upload(
             index += 1
         target.write_bytes(await upload.read())
         saved.append(target.relative_to(ws_dir.resolve()).as_posix())
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"saved": saved}
 
 
@@ -1708,21 +1842,21 @@ async def api_studio_update_asset(payload: dict[str, Any], project: str = "defau
     allowed = {"kind", "prompt", "winner", "style", "title"}
     fields = {key: value for key, value in dict(payload.get("fields") or {}).items() if key in allowed}
     result = _overview_call(asset_studio.update_asset, _ws_dir(project), str(payload.get("path") or ""), fields)
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return result
 
 
 @app.delete("/api/studio/output")
 async def api_studio_remove_output(path: str, output: str, project: str = "default") -> dict[str, Any]:
     result = _overview_call(asset_studio.remove_output, _ws_dir(project), path, output)
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return result
 
 
 @app.post("/api/studio/output/restore")
 async def api_studio_restore_outputs(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     restored = _overview_call(asset_studio.restore_outputs, _ws_dir(project), list(payload.get("moves") or []))
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"restored": restored}
 
 
@@ -1757,7 +1891,7 @@ async def _run_studio_job(project: str, job: dict[str, Any], request: dict[str, 
     job["finished_at"] = time.time()
     _save_jobs(project)
     await ws_manager.broadcast({"type": "studio_job", "project": project, "job": dict(job)})
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
 
 
 def start_studio_job(project: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -1794,7 +1928,27 @@ async def api_studio_run(payload: dict[str, Any], project: str = "default") -> d
 
 @app.get("/api/studio/options")
 async def api_studio_options() -> dict[str, Any]:
-    return {"models": asset_studio.list_image_models(), "selected": load_config().default_image_model, "kinds": list(asset_studio.ASSET_KINDS)}
+    return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": load_config().default_image_model, "kinds": list(asset_studio.ASSET_KINDS)}
+
+
+@app.get("/api/studio/voices")
+async def api_studio_voices() -> dict[str, Any]:
+    try:
+        from forge.providers.elevenlabs_audio import list_voices
+    except ImportError:
+        return {"voices": []}
+    try:
+        return {"voices": await list_voices()}
+    except Exception as exc:  # noqa: BLE001 — an empty list keeps the voice picker usable
+        return {"voices": [], "error": str(exc)[:200]}
+
+
+@app.post("/api/studio/audio-upload")
+async def api_studio_audio_upload(project: str = "default", path: str = "", files: list[UploadFile] = File(...)) -> dict[str, Any]:
+    ws_dir = _ws_dir(project)
+    saved = [_overview_call(asset_studio.save_audio, ws_dir, path, upload.filename or "sound.mp3", await upload.read()) for upload in files[:10]]
+    await workspace_changed(project)
+    return {"saved": saved}
 
 
 @app.get("/api/studio/pillar-targets")
@@ -1805,7 +1959,7 @@ async def api_studio_pillar_targets(path: str, project: str = "default") -> dict
 @app.post("/api/studio/make-pillar")
 async def api_studio_make_pillar(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     saved = _overview_call(asset_studio.make_pillar, _ws_dir(project), str(payload.get("image") or ""), str(payload.get("folder") or ""))
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"saved": saved}
 
 
@@ -1844,7 +1998,7 @@ def _png_bytes(value: str) -> bytes:
 async def api_studio_model_upload(project: str = "default", path: str = "", files: list[UploadFile] = File(...)) -> dict[str, Any]:
     ws_dir = _ws_dir(project)
     saved = [_overview_call(game_tools.save_model, ws_dir, path, upload.filename or "model.glb", await upload.read()) for upload in files[:10]]
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"saved": saved}
 
 
@@ -1871,7 +2025,7 @@ async def api_studio_split(payload: dict[str, Any], project: str = "default") ->
         game_tools.split_image, _ws_dir(project), str(payload.get("asset") or ""), str(payload.get("image") or ""),
         list(payload.get("boxes") or []), bool(payload.get("as_assets")),
     )
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"created": created}
 
 
@@ -1881,7 +2035,7 @@ async def api_studio_icons(payload: dict[str, Any], project: str = "default") ->
         game_tools.make_icons, _ws_dir(project), str(payload.get("asset") or ""), str(payload.get("image") or ""),
         [int(s) for s in payload.get("sizes") or []], float(payload.get("padding") or 0.08),
     )
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"created": created}
 
 
@@ -1891,7 +2045,7 @@ async def api_studio_sprite(payload: dict[str, Any], project: str = "default") -
         game_tools.save_sprite, _ws_dir(project), str(payload.get("asset") or ""), str(payload.get("name") or "sprites"),
         _png_bytes(str(payload.get("png") or "")), payload.get("meta") or None,
     )
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+    await workspace_changed(project)
     return {"saved": saved}
 
 
@@ -1926,7 +2080,20 @@ async def api_agent_models() -> dict[str, Any]:
         "presets": model_endpoints.PRESETS,
         "endpoints": [model_endpoints.public(e) for e in model_endpoints.load_endpoints()],
         "vscode_importable": sum(1 for m in models if m["provider"] == "vscode"),
+        "clis": cli_models.detect(),
     }
+
+
+@app.post("/api/agent/cli/{cli_id}/login")
+async def api_cli_login(cli_id: str) -> dict[str, Any]:
+    """Open a terminal with the coding agent's login (or install command when it isn't installed yet)."""
+    if cli_id not in cli_models.CLIS:
+        raise HTTPException(status_code=404, detail=f"Unknown coding agent '{cli_id}'.")
+    try:
+        cli_models.open_login(cli_id)
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"opened": cli_id}
 
 
 def _endpoint_call(fn, *args: Any) -> Any:
@@ -1987,10 +2154,7 @@ async def api_agent_sessions(project: str = "default") -> dict[str, Any]:
     cfg = load_config()
     return {
         "sessions": workspace_agent.list_sessions(project),
-        "handoff_threshold": cfg.handoff_message_threshold,
-        "default_model": cfg.agent_model or cfg.default_critic_model,
         "default_effort": cfg.agent_reasoning_effort,
-        "terminal_command": cfg.terminal_command,
     }
 
 
@@ -2023,31 +2187,8 @@ async def api_agent_delete_session(session_id: str, project: str = "default") ->
     return {"trashed": _agent_call(workspace_agent.delete_session, project, session_id)}
 
 
-async def _run_cli_turn(project: str, session_id: str, text: str) -> None:
-    async def on_event(event: dict[str, Any]) -> None:
-        await ws_manager.broadcast({"type": "cli_event", "project": project, "session_id": session_id, "event": event})
-        if event["kind"] == "tool":
-            await ws_manager.broadcast({"type": "workspace_changed", "project": project})
-
-    try:
-        await workspace_agent.send_cli(project, session_id, text, on_event, allow_edits=load_config().cli_allow_edits)
-    finally:
-        await ws_manager.broadcast({"type": "cli_done", "project": project, "session_id": session_id})
-        await ws_manager.broadcast({"type": "workspace_changed", "project": project})
-
-
 @app.post("/api/agent/sessions/{session_id}/messages")
 async def api_agent_send(session_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
-    session = _agent_call(workspace_agent.get_session, project, session_id)
-    if session.get("agent", "glob") != "glob":
-        # Coding-agent turns run in the background so several tabs can work at once.
-        if cli_agents.is_running(session_id):
-            raise HTTPException(status_code=409, detail="This agent is still working. Wait or press Stop.")
-        text = str(payload.get("text") or "").strip()
-        if not text:
-            raise HTTPException(status_code=400, detail="Write a message.")
-        asyncio.create_task(_run_cli_turn(project, session_id, text))
-        return {**session, "running": True}
     try:
         session = await workspace_agent.send(
             project,
@@ -2064,7 +2205,7 @@ async def api_agent_send(session_id: str, payload: dict[str, Any], project: str 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if any(action.get("changed") for action in session["messages"][-1].get("actions") or []):
-        await ws_manager.broadcast({"type": "workspace_changed", "project": project})
+        await workspace_changed(project)
     return session
 
 
@@ -2074,50 +2215,12 @@ async def api_agent_compact(session_id: str, project: str = "default") -> dict[s
     return await workspace_agent.compact(project, session, force=True)
 
 
-@app.post("/api/agent/sessions/{session_id}/stop")
-async def api_agent_stop(session_id: str) -> dict[str, Any]:
-    return {"stopped": cli_agents.stop(session_id)}
-
-
-@app.get("/api/agent/clis")
-async def api_list_clis() -> dict[str, Any]:
-    return {"clis": cli_agents.detect()}
-
-
-@app.get("/api/agent/clis/{cli_id}/models")
-async def api_cli_models(cli_id: str) -> dict[str, Any]:
-    if cli_id not in cli_agents.CLIS:
-        raise HTTPException(status_code=404, detail="Unknown coding agent.")
-    return await asyncio.to_thread(cli_agents.models, cli_id)
-
-
-@app.post("/api/agent/clis/{cli_id}/login")
-async def api_cli_login(cli_id: str) -> dict[str, Any]:
-    if cli_id not in cli_agents.CLIS:
-        raise HTTPException(status_code=404, detail="Unknown coding agent.")
-    try:
-        cli_agents.open_login(cli_id)
-    except (OSError, RuntimeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"opened": True}
-
-
 @app.post("/api/agent/sessions/{session_id}/handoff")
 async def api_agent_handoff(session_id: str, project: str = "default") -> dict[str, Any]:
     try:
         return await workspace_agent.handoff(project, session_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc).strip("'\"")) from exc
-
-
-@app.websocket("/ws/terminal")
-async def ws_terminal(websocket: WebSocket, project: str = "default", command: str = "") -> None:
-    cfg = load_config()
-    if not allowed_origin(websocket.headers.get("origin"), cfg.host, cfg.port):
-        await websocket.close(code=4403)
-        return
-    project_dir = actions.get_store(project).project_dir
-    await run_terminal(websocket, resolve_terminal_command(command or cfg.terminal_command), project_dir)
 
 
 # --- Agent Brief & MCP Endpoints ---
@@ -2136,7 +2239,7 @@ async def api_agent_brief(req: AgentBriefRequest) -> dict[str, Any]:
 
 @app.get("/api/mcp/tools")
 async def api_mcp_tools() -> dict[str, Any]:
-    return {"tools": MCP_TOOLS_SCHEMA}
+    return {"tools": advertised_tools()}
 
 
 @app.post("/api/mcp")
@@ -2144,6 +2247,10 @@ async def api_mcp_rpc(request: dict[str, Any]) -> dict[str, Any]:
     if not load_config().mcp_http_enabled:
         raise HTTPException(status_code=403, detail="The MCP HTTP endpoint is turned off in Settings.")
     resp = await mcp_dispatcher.handle_jsonrpc(request)
+    params = request.get("params") or {}
+    if request.get("method") == "tools/call" and params.get("name") in MUTATING_TOOLS:
+        project = str((params.get("arguments") or {}).get("project") or "") or default_project()
+        await workspace_changed(project)
     return resp or {"jsonrpc": "2.0", "result": "ok"}
 
 

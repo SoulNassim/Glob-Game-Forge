@@ -9,6 +9,7 @@ import threading
 import time
 import uvicorn
 
+from forge import __version__
 from forge.config import load_config
 from forge.server.security import is_loopback
 
@@ -22,10 +23,13 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=None, help="Bind port (default: 8420)")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open browser on start")
     parser.add_argument("--mcp", action="store_true", help="Run as stdio MCP server instead of HTTP server")
+    parser.add_argument("--project", default=None, help="With --mcp: the Glob project this agent works on")
     parser.add_argument("--desktop", action="store_true", help="Open Glob in a native window (needs the 'desktop' extra)")
     args = parser.parse_args()
 
     if args.mcp:
+        if args.project:
+            os.environ["FORGE_PROJECT"] = args.project
         from forge.mcp.server import main as mcp_main
         mcp_main()
         return
@@ -39,9 +43,9 @@ def main() -> None:
     port = args.port or cfg.port or 8420
     url = f"http://{host}:{port}"
 
-    print(f"\n  [Forge] Asset Maker v1.0.0")
-    print(f"  -> Local Studio : {url}")
-    print(f"  -> MCP Server   : {url}/api/mcp (HTTP) or `uv run forge --mcp` (stdio)")
+    print(f"\n  Glob {__version__}: your game's asset studio")
+    print(f"  -> Studio       : {url}")
+    print(f"  -> Coding agent : connect your game in Settings → Coding agent (MCP server `glob`)")
     print(f"  -> Mode         : {'Demo Mode (No API keys needed)' if cfg.demo_mode else 'Live Provider Mode'}\n")
 
     if not args.no_browser:
@@ -55,7 +59,7 @@ def main() -> None:
 
     if not is_loopback(host):
         print("  !! WARNING: Glob has no login. Binding to a non-local address lets anyone on your network\n"
-              "     use your API keys, write project files and start coding agents.\n")
+              "     use your API keys and write project files.\n")
     os.environ["FORGE_BIND_HOST"] = host
     uvicorn.run("forge.server.app:app", host=host, port=port, log_level="info")
 

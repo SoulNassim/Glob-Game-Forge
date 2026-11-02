@@ -71,6 +71,8 @@ class ForgeConfig(BaseModel):
     gemini_api_key: str = ""
     meshy_api_key: str = ""
     elevenlabs_api_key: str = ""
+    stability_api_key: str = ""
+    tripo_api_key: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
@@ -106,16 +108,9 @@ class ForgeConfig(BaseModel):
     agent_compact_at_tokens: int = 48000
     agent_keep_recent_messages: int = 6
     agent_max_tool_rounds: int = 8
-    # Coding-agent CLIs may edit workspace files without asking.
-    cli_allow_edits: bool = True
-    terminal_command: str = "shell"
-    handoff_message_threshold: int = 40
+    # Glob chat panel in the app: "auto" (hidden while a coding agent is connected), "on" or "off".
+    chat_mode: str = "auto"
     mcp_http_enabled: bool = True
-
-    # Engine project folders used by exports
-    godot_project_path: str = ""
-    unity_project_path: str = ""
-    unreal_project_path: str = ""
 
     # Look for a new Glob release on start (Settings → Storage & access → Updates).
     auto_update_check: bool = True
@@ -150,6 +145,8 @@ class ForgeConfig(BaseModel):
             "gemini": "GEMINI_API_KEY",
             "meshy": "MESHY_API_KEY",
             "elevenlabs": "ELEVENLABS_API_KEY",
+            "stability": "STABILITY_API_KEY",
+            "tripo": "TRIPO_API_KEY",
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
         }
@@ -173,7 +170,7 @@ class ForgeConfig(BaseModel):
     def masked_dict(self) -> dict[str, Any]:
         """Return safe dictionary with keys masked for UI/API responses."""
         data = self.model_dump()
-        for k in ("gemini_api_key", "meshy_api_key", "elevenlabs_api_key", "openai_api_key", "anthropic_api_key"):
+        for k in ("gemini_api_key", "meshy_api_key", "elevenlabs_api_key", "stability_api_key", "tripo_api_key", "openai_api_key", "anthropic_api_key"):
             provider = k.replace("_api_key", "")
             raw = self.get_key(provider)
             if raw:

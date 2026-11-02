@@ -12,11 +12,188 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from forge.agent.action_layer import ForgeActionLayer
 from forge.agent.autonomous import execute_agent_brief
+from forge.config import get_projects_root
+
+from forge import __version__ as SERVER_VERSION  # noqa: E402
+PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+
+
+def default_project() -> str:
+    """The project an MCP client works on when a tool call names none (set by `forge --mcp --project`)."""
+    return os.environ.get("FORGE_PROJECT", "").strip() or "default"
+
+
+def _ws_tool(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "description": description,
+        "inputSchema": {"type": "object", "properties": {**properties, "project": {"type": "string"}}, "required": required},
+    }
+
+
+_PATH = {"type": "string", "description": "Path relative to the workspace root."}
+
+# The same tools the in-app Glob chat uses, so an external agent can manage the workspace just like Glob.
+WORKSPACE_TOOLS_SCHEMA: list[dict[str, Any]] = [
+    _ws_tool(
+        "workspace_overview",
+        "Start here. Returns the Glob workspace's folder on disk, its tree, the front page, granted outside folders "
+        "and the allowed asset kinds. Load the `glob` prompt to learn how the workspace is organized.",
+        {}, [],
+    ),
+    _ws_tool("workspace_list", "List a workspace folder (\"\" = root).", {"path": _PATH}, []),
+    _ws_tool("workspace_read", "Read a workspace file (Markdown, YAML front matter included).", {"path": _PATH}, ["path"]),
+    _ws_tool(
+        "workspace_write",
+        "Create or overwrite a workspace file; parent folders are created. Set append=true to add to the end instead.",
+        {"path": _PATH, "content": {"type": "string"}, "append": {"type": "boolean", "default": False}},
+        ["path", "content"],
+    ),
+    _ws_tool("workspace_create_folder", "Create a folder (a section or a collection).", {"path": _PATH}, ["path"]),
+    _ws_tool("workspace_move", "Move or rename a file or folder.", {"from": _PATH, "to": _PATH}, ["from", "to"]),
+    _ws_tool("workspace_delete", "Move a file or folder to the workspace's .trash/ (recoverable).", {"path": _PATH}, ["path"]),
+    _ws_tool(
+        "generate",
+        "Start image/3D generation for an asset .md (costs provider credits; runs in the Glob app, which must be open). "
+        "action: candidates (new images from the asset prompt), variant / edit (need instruction, work on the winner), "
+        "views (turnaround of the winner), make_3d, rig, animate (needs action_ids).",
+        {
+            "path": _PATH,
+            "action": {"type": "string", "enum": ["candidates", "variant", "edit", "views", "make_3d", "rig", "animate"]},
+            "count": {"type": "integer", "minimum": 1, "maximum": 4},
+            "instruction": {"type": "string"},
+            "source": {"type": "string", "description": "Image to work on instead of the winner."},
+            "action_ids": {"type": "array", "items": {"type": "integer"}},
+        },
+        ["path", "action"],
+    ),
+    _ws_tool(
+        "pick_winner",
+        "Choose the winning image for an asset (sets `winner:` in its header).",
+        {"path": _PATH, "file": {"type": "string", "description": "Workspace path of the chosen image."}},
+        ["path", "file"],
+    ),
+]
+
+_KIND = {"type": "string", "enum": ["character", "creature", "item", "weapon", "prop", "vehicle", "environment", "ui", "vfx", "sfx", "voice", "music"]}
+_NEEDS = {
+    "type": "array",
+    "items": {"type": "string", "enum": ["image", "model", "rig", "animations", "audio"]},
+    "description": "What must exist before the order is ready. Default by kind: 3D kinds need image+model, environment/ui/vfx an image, sfx/voice/music audio. Add rig/animations for animated characters.",
+}
+
+# The agent-order loop: the coding agent orders, Glob makes, the files are delivered into the game.
+ORDER_TOOLS_SCHEMA: list[dict[str, Any]] = [
+    _ws_tool(
+        "place_order",
+        "Order an asset the game needs (art, 3D model, sound). Keep using a placeholder in the game meanwhile. "
+        "One order per asset; describe it well and say where it is used. Returns the order with its id.",
+        {
+            "title": {"type": "string", "description": "What it is, e.g. 'Orc warrior (blue faction)'."},
+            "kind": _KIND,
+            "brief": {"type": "string", "description": "Look and purpose: shape, materials, colours, size, style hints."},
+            "placeholder": {"type": "string", "description": "Path of the placeholder this replaces, e.g. res://enemies/orc.tscn."},
+            "context": {"type": "string", "description": "Where and how the game uses it (faction, level, gameplay role, scale)."},
+            "needs": _NEEDS,
+            "requested_by": {"type": "string", "description": "Your name, e.g. claude-code."},
+        },
+        ["title", "kind"],
+    ),
+    _ws_tool(
+        "list_orders",
+        "All orders with their live status: draft, filed, in_progress, ready, delivered, integrated, cancelled.",
+        {"status": {"type": "string", "enum": ["draft", "filed", "in_progress", "ready", "delivered", "integrated", "cancelled"]}},
+        [],
+    ),
+    _ws_tool("get_order", "One order with what it still needs.", {"order_id": {"type": "string"}}, ["order_id"]),
+    _ws_tool(
+        "file_order",
+        "Glob role: sort an order into the workspace. Creates the asset .md at `path` (or links an existing one) with "
+        "the order's brief as its prompt. Rewrite the prompt afterwards so it describes the subject well.",
+        {"order_id": {"type": "string"}, "path": {"type": "string", "description": "Workspace path of the asset .md, e.g. 02-characters/blue-faction/orc-warrior.md."}},
+        ["order_id", "path"],
+    ),
+    _ws_tool(
+        "update_order",
+        "Change an order: brief, needs, placeholder, a note, or status integrated (you swapped the placeholder in), "
+        "cancelled, or reopen.",
+        {
+            "order_id": {"type": "string"},
+            "status": {"type": "string", "enum": ["integrated", "cancelled", "reopen"]},
+            "brief": {"type": "string"},
+            "context": {"type": "string"},
+            "placeholder": {"type": "string"},
+            "needs": _NEEDS,
+            "note": {"type": "string"},
+        },
+        ["order_id"],
+    ),
+    _ws_tool(
+        "get_deliveries",
+        "What Glob has delivered into the game's glob_delivery/ folder: per order the files, roles and SHA-256.",
+        {}, [],
+    ),
+    _ws_tool(
+        "deliver_order",
+        "Deliver a ready order into the game's glob_delivery/ folder now (normally happens automatically).",
+        {"order_id": {"type": "string"}},
+        ["order_id"],
+    ),
+]
+ORDER_TOOLS = {tool["name"] for tool in ORDER_TOOLS_SCHEMA}
+
+# Legacy tools that still answer calls but are not advertised: they work on the old asset store, not the workspace.
+LISTED_LEGACY_TOOLS = ("get_budget", "queue_status", "find_placeholders", "scan_game_project", "import_game")
+
+WORKSPACE_TOOL_CALLS = {
+    "workspace_list": "list",
+    "workspace_read": "read",
+    "workspace_create_folder": "create_folder",
+    "workspace_move": "move",
+    "workspace_delete": "delete",
+    "generate": "generate",
+    "pick_winner": "pick_winner",
+}
+MUTATING_TOOLS = {
+    "place_order", "file_order", "update_order", "deliver_order",
+    "workspace_write", "workspace_create_folder", "workspace_move", "workspace_delete", "generate", "pick_winner",
+    "write_workspace_doc", "add_asset_requirement", "fulfill_asset_requirements", "import_game",
+}
+
+SERVER_INSTRUCTIONS = """Glob is the user's game-asset studio (2D art, 3D models, rigs, animations, sounds), running locally.
+- When the game needs an asset, keep a placeholder and order the real one with place_order (one order per
+  asset, with a good brief and the placeholder path). list_orders shows progress.
+- Finished orders are delivered into the game's glob_delivery/<order_id>/ folder (see glob_delivery/README.md
+  and manifest.json). Swap the placeholder in, then call update_order with status integrated.
+- To work as Glob itself (sort orders into the asset workspace, write prompts, generate, pick winners), load the
+  `glob` prompt and call workspace_overview first.
+- Generation spends the user's provider credits: only generate when the user asked for it."""
+
+MCP_ADDENDUM = """## Tools in this session
+
+You reach the workspace through the Glob MCP server: workspace_overview (call it first), workspace_list,
+workspace_read, workspace_write (append=true to append), workspace_create_folder, workspace_move,
+workspace_delete (to .trash/), generate (path + action, see above) and pick_winner. Orders: list_orders,
+get_order, file_order (sort one into the workspace), update_order. All paths are relative to the workspace root. You may also open the workspace files directly at the folder workspace_overview reports;
+after editing files that way, Glob's overview refreshes on its own."""
+
+
+def advertised_tools() -> list[dict[str, Any]]:
+    legacy = [tool for tool in MCP_TOOLS_SCHEMA if tool["name"] in LISTED_LEGACY_TOOLS]
+    return ORDER_TOOLS_SCHEMA + WORKSPACE_TOOLS_SCHEMA + legacy
+
+
+def glob_session_prompt(project: str) -> str:
+    from forge.agent.workspace_agent import glob_prompt
+
+    return f"{glob_prompt(project)}\n\n{MCP_ADDENDUM}"
 
 
 MCP_TOOLS_SCHEMA: list[dict[str, Any]] = [
@@ -406,12 +583,75 @@ MCP_TOOLS_SCHEMA: list[dict[str, Any]] = [
 
 
 class ForgeMCPDispatcher:
-    def __init__(self, action_layer: ForgeActionLayer | None = None) -> None:
+    def __init__(self, action_layer: ForgeActionLayer | None = None, workspace_agent: Any = None) -> None:
         self.actions = action_layer or ForgeActionLayer()
+        if workspace_agent is None:
+            from forge.agent.workspace_agent import WorkspaceAgent
+
+            workspace_agent = WorkspaceAgent(self.actions, model_call=None)
+        # Runs the workspace tools; in the Glob app it also starts generation jobs.
+        self.workspace_agent = workspace_agent
+
+    def _workspace_tool(self, name: str, args: dict[str, Any], proj: str) -> dict[str, Any]:
+        agent = self.workspace_agent
+        if name == "workspace_overview":
+            from forge import asset_studio
+
+            context, _ = agent._context_block(proj, {}, {}, [])
+            return {"project": proj, "workspace": str(agent._ws(proj).resolve()), "kinds": list(asset_studio.ASSET_KINDS), "context": context}
+        if name == "generate" and agent.job_starter is None:
+            raise ValueError("Generation runs in the Glob app. Ask the user to open Glob (`glob` or the desktop app), then try again.")
+        if name == "workspace_write":
+            call = {"tool": "append" if args.get("append") else "write", "path": args.get("path"), "content": args.get("content", "")}
+        else:
+            call = {key: value for key, value in args.items() if key != "project"} | {"tool": WORKSPACE_TOOL_CALLS[name]}
+        outcome = agent.run_tool(proj, call)
+        result = {"ok": True, "summary": outcome.get("summary", ""), "path": outcome.get("path")}
+        if outcome.get("result") is not None:
+            result["content"] = outcome["result"]
+        if outcome.get("job"):
+            result["job"] = outcome["job"]
+        return result
+
+    def _order_tool(self, name: str, args: dict[str, Any], proj: str) -> dict[str, Any]:
+        from forge import game_link, orders
+
+        ws = self.actions.get_workspace(proj).ws_dir
+        game = game_link.game_folder(proj, self.actions.root_dir)
+        if name == "place_order":
+            return orders.place(
+                ws, str(args.get("title") or ""), str(args.get("kind") or ""), str(args.get("brief") or ""),
+                str(args.get("placeholder") or ""), needs=args.get("needs"), context=str(args.get("context") or ""),
+                requested_by=str(args.get("requested_by") or "coding agent"),
+            )
+        if name == "list_orders":
+            listed = orders.list_orders(ws, args.get("status") or None)
+            return {"orders": listed, "counts": orders.summary(orders.list_orders(ws))}
+        if name == "get_order":
+            return orders.get(ws, str(args.get("order_id") or ""))
+        if name == "file_order":
+            return orders.file_order(ws, str(args.get("order_id") or ""), str(args.get("path") or ""))
+        if name == "update_order":
+            fields = {k: v for k, v in args.items() if k not in ("order_id", "project")}
+            return orders.update(ws, str(args.get("order_id") or ""), fields)
+        if name == "get_deliveries":
+            if game is None:
+                return {"connected": False, "orders": {}, "hint": "No game folder is connected to this project yet."}
+            return {"connected": True, "folder": str(game / orders.DELIVERY_DIR)} | orders.read_manifest(game)
+        if name == "deliver_order":
+            if game is None:
+                raise ValueError("Connect the game folder in Glob (Settings → Coding agent) first.")
+            return orders.deliver(ws, game, str(args.get("order_id") or ""), proj)
+        raise ValueError(f"Unknown order tool '{name}'.")
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         args = arguments or {}
-        proj = args.get("project", "default")
+        proj = str(args.get("project") or "").strip() or default_project()
+
+        if name == "workspace_overview" or name == "workspace_write" or name in WORKSPACE_TOOL_CALLS:
+            return self._workspace_tool(name, args, proj)
+        if name in ORDER_TOOLS:
+            return self._order_tool(name, args, proj)
 
         if name == "list_assets":
             return self.actions.list_assets(
@@ -566,27 +806,44 @@ class ForgeMCPDispatcher:
         req_id = request.get("id")
         params = request.get("params") or {}
 
-        if method == "notifications/initialized":
+        if method.startswith("notifications/") or "id" not in request:
             return None
 
         try:
             if method == "initialize":
+                wanted = params.get("protocolVersion")
                 result: Any = {
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "forge-asset-maker-mcp", "version": "1.0.0"},
-                    "capabilities": {"tools": {"listChanged": False}},
+                    "protocolVersion": wanted if wanted in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
+                    "serverInfo": {"name": "glob", "title": "Glob asset studio", "version": SERVER_VERSION},
+                    "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False}},
+                    "instructions": SERVER_INSTRUCTIONS,
                 }
             elif method == "tools/list":
-                result = {"tools": MCP_TOOLS_SCHEMA}
+                result = {"tools": advertised_tools()}
+            elif method == "prompts/list":
+                result = {"prompts": [{"name": "glob", "title": "Become Glob", "description": "Manage this project's Glob asset workspace."}]}
+            elif method == "prompts/get":
+                if params.get("name") != "glob":
+                    raise ValueError(f"Unknown prompt '{params.get('name')}'.")
+                project = str((params.get("arguments") or {}).get("project") or "").strip() or default_project()
+                result = {
+                    "description": "Manage this project's Glob asset workspace.",
+                    "messages": [{"role": "user", "content": {"type": "text", "text": glob_session_prompt(project)}}],
+                }
             elif method == "tools/call":
                 t_name = params.get("name", "")
                 t_args = params.get("arguments") or {}
-                tool_out = await self.call_tool(t_name, t_args)
-                result = {
-                    "content": [{"type": "text", "text": json.dumps(tool_out, indent=2)}],
-                    "structuredContent": tool_out,
-                    "isError": False,
-                }
+                try:
+                    tool_out = await self.call_tool(t_name, t_args)
+                except Exception as exc:  # noqa: BLE001 — tool failures go back to the agent as readable results
+                    detail = str(exc).strip("'\"") or type(exc).__name__
+                    result = {"content": [{"type": "text", "text": detail}], "isError": True}
+                else:
+                    result = {
+                        "content": [{"type": "text", "text": json.dumps(tool_out, indent=2)}],
+                        "structuredContent": tool_out,
+                        "isError": False,
+                    }
             elif method == "ping":
                 result = {}
             else:
@@ -604,8 +861,56 @@ class ForgeMCPDispatcher:
             }
 
 
+def _with_project(request: dict[str, Any]) -> dict[str, Any]:
+    """Name this client's project in calls forwarded to the Glob app, which serves every project."""
+    params = request.get("params")
+    if request.get("method") not in ("tools/call", "prompts/get") or not isinstance(params, dict):
+        return request
+    arguments = dict(params.get("arguments") or {})
+    arguments.setdefault("project", default_project())
+    return request | {"params": params | {"arguments": arguments}}
+
+
+class AppBridge:
+    """Forwards stdio requests to the running Glob app so jobs and live updates show up there.
+
+    Falls back to an in-process dispatcher while the app is closed (generation then asks the user to open it).
+    """
+
+    def __init__(self) -> None:
+        from forge.config import load_config
+
+        cfg = load_config()
+        self.base = (os.environ.get("FORGE_APP_URL") or f"http://127.0.0.1:{cfg.port or 8420}").rstrip("/")
+        self._local: ForgeMCPDispatcher | None = None
+        self._app_ok: bool | None = None
+
+    def local(self) -> ForgeMCPDispatcher:
+        if self._local is None:
+            self._local = ForgeMCPDispatcher()
+        return self._local
+
+    async def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
+        if request.get("method") in ("initialize", "ping") or request.get("method", "").startswith("notifications/"):
+            return await self.local().handle_jsonrpc(request)
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=1.5)) as client:
+                if not self._app_ok:
+                    health = (await client.get(f"{self.base}/api/health")).json()
+                    self._app_ok = Path(str(health.get("projects_dir") or "")).resolve() == get_projects_root().resolve()
+                if self._app_ok:
+                    response = await client.post(f"{self.base}/api/mcp", json=_with_project(request))
+                    if response.status_code == 200:
+                        return response.json()
+        except (httpx.HTTPError, ValueError, AttributeError):
+            self._app_ok = None  # the app may start later; check again on the next call
+        return await self.local().handle_jsonrpc(_with_project(request))
+
+
 async def _stdio_loop() -> None:
-    dispatcher = ForgeMCPDispatcher()
+    bridge = AppBridge()
     loop = asyncio.get_running_loop()
     while True:
         line = await loop.run_in_executor(None, sys.stdin.readline)
@@ -616,7 +921,7 @@ async def _stdio_loop() -> None:
             continue
         try:
             req = json.loads(line_str)
-            resp = await dispatcher.handle_jsonrpc(req)
+            resp = await bridge.handle(req)
             if resp is not None:
                 sys.stdout.write(json.dumps(resp) + "\n")
                 sys.stdout.flush()

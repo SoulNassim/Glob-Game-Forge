@@ -34,7 +34,7 @@ from forge.providers.elevenlabs_image import resolve_image_provider
 PILLAR_DIR = "pillars"
 REF_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_REFERENCES = 8
-OUTPUT_KINDS = ("candidates", "variants", "edits", "views", "3d", "rig", "animations", "textures", "parts", "icons", "sprites")
+OUTPUT_KINDS = ("candidates", "variants", "edits", "views", "3d", "rig", "animations", "textures", "parts", "icons", "sprites", "audio")
 # Imported engine files the browser can't preview (Godot .res clips, .blend, .anim) are still listed.
 LISTED_FILE_SUFFIXES = {".res", ".tres", ".anim", ".blend", ".dae", ".tga", ".exr", ".psd"}
 ACTIONS = ("candidates", "variant", "edit", "views", "make_3d", "rig", "animate")
@@ -55,7 +55,18 @@ MESH_CHOICES: dict[str, list[Any]] = {
 }
 POLYCOUNT_PRESETS = (1500, 3000, 6000, 12000, 30000, 100000)
 # The fixed set of asset kinds; the UI offers these as tags so nobody has to type them.
-ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "vehicle", "ui", "vfx")
+ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "vehicle", "ui", "vfx", "sfx", "voice", "music")
+# Sound assets: their "candidates" are audio files in <asset>/audio/, the prompt describes the sound (or, for a voice,
+# is the line to speak) and the winner is the chosen take.
+AUDIO_KINDS = ("sfx", "voice", "music")
+AUDIO_SUFFIXES = {".mp3", ".wav", ".ogg", ".flac"}
+AUDIO_MODELS = (
+    {"id": "elevenlabs_audio:sfx", "label": "ElevenLabs · sound effects", "kinds": ["sfx"], "key": "elevenlabs"},
+    {"id": "stability_audio:sfx", "label": "Stable Audio · sound effects", "kinds": ["sfx"], "key": "stability"},
+    {"id": "elevenlabs_audio:tts", "label": "ElevenLabs · voices", "kinds": ["voice"], "key": "elevenlabs"},
+    {"id": "stability_audio:music", "label": "Stable Audio · music & loops", "kinds": ["music"], "key": "stability"},
+)
+AUDIO_CAPABILITY = {"sfx": ProviderCapability.SOUND_EFFECT, "tts": ProviderCapability.TEXT_TO_SPEECH, "music": ProviderCapability.TEXT_TO_MUSIC}
 
 PILLAR_RULE = (
     "Use the attached reference images only for art style: rendering, brushwork, material handling, lighting and "
@@ -224,7 +235,9 @@ def list_outputs(ws_dir: Path, asset_path: Path) -> dict[str, list[dict[str, Any
             suffix = file.suffix.lower()
             if file.stem.endswith("_thumb"):
                 continue
-            if suffix in IMAGE_SUFFIXES:
+            if suffix in AUDIO_SUFFIXES:
+                outputs[kind].append({"path": _ws_rel(ws_dir, file), "type": "audio"})
+            elif suffix in IMAGE_SUFFIXES:
                 if kind in ("3d", "rig", "animations"):
                     continue  # textures a model file points at, kept next to it
                 outputs[kind].append({"path": _ws_rel(ws_dir, file), "type": "image"})
@@ -370,6 +383,8 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
         raise ValueError(f"Unknown action '{action}'.")
     asset = describe_asset(ws_dir, rel)
     cfg = load_config()
+    if asset["kind"] in AUDIO_KINDS:
+        return _audio_request(asset, action, model)
     if action in ("rig", "animate"):
         return _rig_request(ws_dir, asset, action, source)
     source = source or (default_source(ws_dir, asset) if action != "candidates" else "")
@@ -439,6 +454,58 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
     }
 
 
+def list_audio_models() -> list[dict[str, Any]]:
+    cfg = load_config()
+    return [{**m, "available": bool(cfg.get_key(m["key"]))} for m in AUDIO_MODELS]
+
+
+def _audio_request(asset: dict[str, Any], action: str, model: str) -> dict[str, Any]:
+    kind = asset["kind"]
+    if action != "candidates":
+        raise ValueError("Sound assets are made with Generate; variants, edits and 3D are for images.")
+    text = asset["prompt"].strip() or asset["body"].strip()[:600]
+    choices = [m for m in list_audio_models() if kind in m["kinds"]]
+    picked = next((m for m in choices if m["id"] == model), None) or next((m for m in choices if m["available"]), choices[0])
+    settings: dict[str, Any] = {"duration": 0, "loop": False, "prompt_influence": 0.3} if kind == "sfx" else {}
+    if kind == "voice":
+        settings = {"voice_id": str(asset["meta"].get("voice") or ""), "model_id": "eleven_multilingual_v2"}
+    if kind == "music":
+        settings = {"duration": 30, "loop": True}
+    return {
+        "action": action,
+        "asset": asset["path"],
+        "audio": True,
+        "kind": kind,
+        "prompt": text,
+        "parts": [{"source": "Line to speak" if kind == "voice" else "Asset prompt", "text": text, "role": "subject"}],
+        "references": [],
+        "model": picked["id"],
+        "models": choices,
+        "settings": settings,
+        "count": 2 if kind == "sfx" else 1,
+    }
+
+
+def save_audio(ws_dir: Path, rel: str, filename: str, data: bytes) -> str:
+    """An audio file dropped on a sound asset becomes a take in <asset>/audio/ (and the winner if there is none)."""
+    asset_path, meta, _ = read_asset(ws_dir, rel)
+    suffix = Path(filename).suffix.lower()
+    if suffix not in AUDIO_SUFFIXES:
+        raise ValueError("Drop an MP3, WAV, OGG or FLAC file.")
+    folder = output_dir(asset_path) / "audio"
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", Path(filename).stem).strip("-") or "sound"
+    target = folder / f"{stem}{suffix}"
+    n = 2
+    while target.exists():
+        target, n = folder / f"{stem}-{n}{suffix}", n + 1
+    target.write_bytes(data)
+    rel_target = _ws_rel(ws_dir, target)
+    if not meta.get("winner"):
+        update_asset(ws_dir, rel, {"winner": rel_target})
+    return rel_target
+
+
 def _rig_request(ws_dir: Path, asset: dict[str, Any], action: str, source: str) -> dict[str, Any]:
     from forge import game_tools
 
@@ -506,7 +573,8 @@ def _record(actions: Any, project: str, ws_dir: Path, asset_rel: str, action: st
     store = actions.get_store(project)
     asset_path = resolve_rel(ws_dir, asset_rel)
     src = store.resolve_safe_path(stored.file_path)
-    folder = output_dir(asset_path) / ACTION_FOLDER[action]
+    kind_folder = "audio" if request.get("audio") else ACTION_FOLDER[action]
+    folder = output_dir(asset_path) / kind_folder
     target = folder / f"{name}{src.suffix.lower()}"
     _link_or_copy(src, target)
     if stored.type == AssetType.MESH and stored.thumbnail_path:
@@ -521,7 +589,7 @@ def _record(actions: Any, project: str, ws_dir: Path, asset_rel: str, action: st
                 _link_or_copy(extra, folder / f"{name}{extra.suffix.lower()}")
                 extras.append(extra)
 
-    vault_dir = store.project_dir / "vault" / Path(asset_rel).with_suffix("") / ACTION_FOLDER[action]
+    vault_dir = store.project_dir / "vault" / Path(asset_rel).with_suffix("") / kind_folder
     _link_or_copy(src, vault_dir / target.name)
     for extra in extras:
         _link_or_copy(extra, vault_dir / f"{name}{extra.suffix.lower()}")
@@ -583,6 +651,40 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
             model = next((ref["path"] for ref in request.get("references") or [] if ref.get("role") == "source"), "")
             return await game_tools.rig_model(ws_dir, asset_rel, model, float((request.get("settings") or {}).get("height_meters") or 1.7))
         return await game_tools.animate(ws_dir, asset_rel, list(request.get("action_ids") or []), list(request.get("names") or []), int((request.get("settings") or {}).get("fps") or 30))
+
+    if request.get("audio"):
+        provider_id, _, mode = str(request.get("model") or "").partition(":")
+        capability = AUDIO_CAPABILITY.get(mode)
+        if not provider_id or capability is None:
+            raise ValueError(f"Unknown sound model '{request.get('model')}'.")
+        text = str(request.get("prompt") or "").strip()
+        if not text:
+            raise ValueError("Describe the sound first (for a voice: the line to speak).")
+        settings = {k: v for k, v in (request.get("settings") or {}).items() if v not in ("", None)}
+        if not settings.get("duration"):
+            settings.pop("duration", None)  # let the provider pick a fitting length
+        for index in range(count):
+            stored = await executor._generate_single_asset(
+                provider_id=provider_id,
+                capability=capability,
+                name=f"{title} (sound {index + 1})",
+                asset_type=AssetType.AUDIO,
+                verb="generate_audio",
+                recipe_id="audio",
+                prompt_raw=text,
+                prompt_full=text,
+                parent_ids=[],
+                reference_files=[],
+                params=dict(settings),
+                tags=["audio", str(request.get("kind") or ""), f"asset:{asset_rel}"],
+                force_uncached=True,
+                bible=bible,
+                run_spent_tracker=tracker,
+            )
+            created.append(_record(actions, project, ws_dir, asset_rel, action, stored, request, f"{asset_path.stem}-{stamp}-{index + 1}"))
+        if created and not meta.get("winner"):
+            update_asset(ws_dir, asset_rel, {"winner": created[0]})
+        return created
 
     if action == "make_3d":
         if not refs:

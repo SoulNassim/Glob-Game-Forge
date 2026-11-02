@@ -2,8 +2,8 @@
 
 Glob listens on 127.0.0.1 and has no login, so any web page the user visits could otherwise
 talk to it: a cross-site form POST (CSRF) or a DNS-rebinding page whose domain resolves to
-127.0.0.1. Several endpoints write files, spend provider credits or start coding agents and
-terminals, so every request passes this guard first:
+127.0.0.1. Several endpoints write files, spend provider credits or write into connected game folders,
+so every request passes this guard first:
 
 * the Host header must name a loopback address (or the host the user explicitly bound to),
   which defeats DNS rebinding;

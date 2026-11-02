@@ -215,7 +215,6 @@ async def test_scalpel_edit_sends_only_source_and_instruction(
 @pytest.mark.asyncio
 async def test_workspace_agent_tool_loop_and_handoff(tmp_path: Path) -> None:
     from forge.agent.workspace_agent import WorkspaceAgent
-    from forge.server.terminal import allowed_origin, resolve_terminal_command
 
     actions = ForgeActionLayer(root_dir=tmp_path)
     project = "agent_probe"
@@ -265,10 +264,6 @@ async def test_workspace_agent_tool_loop_and_handoff(tmp_path: Path) -> None:
     assert result["session"]["handoff_from"] == result["handoff_path"] and result["session"]["group"] == "Lore"
     assert agent.get_session(project, session["id"])["handoff_to"] == result["session"]["id"]
     assert [entry["id"] for entry in agent.list_sessions(project)] == [session["id"], result["session"]["id"]]
-
-    assert allowed_origin("http://127.0.0.1:8420", "127.0.0.1", 8420)
-    assert not allowed_origin("https://evil.example", "127.0.0.1", 8420) and not allowed_origin(None, "127.0.0.1", 8420)
-    assert resolve_terminal_command("claude") == ["claude"] and resolve_terminal_command("shell")[-1] == "-l"
 
 
 @pytest.mark.asyncio
@@ -943,27 +938,13 @@ async def test_mcp_dispatcher_and_export_security(tmp_path: Path) -> None:
     assert list_resp is not None
     tool_names = {t["name"] for t in list_resp["result"]["tools"]}
     assert {
-        "list_assets",
-        "get_asset",
-        "run_verb",
-        "run_recipe",
-        "create_recipe",
-        "list_style_packs",
-        "get_project_bible",
-        "update_project_bible",
-        "rate_asset",
-        "queue_status",
-        "get_budget",
-        "export",
-        "scan_game_project",
-        "get_game_profile",
-        "update_game_profile",
-        "list_asset_wishlist",
-        "find_placeholders",
-        "propose_assets_for",
-        "writeback_preview",
-        "writeback_apply",
-    }.issubset(tool_names)
+        "place_order", "list_orders", "get_order", "file_order", "update_order", "get_deliveries", "deliver_order",
+        "workspace_overview", "workspace_list", "workspace_read", "workspace_write", "workspace_move",
+        "workspace_delete", "workspace_create_folder", "generate", "pick_winner",
+        "get_budget", "queue_status", "find_placeholders", "scan_game_project", "import_game",
+    } == tool_names
+    # Legacy tools are no longer advertised but still answer calls.
+    assert (await mcp.call_tool("get_budget", {}))
 
     # Export project for Godot, Unity, and Unreal and verify no key strings exist
     store = actions.get_store("default")
@@ -992,7 +973,7 @@ async def test_fastapi_server_endpoints() -> None:
         r_boot = await client.get("/api/bootstrap?project=default")
         assert r_boot.status_code == 200
         boot = r_boot.json()
-        assert len(boot["assets"]) >= 6
+        assert isinstance(boot["assets"], list)  # the server no longer seeds demo assets on start
         assert len(boot["recipes"]) >= 10
         assert len(boot["style_packs"]) >= 6
 
@@ -1059,7 +1040,7 @@ async def test_workspace_inspector_lists_tree_skills_and_mcp(
     assert {"characters/royals/king.md"} <= paths
     assert ".trash" not in paths
     assert "characters/royals/ref.png" not in paths
-    assert "list_assets" in payload["mcp"]["tools"]
+    assert "place_order" in payload["mcp"]["tools"] and "workspace_overview" in payload["mcp"]["tools"]
     assert any(skill["name"] == "forge-asset-maker" for skill in payload["skills"])
 
 
@@ -1840,21 +1821,106 @@ def test_added_endpoints_become_chat_models(tmp_path: Path, monkeypatch: pytest.
     assert not endpoints.load_endpoints()
 
 
-def test_cli_agent_events_are_parsed_into_chat_text_and_actions() -> None:
-    from forge.agent import cli_agents
+@pytest.mark.asyncio
+async def test_mcp_workspace_tools_prompt_and_project_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FORGE_PROJECT", "demo")
+    mcp = ForgeMCPDispatcher(action_layer=ForgeActionLayer(root_dir=tmp_path))
 
-    line = '{"type":"assistant","session_id":"s1","message":{"content":[{"type":"text","text":"Hi"},{"type":"tool_use","name":"Write","input":{"file_path":"02/hero.md"}}]}}'
-    events = cli_agents.parse_event("claude", line)
-    assert events[0] == {"kind": "session", "id": "s1"} and events[1]["text"] == "Hi" and events[2]["text"] == "Write 02/hero.md"
-    oc = cli_agents.parse_event("opencode", '{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"ok"}}')
-    assert oc == [{"kind": "session", "id": "ses_1"}, {"kind": "text", "text": "ok"}]
-    cx = cli_agents.parse_event("codex", '{"type":"item.completed","item":{"type":"file_change","changes":[{"kind":"add","path":"a.md"}]}}')
-    assert cx == [{"kind": "tool", "text": "add a.md"}]
-    cmd, stdin = cli_agents.build_command("claude", "do it", "s1", True)
-    assert stdin == "do it" and "--resume" in cmd and "acceptEdits" in cmd and "--mcp-config" in cmd
-    cmd, stdin = cli_agents.build_command("opencode", "do it", "", False)
-    assert stdin is None and cmd[-1] == "do it" and "--auto" not in cmd
-    assert {c["id"] for c in cli_agents.detect()} == {"claude", "codex", "opencode", "gemini"}
+    init = await mcp.handle_jsonrpc({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+    assert init["result"]["protocolVersion"] == "2025-06-18" and "prompts" in init["result"]["capabilities"]
+    assert "Glob" in init["result"]["instructions"]
+    assert await mcp.handle_jsonrpc({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+
+    prompt = await mcp.handle_jsonrpc({"jsonrpc": "2.0", "id": 2, "method": "prompts/get", "params": {"name": "glob"}})
+    text = prompt["result"]["messages"][0]["content"]["text"]
+    assert '"demo"' in text and "workspace_overview" in text and "{kinds}" not in text
+
+    async def call(name: str, **arguments: Any) -> dict[str, Any]:
+        resp = await mcp.handle_jsonrpc({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
+        return resp["result"]
+
+    assert not (await call("workspace_write", path="02-characters/knight.md", content="---\nkind: character\n---\n# Knight"))["isError"]
+    assert (tmp_path / "demo" / "workspace" / "02-characters" / "knight.md").is_file()
+    read = await call("workspace_read", path="02-characters/knight.md")
+    assert read["structuredContent"]["content"].endswith("# Knight")
+    escape = await call("workspace_read", path="../../outside.md")
+    assert escape["isError"] and "outside the workspace" in escape["content"][0]["text"]
+    generate = await call("generate", path="02-characters/knight.md", action="candidates")
+    assert generate["isError"] and "Glob app" in generate["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_agent_orders_flow_from_order_to_delivery(tmp_path: Path) -> None:
+    from forge import asset_studio, game_link, orders
+
+    actions = ForgeActionLayer(root_dir=tmp_path / "projects")
+    mcp = ForgeMCPDispatcher(action_layer=actions)
+    ws = actions.get_workspace("demo").ws_dir
+    game = tmp_path / "game"
+    game.mkdir()
+    game_link.set_link("demo", game, ["claude"], tmp_path / "projects")
+
+    async def call(name: str, **arguments: Any) -> dict[str, Any]:
+        return await mcp.call_tool(name, {"project": "demo", **arguments})
+
+    placed = await call("place_order", title="Health potion", kind="item", brief="Red flask", placeholder="res://potion.tscn", needs=["image"])
+    assert placed["status"] == "draft" and placed["needs"] == ["image"]
+    again = await call("place_order", title="Potion again", kind="item", placeholder="res://potion.tscn")
+    assert again["id"] == placed["id"] and "already exists" in again["note"]
+    with pytest.raises(ValueError, match="kind must be one of"):
+        await call("place_order", title="Thing", kind="spaceship")
+
+    filed = await call("file_order", order_id=placed["id"], path="04-items")
+    assert filed["status"] == "filed" and filed["asset"] == "04-items/health-potion.md"
+    assert "order: health_potion" in (ws / filed["asset"]).read_text(encoding="utf-8")
+
+    image = ws / "04-items" / "health-potion" / "candidates" / "p1.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"png")
+    assert (await call("get_order", order_id="health_potion"))["status"] == "in_progress"
+    asset_studio.update_asset(ws, filed["asset"], {"winner": "04-items/health-potion/candidates/p1.png"})
+    assert (await call("list_orders", status="ready"))["orders"][0]["id"] == "health_potion"
+
+    assert orders.auto_deliver(ws, game, "demo") == ["health_potion"]
+    assert (game / "glob_delivery" / "health_potion" / "health_potion.png").read_bytes() == b"png"
+    deliveries = await call("get_deliveries")
+    entry = deliveries["orders"]["health_potion"]
+    assert entry["placeholder"] == "res://potion.tscn" and len(entry["files"][0]["sha256"]) == 64
+    assert (await call("get_order", order_id="health_potion"))["status"] == "delivered"
+    assert orders.auto_deliver(ws, game, "demo") == []
+
+    assert (await call("update_order", order_id="health_potion", status="integrated"))["status"] == "integrated"
+    image.write_bytes(b"png v2")  # a changed asset is ready (and delivered) again
+    assert (await call("get_order", order_id="health_potion"))["status"] == "ready"
+
+
+def test_connect_writes_agent_files_and_disconnect_removes_only_globs_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from forge.agent import connect
+
+    monkeypatch.setenv("FORGE_CONFIG_DIR", str(tmp_path / "cfg"))
+    root, game = tmp_path / "projects", tmp_path / "game"
+    game.mkdir()
+    (game / "CLAUDE.md").write_text("# My notes\n", encoding="utf-8")
+    (game / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}), encoding="utf-8")
+
+    status = connect.connect("demo", str(game), ["claude", "codex"], root=root)
+    assert status["connected"] and status["healthy"] and status["selected"] == ["claude", "codex"]
+    servers = json.loads((game / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    assert servers["other"] == {"command": "x"} and servers["glob"]["args"][-2:] == ["--project", "demo"]
+    assert servers["glob"]["env"]["FORGE_PROJECTS_DIR"] == str(root.resolve())
+    assert "# My notes" in (game / "CLAUDE.md").read_text(encoding="utf-8") and "place_order" in (game / "AGENTS.md").read_text(encoding="utf-8")
+    assert "[mcp_servers.glob]" in (game / ".codex" / "config.toml").read_text(encoding="utf-8")
+    assert (game / ".claude/skills/glob/SKILL.md").read_text(encoding="utf-8").startswith("---\nname: glob")
+    assert (game / "glob_delivery" / "README.md").is_file()
+
+    connect.connect("demo", str(game), ["claude"], root=root)
+    assert not (game / ".codex" / "config.toml").exists()
+
+    connect.disconnect("demo", root=root)
+    assert (game / "CLAUDE.md").read_text(encoding="utf-8") == "# My notes\n"
+    assert json.loads((game / ".mcp.json").read_text(encoding="utf-8")) == {"mcpServers": {"other": {"command": "x"}}}
+    assert not (game / "AGENTS.md").exists() and not (game / ".claude").exists()
+    assert not connect.status("demo", root=root)["connected"]
 
 
 @pytest.mark.asyncio
@@ -1881,19 +1947,6 @@ async def test_long_chats_are_compacted_into_a_summary(tmp_path: Path, monkeypat
     assert any(m["role"] == "note" and "Compacted" in m["text"] for m in result["messages"])
     assert "The hero is a fox" in agent._transcript(result)
     assert agent.context_tokens(result) < 400
-
-
-def test_cli_model_and_effort_flags():
-    from forge.agent import cli_agents
-
-    cmd, _ = cli_agents.build_command("claude", "hi", "", False, model="opus", effort="high")
-    assert cmd[cmd.index("--model") + 1] == "opus" and cmd[cmd.index("--effort") + 1] == "high"
-    cmd, _ = cli_agents.build_command("codex", "hi", "", False, model="gpt-5", effort="low")
-    assert "gpt-5" in cmd and "model_reasoning_effort=low" in cmd
-    cmd, _ = cli_agents.build_command("opencode", "hi", "", False, model="kiconnect/gpt-6", effort="high")
-    assert cmd[cmd.index("--model") + 1] == "kiconnect/gpt-6" and "--effort" not in cmd
-    cmd, _ = cli_agents.build_command("claude", "hi", "", False)
-    assert "--model" not in cmd and "--effort" not in cmd
 
 
 def test_style_bible_not_added_twice(tmp_path):
@@ -1991,3 +2044,60 @@ def test_asset_studio_remove_output_trashes_and_restores(tmp_path: Path) -> None
     # Only the asset's own outputs can be removed.
     with pytest.raises(FileNotFoundError):
         asset_studio.remove_output(ws_dir, asset_rel, asset_rel)
+
+
+@pytest.mark.asyncio
+async def test_sound_asset_generates_takes_and_delivers_audio(tmp_path: Path) -> None:
+    from forge import asset_studio, orders
+
+    actions = ForgeActionLayer(root_dir=tmp_path / "projects")
+    ws = actions.get_workspace("demo").ws_dir
+    (ws / "05-sounds").mkdir(parents=True)
+    (ws / "05-sounds" / "swing.md").write_text("---\nkind: sfx\nprompt: Heavy sword whoosh\n---\n# Swing\n", encoding="utf-8")
+    order = orders.place(ws, "Swing", "sfx", "whoosh", "res://sfx/swing.wav")
+    orders.file_order(ws, order["id"], "05-sounds/swing.md")
+
+    request = asset_studio.build_request(ws, "05-sounds/swing.md", "candidates")
+    assert request["audio"] and request["model"].endswith(":sfx") and request["count"] == 2
+    with pytest.raises(ValueError, match="Sound assets"):
+        asset_studio.build_request(ws, "05-sounds/swing.md", "make_3d")
+
+    created = await asset_studio.run_action(actions, "demo", {**request, "count": 1})
+    assert created[0].startswith("05-sounds/swing/audio/") and created[0].endswith(".mp3")
+    assert asset_studio.describe_asset(ws, "05-sounds/swing.md")["winner"] == created[0]
+    game = tmp_path / "game"
+    game.mkdir()
+    assert orders.auto_deliver(ws, game, "demo") == ["swing"]
+    assert (game / "glob_delivery" / "swing" / "swing.mp3").is_file()
+
+    take = asset_studio.save_audio(ws, "05-sounds/swing.md", "my take.wav", b"RIFF")
+    assert take == "05-sounds/swing/audio/my-take.wav"
+
+
+def test_import_follows_the_approved_plan(tmp_path: Path) -> None:
+    from forge import game_import, orders
+
+    game = tmp_path / "game"
+    for rel in ("characters/knight/knight.glb", "characters/rogue/rogue.glb", "enemies/zombie/zombie.glb"):
+        (game / rel).parent.mkdir(parents=True, exist_ok=True)
+        (game / rel).write_bytes(b"glTF")
+    (game / "data" / "items").mkdir(parents=True)
+    (game / "data" / "items" / "bone_key.tres").write_text('[resource]\nname = "Bone Key"\ndescription = "Opens the crypt"\n', encoding="utf-8")
+    (game / "project.godot").write_text("", encoding="utf-8")
+    (game / "glob_delivery" / "old").mkdir(parents=True)
+    (game / "glob_delivery" / "old" / "old.png").write_bytes(b"png")
+
+    summary = game_import.preview(game)
+    units = {u["title"]: u for s in summary["sections"] for u in s["units"]}
+    assert "Old" not in units  # Glob's own deliveries are never imported back
+    plan = {
+        "exclude": [units["Rogue"]["id"]],
+        "move": {units["Zombie"]["id"]: "characters"},
+        "sections": {"characters": {"title": "Heroes & Foes"}},
+        "orders": True,
+    }
+    ws = tmp_path / "ws"
+    result = game_import.import_game(game, ws, plan=plan)
+    heroes = ws / result["sections"]["characters"]
+    assert heroes.name.endswith("heroes-foes") and (heroes / "zombie.md").is_file() and not (heroes / "rogue.md").exists()
+    assert result["orders"] == 1 and orders.list_orders(ws)[0]["placeholder"].endswith("bone_key.tres")

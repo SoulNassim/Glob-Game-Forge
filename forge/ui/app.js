@@ -13,8 +13,7 @@ const state = {
   models: [],
   model: "",
   effort: "medium",
-  clis: [],
-  live: {},
+  connect: null, // the game folder this project is connected to (coding agent + deliveries)
   overview: null,
   jobs: {},
   preview: null,
@@ -419,6 +418,16 @@ async function forgeWorld() {
       await api("/api/overview/file", { method: "PUT", body: { path: "pillars/style-bible.md", content: `# Style bible\n\n${rules.join("\n")}\n` } });
       log("Style bible written: put in front of every image prompt", "ok");
     }
+    if (!state.models.some((m) => m.ready)) {
+      // No chat model: the coding agent (or the user) builds the structure with the glob skill instead.
+      const brief = [`/glob Create a project structure for my game "${ob.name}".`, ob.pitch && `Pitch: ${ob.pitch}`, ob.genres.length && `Genre: ${ob.genres.join(", ")}.`, look && `Look: ${look}.`].filter(Boolean).join(" ");
+      await api("/api/overview/file", { method: "PUT", body: { path: "README.md", content: `# ${ob.name}\n\n${ob.pitch || "A new game."}\n` } });
+      log("Front page written", "ok");
+      log("No chat model is connected, so Glob can't design the sections here. Connect your game in Settings → Coding agent and give your agent this:", "");
+      $("#obLog").insertAdjacentHTML("afterend", `<pre class="cn-cmd ob-brief"><code>${esc(brief)}</code></pre><button class="ob-back" data-cn-copy="${esc(brief)}">Copy</button>`);
+      $(".ob-brief + button").insertAdjacentHTML("afterend", `<button class="ob-next forge" data-ob-enter>Enter your world →</button>`);
+      return;
+    }
     const session = await api("/api/agent/sessions", { method: "POST", body: { title: "Project setup" } });
     log("The agent is designing your project…");
     const seen = new Set();
@@ -459,7 +468,7 @@ async function switchProject(name) {
   state.view = { type: "home" };
   state.trail = [];
   await loadJobs();
-  await Promise.all([loadSessions(), loadOverview()]);
+  await Promise.all([loadSessions(), loadOverview(), loadConnect()]);
 }
 
 // ---------- chat ----------
@@ -467,7 +476,6 @@ async function switchProject(name) {
 async function loadSessions() {
   const data = await api("/api/agent/sessions");
   state.sessions = (data.sessions || []).filter((s) => s.group !== "Archive" || s.message_count);
-  for (const s of state.sessions) if (s.running && !state.live[s.id]) state.live[s.id] = { text: "", tools: [] };
   const remembered = storeGet(`forge.session.${state.project}`);
   const pick = state.sessions.find((s) => s.id === remembered) || state.sessions[state.sessions.length - 1];
   if (pick) await openSession(pick.id);
@@ -487,8 +495,7 @@ async function openSession(id) {
 
 async function ensureSession() {
   if (state.sessionId) return state.sessionId;
-  const created = await api("/api/agent/sessions", { method: "POST", body: { title: "New chat", model: state.model, effort: state.effort, agent: state.newAgent || "glob" } });
-  state.newAgent = "glob";
+  const created = await api("/api/agent/sessions", { method: "POST", body: { title: "New chat", model: state.model, effort: state.effort } });
   state.sessions.push(created);
   state.sessionId = created.id;
   state.session = created;
@@ -497,10 +504,9 @@ async function ensureSession() {
   return created.id;
 }
 
-async function newChat(agent = "glob") {
+async function newChat() {
   state.sessionId = "";
   state.session = null;
-  state.newAgent = agent;
   await ensureSession();
   renderMessages();
   $("#input").focus();
@@ -521,36 +527,10 @@ async function deleteChat(id) {
 
 function renderTabs() {
   const tabs = state.sessions.map((s) => `
-    <button class="tab${s.id === state.sessionId ? " active" : ""}${state.live[s.id] ? " running" : ""}" data-session="${s.id}" role="tab" title="${esc(s.title)}">
-      ${agentIcon(s.agent)}<span>${esc(s.title || "New chat")}</span><span class="x" data-delete="${s.id}" aria-label="Delete chat">×</span>
+    <button class="tab${s.id === state.sessionId ? " active" : ""}" data-session="${s.id}" role="tab" title="${esc(s.title)}">
+      <img src="/ui/glob-face.svg" alt=""><span>${esc(s.title || "New chat")}</span><span class="x" data-delete="${s.id}" aria-label="Delete chat">×</span>
     </button>`).join("");
   $("#sessionTabs").innerHTML = `${tabs}<button class="tab add" id="newChatBtn" title="New chat" aria-label="New chat">+</button>`;
-}
-
-const CLI_BADGE = { claude: ["C", "#d97757"], codex: ["X", "#10a37f"], opencode: ["O", "#a1a1aa"], gemini: ["G", "#4f8cff"] };
-
-function agentIcon(agent) {
-  if (!agent || agent === "glob") return `<img src="/ui/glob-face.svg" alt="">`;
-  const [letter, color] = CLI_BADGE[agent] || ["?", "#71717a"];
-  return `<span class="cli-badge" style="--c:${color}">${letter}</span>`;
-}
-
-function agentName(agent) {
-  return agent && agent !== "glob" ? (state.clis.find((c) => c.id === agent)?.label || agent) : "Glob";
-}
-
-async function loadClis() {
-  try { state.clis = (await api("/api/agent/clis")).clis; } catch { state.clis = []; }
-}
-
-function renderNewTabPop() {
-  $("#newTabPop").innerHTML = `
-    <div class="pop-group">New chat with</div>
-    <button type="button" class="pop-model" data-new-chat="glob">${agentIcon("glob")}<span>Glob<small>organizes and generates your project</small></span></button>
-    <div class="pop-group">Coding agents · your own login</div>
-    ${state.clis.map((c) => c.installed
-      ? `<button type="button" class="pop-model" data-new-chat="${c.id}">${agentIcon(c.id)}<span>${esc(c.label)}<small>works in this project folder</small></span></button>`
-      : `<button type="button" class="pop-model off" data-settings-coding>${agentIcon(c.id)}<span>${esc(c.label)}<small>not installed · set up</small></span></button>`).join("")}`;
 }
 
 const SUGGESTIONS = [
@@ -558,24 +538,13 @@ const SUGGESTIONS = [
   ["◎", "Look at my project and suggest what's missing."],
   ["✎", "Write a short pitch and a feature list on the front page."],
 ];
-const TOOL_ICON = { write: "✎", append: "✎", create_folder: "▣", move: "↦", delete: "✕", generate: "✦", pick_winner: "★", request_access: "🔒", import_game: "⇣", copy_in: "⇣" };
+const TOOL_ICON = { write: "✎", append: "✎", create_folder: "▣", move: "↦", delete: "✕", generate: "✦", pick_winner: "★", file_order: "⇢", request_access: "🔒", import_game: "⇣", copy_in: "⇣" };
 
 function renderMessages() {
   const box = $("#messages");
   const messages = state.session?.messages || [];
   const noModel = !state.models.some((m) => m.ready);
   const banner = noModel ? `<div class="banner">Glob needs a brain first. <button class="ghost" data-settings>Connect a model</button></div>` : "";
-  const agent = state.session?.agent || "glob";
-  const live = state.live[state.sessionId];
-  if (agent !== "glob" && !messages.length && !live) {
-    box.innerHTML = `<div class="chat-empty cli">
-      <div class="cli-hero">${agentIcon(agent)}</div>
-      <h2>${esc(agentName(agent))}</h2>
-      <p>Runs in this project's folder with your own ${esc(agentName(agent))} login. Glob keeps the overview on the right up to date while it works.</p>
-    </div>`;
-    syncComposer();
-    return;
-  }
   if (!messages.length && !state.sending) {
     box.innerHTML = `${banner}<div class="chat-empty">
       <img class="hero-glob" src="/ui/glob-forge.svg" alt="">
@@ -585,25 +554,19 @@ function renderMessages() {
     </div>`;
     return;
   }
-  const thinking = live
-    ? `<div class="msg agent thinking cli">${avatarFor(agent)}<div class="bubble"><div class="who">${esc(agentName(agent))}</div>${live.text ? `<div class="md">${renderMarkdown(live.text)}</div>` : ""}${live.tools.length ? `<ul class="live-tools">${live.tools.slice(-6).map((t) => `<li><i>⚙</i>${esc(t)}</li>`).join("")}</ul>` : ""}<span class="shimmer">Working…</span></div></div>`
-    : state.sending ? `<div class="msg agent thinking"><img class="avatar forge" src="/ui/glob-forge.svg" alt=""><div class="bubble"><div class="who">Glob</div><span class="shimmer">Forging…</span></div></div>` : "";
-  box.innerHTML = (agent === "glob" ? banner : "") + messages.map((m) => renderMessage(m, agent)).join("") + thinking;
+  const thinking = state.sending ? `<div class="msg agent thinking"><img class="avatar forge" src="/ui/glob-forge.svg" alt=""><div class="bubble"><div class="who">Glob</div><span class="shimmer">Forging…</span></div></div>` : "";
+  box.innerHTML = banner + messages.map(renderMessage).join("") + thinking;
   box.scrollTop = box.scrollHeight;
   syncComposer();
 }
 
-function avatarFor(agent) {
-  return agent && agent !== "glob" ? `<span class="avatar">${agentIcon(agent)}</span>` : `<img class="avatar" src="/ui/glob-face.svg" alt="">`;
-}
-
-function renderMessage(m, agent = "glob") {
+function renderMessage(m) {
   if (m.role === "user") {
     const imgs = (m.attachments || []).map((a) => `<img class="thumb" src="${esc(fileUrl(a.path))}" alt="">`).join("");
     return `<div class="msg user"><div class="bubble">${esc(m.text)}${imgs}</div></div>`;
   }
   if (m.role === "note") return `<div class="msg note">${esc(m.text)}</div>`;
-  const actions = (m.actions || []).filter((a) => (a.tool !== "list" && a.tool !== "read" && a.tool !== "legacy") || a.ok === false);
+  const actions = (m.actions || []).filter((a) => !["list", "read", "list_orders", "legacy"].includes(a.tool) || a.ok === false);
   const failed = actions.filter((a) => a.ok === false).length;
   const rows = actions.map((a) => {
     const openable = a.ok !== false && a.path && a.tool !== "delete";
@@ -612,20 +575,14 @@ function renderMessage(m, agent = "glob") {
   const card = actions.length ? `<details class="changes"${actions.length <= 3 ? " open" : ""}><summary><span class="spark">✦</span>${actions.length} change${actions.length === 1 ? "" : "s"}${failed ? ` <em>${failed} failed</em>` : ""}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary><ul>${rows}</ul></details>` : "";
   const last = m === state.session?.messages?.at(-1);
   const asks = (m.actions || []).filter((a) => a.access_request).map((a) => accessCard(a.access_request, last)).join("");
-  return `<div class="msg agent${m.error ? " error" : ""}">${avatarFor(agent)}<div class="bubble"><div class="who">${esc(agentName(agent))}${m.model && agent === "glob" ? ` <small>${esc(m.model)}</small>` : ""}</div><div class="md">${renderMarkdown(m.text)}</div>${asks}${card}</div></div>`;
+  return `<div class="msg agent${m.error ? " error" : ""}"><img class="avatar" src="/ui/glob-face.svg" alt=""><div class="bubble"><div class="who">Glob${m.model ? ` <small>${esc(m.model)}</small>` : ""}</div><div class="md">${renderMarkdown(m.text)}</div>${asks}${card}</div></div>`;
 }
 
 function syncComposer() {
-  const agent = state.session?.agent || state.newAgent || "glob";
-  const running = Boolean(state.live[state.sessionId]);
-  $("#cliPill").hidden = true;
   renderModelPill();
-  $("#sendBtn").hidden = running;
-  $("#stopBtn").hidden = !running;
-  $("#input").placeholder = agent === "glob" ? "Ask Glob to build, change or generate anything…" : `Tell ${agentName(agent)} what to do in this project…`;
   const used = state.session?.context_tokens || 0;
   const limit = state.agentCfg?.agent_compact_at_tokens || 48000;
-  $("#contextMeter").innerHTML = agent === "glob" && used
+  $("#contextMeter").innerHTML = used
     ? `<span class="meter"><i style="width:${Math.min(100, (used / limit) * 100)}%"></i></span>Context ${(used / 1000).toFixed(1)}k / ${limit / 1000}k · <button type="button" class="link-btn" data-compact-now>Compact now</button>`
     : "Enter to send · Shift+Enter for a new line";
 }
@@ -645,34 +602,9 @@ function addFiles(files) {
   }
 }
 
-async function sendCli(text) {
-  const id = state.sessionId;
-  state.session.messages = [...(state.session.messages || []), { role: "user", text, attachments: [] }];
-  state.live[id] = { text: "", tools: [] };
-  $("#input").value = "";
-  autoGrow();
-  renderTabs();
-  renderMessages();
-  try {
-    await api(`/api/agent/sessions/${id}/messages`, { method: "POST", body: { text } });
-  } catch (err) {
-    delete state.live[id];
-    toast(err.message, true);
-    await openSession(id).catch(() => {});
-  }
-}
-
-async function stopCli() {
-  try { await api(`/api/agent/sessions/${state.sessionId}/stop`, { method: "POST" }); } catch (err) { toast(err.message, true); }
-}
-
 async function send() {
   const input = $("#input");
   const text = input.value.trim();
-  if (state.session?.agent && state.session.agent !== "glob") {
-    if (text && !state.live[state.sessionId]) await sendCli(text);
-    return;
-  }
   if ((!text && !state.attachments.length) || state.sending) return;
   state.sending = true;
   $("#sendBtn").disabled = true;
@@ -722,32 +654,7 @@ const EFFORT_LABEL = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra
 
 function currentModel() { return state.models.find((m) => m.id === state.model); }
 
-// Coding-agent tabs pick from their CLI's own models; "" keeps the CLI's default.
-function cliAgent() {
-  const agent = state.session?.agent || state.newAgent || "glob";
-  return agent === "glob" ? "" : agent;
-}
-
-async function cliModels(cli) {
-  state.cliModels ||= {};
-  if (!state.cliModels[cli]) {
-    state.cliModels[cli] = { models: [], efforts: [], loading: true };
-    try { state.cliModels[cli] = await api(`/api/agent/clis/${cli}/models`); } catch { state.cliModels[cli] = { models: [], efforts: [] }; }
-    if (cliAgent() === cli && !$("#modelPop").hidden) renderModelPop();
-  }
-  return state.cliModels[cli];
-}
-
 function renderModelPill() {
-  const cli = cliAgent();
-  if (cli) {
-    const model = state.session?.cli_model || "";
-    const label = state.cliModels?.[cli]?.models?.find((x) => x.id === model)?.label || model || "Default model";
-    const effort = state.session?.cli_effort;
-    $("#statusDot").className = "dot live";
-    $("#modelPillLabel").innerHTML = `${esc(agentName(cli))} · ${esc(label)}${effort ? ` <em>· ${EFFORT_LABEL[effort] || effort}</em>` : ""}`;
-    return;
-  }
   const m = currentModel();
   const ready = state.models.some((x) => x.ready);
   $("#statusDot").className = `dot ${ready ? "live" : "off"}`;
@@ -756,37 +663,7 @@ function renderModelPill() {
     : ready ? "Pick a model" : "Connect a model";
 }
 
-function renderCliPop(cli) {
-  const info = state.cliModels?.[cli];
-  if (!info) { cliModels(cli); }
-  const model = state.session?.cli_model || "";
-  const effort = state.session?.cli_effort || "";
-  const groups = {};
-  for (const m of info?.models || []) (groups[m.group || agentName(cli)] ||= []).push(m);
-  const row = (id, label, sub = "") => `<button type="button" class="pop-model${id === model ? " on" : ""}" data-pick-cli-model="${esc(id)}"><span>${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ""}</span>${id === model ? "<b>✓</b>" : ""}</button>`;
-  const custom = model && !(info?.models || []).some((m) => m.id === model);
-  $("#modelPop").innerHTML = `
-    <div class="pop-group">${esc(agentName(cli))}</div>
-    ${row("", "Default model", "whatever is set up in the CLI")}
-    ${custom ? row(model, model, "typed in") : ""}
-    ${!info || info.loading ? `<p class="pop-empty">Loading models…</p>` : ""}
-    ${Object.entries(groups).map(([group, items]) => `${Object.keys(groups).length > 1 || group !== agentName(cli) ? `<div class="pop-group">${esc(group)}</div>` : ""}${items.map((m) => row(m.id, m.label)).join("")}`).join("")}
-    <form class="pop-custom" data-cli-custom><input name="model" placeholder="Other model id…" autocomplete="off" spellcheck="false"><button>Use</button></form>
-    ${info?.efforts?.length ? `<div class="pop-group">Reasoning effort</div><div class="effort-seg">${["", ...info.efforts].map((e) => `<button type="button" class="${e === effort ? "on" : ""}" data-pick-cli-effort="${e || "default"}">${e ? EFFORT_LABEL[e] || e : "Default"}</button>`).join("")}</div>` : ""}`;
-}
-
-async function pickCli(fields) {
-  if (!state.session) return;
-  Object.assign(state.session, fields);
-  renderModelPill();
-  renderModelPop();
-  if (!state.sessionId) return;
-  try { await api(`/api/agent/sessions/${state.sessionId}`, { method: "PATCH", body: fields }); } catch (err) { toast(err.message, true); }
-}
-
 function renderModelPop() {
-  const cli = cliAgent();
-  if (cli) return renderCliPop(cli);
   const groups = {};
   for (const m of state.models.filter((x) => x.ready)) (groups[m.group || m.provider] ||= []).push(m);
   const m = currentModel();
@@ -835,7 +712,7 @@ function autoGrow() {
 
 async function settingsDialog(tab) {
   toggleModelPop(false);
-  state.settings = { tab: tab || state.settings?.tab || "models", adding: null };
+  state.settings = { tab: tab || state.settings?.tab || "connect", adding: null };
   showScene($("#settingsView"));
   await renderSettings();
 }
@@ -848,8 +725,10 @@ function closeSettings() {
 
 const KEY_PROVIDERS = [
   { key: "gemini", name: "Google Gemini", use: "2D images (Nano Banana)", url: "https://aistudio.google.com/apikey", hint: "AIza…" },
-  { key: "meshy", name: "Meshy", use: "3D models and Meshy image models", url: "https://www.meshy.ai/settings/api", hint: "msy_…" },
-  { key: "elevenlabs", name: "ElevenLabs", use: "GPT Image, Seedream and more image models", url: "https://elevenlabs.io/app/settings/api-keys", hint: "sk_…" },
+  { key: "meshy", name: "Meshy", use: "3D models, rigs, animations", url: "https://www.meshy.ai/settings/api", hint: "msy_…" },
+  { key: "tripo", name: "Tripo", use: "3D models (second 3D engine)", url: "https://platform.tripo3d.ai/api-keys", hint: "tsk_…" },
+  { key: "elevenlabs", name: "ElevenLabs", use: "Sound effects, voices, more image models", url: "https://elevenlabs.io/app/settings/api-keys", hint: "sk_…" },
+  { key: "stability", name: "Stability AI", use: "Music and ambient loops (Stable Audio)", url: "https://platform.stability.ai/account/keys", hint: "sk-…" },
 ];
 const PRESET_ICON = { anthropic: "✳", openai: "◯", openrouter: "⇄", gemini: "✦", ollama: "◉", lmstudio: "▣", custom: "⚙" };
 
@@ -857,20 +736,25 @@ async function renderSettings() {
   const st = state.settings;
   await loadModels();
   const info = state.modelInfo || { presets: {}, endpoints: [] };
-  const nav = [["models", "AI models"], ["agent", "Agent"], ["coding", "Coding agents"], ["images", "Image & 3D"], ["storage", "Storage & access"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
+  const nav = [["connect", "Coding agent"], ["images", "Generators"], ["agent", "Glob chat"], ["models", "Chat models"], ["storage", "Storage & access"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
   let body = "";
   if (st.tab === "models") {
     const ready = state.models.filter((m) => m.ready);
     const groups = {};
     for (const m of ready) (groups[m.group || m.provider] ||= []).push(m);
     body = `
-      <h1>AI models</h1><p class="st-lede">Glob's chat runs on any of these. Connect one in a few clicks: pick a provider, paste a key, choose models.</p>
+      <h1>Chat models</h1><p class="st-lede">The model behind Glob's chat in this app. Connect one in a few clicks: pick a provider, paste a key, choose models.</p>
       ${st.adding ? addModelCard(info) : `
         <div class="st-label">Add a model</div>
         <div class="preset-grid">
           ${info.vscode_importable ? `<button class="preset featured" data-import-vscode><i>⇣</i><strong>Import from VS Code</strong><small>${info.vscode_importable} model${info.vscode_importable === 1 ? "" : "s"} found, keys included</small></button>` : ""}
           ${Object.entries(info.presets).map(([id, p]) => `<button class="preset" data-add-preset="${id}"><i>${PRESET_ICON[id] || "•"}</i><strong>${esc(p.label)}</strong><small>${p.needs_key ? "API key" : id === "custom" ? "Any OpenAI-compatible URL" : "No key needed"}</small></button>`).join("")}
         </div>`}
+      <div class="st-label">Coding agents · your own login</div>
+      <p class="st-empty">Claude Code, Codex, Gemini CLI and OpenCode can run Glob's chat on your existing subscription, no API key. Installed ones appear in the model menu.</p>
+      <div class="preset-grid">
+        ${(info.clis || []).map((c) => `<button class="preset" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i>${c.installed ? "✓" : "⇣"}</i><strong>${esc(c.label)}</strong><small>${c.installed ? "Installed · Log in" : "Install"}</small></button>`).join("")}
+      </div>
       <div class="st-label">Connected · ${ready.length}</div>
       ${ready.length ? Object.entries(groups).map(([group, items]) => {
         const ep = items[0].endpoint;
@@ -882,8 +766,10 @@ async function renderSettings() {
     const opt = (values, current, label = (v) => v) => values.map((v) => `<option value="${v}" ${String(v) === String(current) ? "selected" : ""}>${label(v)}</option>`).join("");
     const k = (v) => `${v / 1000}k tokens`;
     body = `
-      <h1>Agent</h1><p class="st-lede">How Glob thinks and how much of the chat it keeps in mind.</p>
+      <h1>Glob chat</h1><p class="st-lede">Glob can also run right here, in a chat next to your project. It's optional: a connected coding agent can do the same work with the <code>glob</code> skill.</p>
       <form id="agentForm" class="agent-form">
+        <div class="set-row"><div><strong>Show the Glob chat</strong><small>Automatic hides it while a coding agent is connected to the project; the panel button still brings it back.</small></div>
+          <select name="chat_mode">${opt(["auto", "on", "off"], cfg.chat_mode || "auto", (v) => ({ auto: "Automatic", on: "Always", off: "Never" })[v])}</select></div>
         <div class="set-row"><div><strong>Default reasoning effort</strong><small>For new chats. Each chat can change it in the model pill.</small></div>
           <select name="agent_reasoning_effort">${opt(["low", "medium", "high", "max"], cfg.agent_reasoning_effort, (v) => EFFORT_LABEL[v])}</select></div>
         <div class="set-row"><div><strong>Auto-compact long chats</strong><small>When a chat gets long, Glob folds the older messages into a summary so it stays fast and cheap without forgetting decisions.</small></div>
@@ -894,38 +780,26 @@ async function renderSettings() {
           <select name="agent_keep_recent_messages">${opt([2, 4, 6, 8, 12, 16], cfg.agent_keep_recent_messages)}</select></div>
         <div class="set-row"><div><strong>Steps per message</strong><small>How many read/write rounds Glob may take for one message.</small></div>
           <select name="agent_max_tool_rounds">${opt([4, 8, 12, 16, 24], cfg.agent_max_tool_rounds)}</select></div>
-        <div class="set-row"><div><strong>Coding agents may edit files without asking</strong><small>Claude Code: file edits only. Codex: sandboxed to the workspace. OpenCode and Gemini CLI: auto-approve.</small></div>
-          <label class="switch"><input type="checkbox" name="cli_allow_edits" ${cfg.cli_allow_edits ? "checked" : ""}><span></span></label></div>
         <div class="row"><button class="primary">Save</button></div>
       </form>`;
-  } else if (st.tab === "coding") {
-    await loadClis();
-    body = `
-      <h1>Coding agents</h1><p class="st-lede">Use Claude Code, Codex, OpenCode or Gemini CLI right inside Glob. Each one runs in your project folder with your own login, in its own chat tab, and several can work at the same time. Glob stays the workspace: the overview updates live while they work.</p>
-      <div class="cli-cards">${state.clis.map((c) => `<div class="cli-card${c.installed ? " on" : ""}">
-        <div class="cli-top">${agentIcon(c.id)}<div><strong>${esc(c.label)}</strong><small>${c.installed ? `Installed · ${esc(c.path)}` : "Not installed"}</small></div>
-          <a href="${esc(c.site)}" target="_blank" rel="noopener">About ↗</a></div>
-        ${c.installed
-          ? `<div class="cli-actions"><button class="primary" data-new-chat="${c.id}">Open a tab</button><button class="ghost" data-cli-login="${c.id}">Log in</button></div>
-             <small class="cli-note">Not logged in yet? <b>Log in</b> opens a terminal with <code>${esc(c.login)}</code>, then come back.</small>`
-          : `<div class="cli-actions"><button class="primary" data-cli-login="${c.id}">Install</button><code class="cli-cmd">${esc(c.install)}</code></div>
-             <small class="cli-note">Opens a terminal that runs the install command (needs Node.js). Press <b>Refresh</b> when it's done.</small>`}
-      </div>`).join("")}</div>
-      <div class="row"><button class="ghost" data-settings-tab="coding">Refresh</button></div>
-      <p class="st-note">Edits: Claude Code may edit files without asking (not run commands), Codex runs sandboxed to the workspace, OpenCode and Gemini CLI auto-approve file edits. Claude Code also gets Glob's own tools.</p>`;
+  } else if (st.tab === "connect") {
+    body = await connectSettings();
   } else if (st.tab === "storage") {
     body = await storageSettings();
   } else {
     const cfg = await api("/api/config");
     const studio = await studioOptions();
     body = `
-      <h1>Image & 3D</h1><p class="st-lede">Paste a key and Glob can generate 2D images and 3D models. Keys stay on this computer.</p>
+      <h1>Generators</h1><p class="st-lede">Paste a key and Glob can make 2D art, 3D models and sounds. Keys stay on this computer; you pay the providers directly.</p>
+      ${budgetCard(await api("/api/budget").catch(() => null))}
       <form id="keysForm" class="key-cards">
         ${KEY_PROVIDERS.map((k) => `<div class="key-card${cfg[`${k.key}_configured`] ? " on" : ""}">
           <div class="key-top"><span class="dot ${cfg[`${k.key}_configured`] ? "live" : ""}"></span><strong>${k.name}</strong><a href="${k.url}" target="_blank" rel="noopener">Get a key ↗</a></div>
           <small>${k.use}</small>
           <input name="${k.key}_api_key" type="password" autocomplete="off" placeholder="${cfg[`${k.key}_configured`] ? `Connected (${esc(cfg[`${k.key}_api_key`])}). Paste to replace` : k.hint}">
         </div>`).join("")}
+        <label class="st-select">3D generator
+          <select name="default_3d_provider">${[["meshy", "Meshy (rigging & animation too)"], ["tripo", "Tripo"]].map(([id, label]) => `<option value="${id}" ${cfg.default_3d_provider === id ? "selected" : ""} ${cfg[`${id}_configured`] ? "" : "disabled"}>${label}${cfg[`${id}_configured`] ? "" : " (no key)"}</option>`).join("")}</select></label>
         <label class="st-select">Default image model
           <select name="default_image_model">${studio.models.map((m) => `<option value="${esc(m.id)}" ${m.id === studio.selected ? "selected" : ""} ${m.available ? "" : "disabled"}>${esc(m.label)} · $${m.price.toFixed(3)}${m.available ? "" : " (no key)"}</option>`).join("")}</select></label>
         <div class="row"><button class="primary">Save</button></div>
@@ -945,10 +819,128 @@ async function renderSettings() {
       agent_compact_at_tokens: Number(form.agent_compact_at_tokens.value),
       agent_keep_recent_messages: Number(form.agent_keep_recent_messages.value),
       agent_max_tool_rounds: Number(form.agent_max_tool_rounds.value),
-      cli_allow_edits: form.cli_allow_edits.checked,
+      chat_mode: form.chat_mode.value,
     };
-    try { await api("/api/config", { method: "PUT", body: updates }); state.agentCfg = updates; toast("Saved"); syncComposer(); } catch (err) { toast(err.message, true); }
+    try { await api("/api/config", { method: "PUT", body: updates }); state.agentCfg = { ...state.agentCfg, ...updates }; toast("Saved"); syncComposer(); applyChatMode(); } catch (err) { toast(err.message, true); }
   });
+}
+
+// ---------- coding agent: connect the game folder ----------
+
+const TRY_PROMPTS = [
+  "Add the enemies with placeholder art for now and order the real models from Glob.",
+  "Check which Glob orders are ready and swap the placeholders in.",
+  "/glob Sort the new agent orders into the workspace and write a good prompt for each.",
+];
+
+async function loadConnect() {
+  try { state.connect = await api("/api/connect"); } catch { state.connect = null; }
+  applyChatMode();
+  return state.connect;
+}
+
+async function connectSettings() {
+  const cn = await loadConnect();
+  const draft = (state.cnDraft ||= { folder: "", targets: null });
+  const selected = draft.targets || cn?.selected?.length && cn.selected || cn?.suggested || ["claude", "codex"];
+  const chips = (cn?.targets || []).map((t) => `<button type="button" class="ob-chip${selected.includes(t.id) ? " on" : ""}" data-cn-target="${t.id}" title="Writes ${esc(t.files.join(", "))}">${esc(t.label)}</button>`).join("");
+  const how = `<div class="cn-how">
+      <div><b>1</b><span>Your agent codes the game and keeps placeholders. When it needs art, it <strong>orders</strong> the asset from Glob.</span></div>
+      <div><b>2</b><span>Orders show up in <strong>Agent Orders</strong>. Glob sorts them into your workspace, you generate and pick.</span></div>
+      <div><b>3</b><span>Finished assets are <strong>delivered</strong> to <code>glob_delivery/</code> in the game, with a README the agent reads on its own.</span></div>
+    </div>`;
+  if (!cn?.connected) {
+    return `<h1>Coding agent</h1>
+      <p class="st-lede">Code your game with Claude Code, Codex, Cursor, Copilot or any agent you like. Connect the game folder once and that agent knows about Glob: it orders assets and can manage this workspace, without you ever saying "use Glob".</p>
+      ${how}
+      <div class="st-label">Game folder</div>
+      <div class="cn-pick"><input id="cnFolder" placeholder="/path/to/your/game" value="${esc(draft.folder)}" spellcheck="false"><button class="ghost" data-cn-browse>Browse…</button></div>
+      <div class="st-label">Agents you use there</div>
+      <div class="ob-chips left">${chips}</div>
+      <div class="row"><button class="primary" data-cn-connect>Connect ${esc(humanize(state.project))}</button></div>
+      <p class="st-note">Glob only adds its own part to the folder: the <code>glob</code> MCP server in each agent's config, a short note in <code>AGENTS.md</code> / <code>CLAUDE.md</code>, a <code>glob</code> skill and <code>glob_delivery/</code>. Your code and notes are never changed, and Disconnect removes Glob's part again.</p>`;
+  }
+  return `<h1>Coding agent</h1>
+    <p class="st-lede">${esc(humanize(state.project))} is connected to your game. Agents working there can order assets from Glob and manage this workspace.</p>
+    <div class="cn-card">
+      <div class="cn-top"><span class="dot ${cn.healthy ? "live" : "warn"}"></span><div><strong>${esc(cn.game_name)}</strong><small>${esc(cn.game_folder)}</small></div>
+        <button class="mini" data-cn-open>Open folder</button></div>
+      ${cn.healthy ? "" : `<p class="cn-warn">Some of Glob's files in the game folder are missing or changed. <button class="link-btn" data-cn-connect>Repair</button></p>`}
+      <div class="st-label">Agents</div>
+      <div class="ob-chips left">${chips}</div>
+      <div class="row"><button class="ghost" data-cn-connect>Update agents</button></div>
+      <div class="set-row"><div><strong>Deliver finished orders automatically</strong><small>As soon as an order is ready, Glob copies its files to <code>glob_delivery/</code>. Glob never writes anywhere else in your game.</small></div>
+        <label class="switch"><input type="checkbox" data-cn-auto ${cn.auto_deliver ? "checked" : ""}><span></span></label></div>
+    </div>
+    ${how}
+    <div class="st-label">Try it: say this to your agent</div>
+    <div class="cn-tries">${TRY_PROMPTS.map((p) => `<button type="button" class="cn-try" data-cn-copy="${esc(p)}"><span>${esc(p)}</span><i>Copy</i></button>`).join("")}</div>
+    <p class="st-note">Restart your agent (or reload its MCP servers) after connecting so it picks up Glob. <button class="link-btn danger-text" data-cn-disconnect>Disconnect</button></p>`;
+}
+
+async function connectGame() {
+  const draft = state.cnDraft || {};
+  const folder = $("#cnFolder") ? $("#cnFolder").value.trim() : state.connect?.game_folder;
+  if (!folder) return toast("Choose your game folder first.", true);
+  const targets = draft.targets || state.connect?.selected || state.connect?.suggested || [];
+  try {
+    state.connect = await api("/api/connect", { method: "POST", body: { folder, targets } });
+    state.cnDraft = null;
+    toast(`Connected to ${state.connect.game_name}. Restart your agent so it sees Glob.`);
+  } catch (err) { return toast(err.message, true); }
+  applyChatMode();
+  return inSetup() ? renderSetup() : renderSettings();
+}
+
+const inSetup = () => Boolean(state.setup) && !$("#setup").hidden;
+
+document.addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-cn-browse],[data-cn-target],[data-cn-connect],[data-cn-disconnect],[data-cn-open],[data-cn-copy]");
+  if (!t) return;
+  const d = t.dataset;
+  const draft = (state.cnDraft ||= { folder: "", targets: null });
+  if ($("#cnFolder")) draft.folder = $("#cnFolder").value.trim();
+  const rerender = () => (inSetup() ? renderSetup() : renderSettings());
+  if (d.cnBrowse !== undefined) {
+    const folder = await chooseFolder("Choose your game folder");
+    if (!folder) return;
+    draft.folder = folder;
+    try { draft.targets = draft.targets || (await api(`/api/connect?folder=${encodeURIComponent(folder)}`)).suggested; } catch { /* keep defaults */ }
+    return rerender();
+  }
+  if (d.cnTarget) {
+    const current = draft.targets || state.connect?.selected?.length && [...state.connect.selected] || state.connect?.suggested || ["claude", "codex"];
+    draft.targets = current.includes(d.cnTarget) ? current.filter((x) => x !== d.cnTarget) : [...current, d.cnTarget];
+    return rerender();
+  }
+  if (d.cnConnect !== undefined) return connectGame();
+  if (d.cnDisconnect !== undefined) {
+    if (!confirm("Disconnect the game? Glob removes its part from the game folder; deliveries stay.")) return;
+    try { state.connect = await api("/api/connect", { method: "DELETE" }); } catch (err) { return toast(err.message, true); }
+    applyChatMode();
+    return rerender();
+  }
+  if (d.cnOpen !== undefined) {
+    try { await api("/api/storage/open", { method: "POST", body: { target: "grant", path: state.connect.game_folder } }); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (d.cnCopy) {
+    try { await navigator.clipboard.writeText(d.cnCopy); toast("Copied"); } catch { toast("Copy failed", true); }
+  }
+});
+
+document.addEventListener("change", async (event) => {
+  if (!event.target.matches?.("[data-cn-auto]")) return;
+  try { state.connect = await api("/api/connect", { method: "PATCH", body: { auto_deliver: event.target.checked } }); } catch (err) { toast(err.message, true); }
+});
+
+function budgetCard(b) {
+  if (!b) return "";
+  const spent = Number(b.spent_usd ?? b.total_spent_usd ?? b.spent ?? 0);
+  const cap = Number(b.spend_cap_usd ?? b.cap_usd ?? 0);
+  const pct = cap ? Math.min(100, (spent / cap) * 100) : 0;
+  return `<div class="budget-card"><div><strong>$${spent.toFixed(2)}</strong><span> spent in ${esc(humanize(state.project))}${cap ? ` of a $${cap.toFixed(2)} limit` : ""}</span></div>
+    ${cap ? `<span class="meter"><i style="width:${pct}%"></i></span>` : ""}<small>Counted from what the providers report for each image, model and sound.</small></div>`;
 }
 
 function addModelCard(info) {
@@ -1055,11 +1047,12 @@ function projectTitle() {
 
 function renderSections() {
   const ov = state.overview;
-  const active = state.view.type === "home" || state.view.type === "vault" ? "" : (state.view.path || "").split("/")[0];
+  const active = ["home", "vault", "orders"].includes(state.view.type) ? "" : (state.view.path || "").split("/")[0];
   const initials = projectTitle().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   $("#sections").innerHTML = `
     <div class="proj-card"><span class="proj-badge">${esc(initials || "F")}</span><div><strong>${esc(projectTitle())}</strong><small>${esc(ov.excerpt || "Your game project")}</small></div></div>
     <button class="sec${state.view.type === "home" ? " active" : ""}" data-home><small>00</small>Overview</button>
+    <button class="sec vault-sec${state.view.type === "orders" ? " active" : ""}" data-orders>${icon("inbox")}<span class="sec-name">Agent Orders</span>${orderBadge(ov.orders)}</button>
     <button class="sec vault-sec${state.view.type === "vault" ? " active" : ""}" data-vault>${icon("box")}<span class="sec-name">Final Vault</span></button>
     ${ov.sections.length ? `<div class="sec-label">Sections</div>` : ""}
     ${ov.sections.map((s) => `<button class="sec${s.path === active ? " active" : ""}" data-folder="${esc(s.path)}"><small>${s.number}</small><span class="sec-name">${esc(s.title)}</span>${s.children?.length ? `<span class="caret${s.path === active ? " open" : ""}"></span>` : ""}</button>${s.path === active ? subTree(s.children) : ""}`).join("")}
@@ -1083,6 +1076,7 @@ function renderCrumbs() {
   const path = state.view.path || "";
   if (state.view.type === "home") parts.push(`<strong>${esc(projectTitle())}</strong>`);
   else if (state.view.type === "vault") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Final Vault</strong>`);
+  else if (state.view.type === "orders") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Agent Orders</strong>`);
   else {
     parts.push(`<button data-home>${esc(projectTitle())}</button>`);
     const segs = path.split("/");
@@ -1338,6 +1332,7 @@ async function renderViewBody() {
   }
 
   if (view.type === "vault") return renderVault();
+  if (view.type === "orders") return renderOrders();
 
   if (view.type === "folder") {
     let folder;
@@ -1381,7 +1376,7 @@ async function renderViewBody() {
     const isMd = view.path.toLowerCase().endsWith(".md");
     if (isMd && !view.editing) {
       const asset = await api(`/api/studio/asset?path=${encodeURIComponent(view.path)}`).catch(() => null);
-      if (asset?.is_asset) { content.innerHTML = renderAssetPage(asset); content.dataset.dropAsset = ""; queueThumbs(asset); return; }
+      if (asset?.is_asset) { content.innerHTML = renderAssetPage(asset); content.dataset.dropAsset = ""; queueThumbs(asset); showOrderBanner(asset); return; }
     }
     content.innerHTML = `
       <div class="doc-bar"><span class="path">${esc(file.path)}</span>
@@ -1390,6 +1385,210 @@ async function renderViewBody() {
         : isMd ? withToc(renderMarkdown(file.content, dirOf(file.path))) : `<div class="md"><pre><code>${esc(file.content)}</code></pre></div>`}`;
   }
 }
+
+// ---------- agent orders ----------
+// The coding agent orders assets; Glob sorts them into the workspace; finished ones are delivered to the game.
+
+const ORDER_COLUMNS = [
+  ["draft", "Drafts", ["draft"], "New orders from your coding agent, not in the workspace yet."],
+  ["work", "In the workspace", ["filed", "in_progress"], "Sorted into a folder. Generate and pick a winner."],
+  ["ready", "Ready", ["ready"], "Everything the order needs exists."],
+  ["done", "Delivered", ["delivered", "integrated"], "Copied to glob_delivery/ in your game."],
+];
+const ORDER_STATUS = { draft: "Draft", filed: "Filed", in_progress: "In progress", ready: "Ready", delivered: "Delivered", integrated: "In the game", cancelled: "Cancelled" };
+const NEED_LABEL = { image: "Image", model: "3D", rig: "Rig", animations: "Anim", audio: "Audio" };
+const ORDER_KIND_NEEDS = { character: ["image", "model"], creature: ["image", "model"], item: ["image", "model"], weapon: ["image", "model"], prop: ["image", "model"], vehicle: ["image", "model"], environment: ["image"], ui: ["image"], vfx: ["image"], sfx: ["audio"], voice: ["audio"], music: ["audio"] };
+const SORT_PROMPT = "/glob Sort the new agent orders into the workspace and write a good prompt for each.";
+
+function orderBadge(counts) {
+  const n = (counts?.draft || 0) + (counts?.ready || 0);
+  return n ? `<span class="sec-badge" title="${counts.draft || 0} new · ${counts.ready || 0} ready">${n}</span>` : "";
+}
+
+function orderCard(o) {
+  const needs = (o.needs || []).map((n) => `<span class="need${o.have?.[n] ? " ok" : ""}">${o.have?.[n] ? "✓" : "○"} ${NEED_LABEL[n] || n}</span>`).join("");
+  const actions = {
+    draft: `<button class="act" data-order-file="${esc(o.id)}">${icon("folder")}File into…</button>`,
+    filed: `<button class="act" data-open="${esc(o.asset)}">Open asset</button>`,
+    in_progress: `<button class="act" data-open="${esc(o.asset)}">Open asset</button>`,
+    ready: `<button class="act" data-open="${esc(o.asset)}">Open</button>${state.connect?.connected ? `<button class="act on" data-order-deliver="${esc(o.id)}">${icon("send")}Deliver</button>` : ""}`,
+    delivered: `<button class="act" data-open="${esc(o.asset)}">Open</button>`,
+    integrated: `<button class="act" data-open="${esc(o.asset)}">Open</button>`,
+    cancelled: `<button class="act" data-order-reopen="${esc(o.id)}">Reopen</button>`,
+  }[o.status] || "";
+  return `<div class="ord-card st-${o.status}">
+    <div class="ord-top"><span class="kind-tag">${esc(o.kind)}</span><span class="ord-status">${ORDER_STATUS[o.status] || o.status}</span>
+      <button class="ord-menu" data-order-edit="${esc(o.id)}" title="Edit order" aria-label="Edit order">⋯</button></div>
+    <strong class="ord-title">${esc(o.title)}</strong>
+    ${o.brief ? `<p class="ord-brief">${esc(o.brief)}</p>` : ""}
+    ${o.placeholder ? `<code class="ord-ph" title="Placeholder in the game">${esc(o.placeholder)}</code>` : ""}
+    ${o.asset ? `<button class="ord-asset" data-open="${esc(o.asset)}">${icon("folder")}${esc(o.asset)}</button>` : ""}
+    <div class="ord-needs">${needs}</div>
+    <div class="ord-foot"><small>${esc(o.requested_by || "")} · ${esc(timeAgo(o.created_at))}</small><span class="grow"></span>${actions}</div>
+  </div>`;
+}
+
+// An asset made for an agent order says so at the top: who ordered it, for which placeholder, and what's missing.
+async function showOrderBanner(asset) {
+  const id = asset.meta?.order;
+  if (!id) return;
+  let order;
+  try { order = (await api("/api/orders")).orders.find((o) => o.id === id); } catch { return; }
+  const head = $("#content .asset-head");
+  if (!order || !head || state.view.path !== asset.path) return;
+  const missing = Object.entries(order.have || {}).filter(([, ok]) => !ok).map(([n]) => NEED_LABEL[n] || n);
+  const note = { ready: "Ready: delivering to the game.", delivered: "Delivered to glob_delivery/.", integrated: "In the game.", cancelled: "Order cancelled." }[order.status]
+    || (missing.length ? `Still needs: ${missing.join(", ")}.` : "");
+  head.insertAdjacentHTML("afterend", `<div class="order-banner st-${order.status}">${icon("inbox")}<span class="grow">Order <b>${esc(order.id)}</b> from ${esc(order.requested_by || "your agent")}${order.placeholder ? ` for <code>${esc(order.placeholder)}</code>` : ""} · ${esc(note)}</span>
+    ${order.status === "ready" && state.connect?.connected ? `<button class="mini on" data-order-deliver="${esc(order.id)}">Deliver now</button>` : ""}<button class="mini" data-orders>All orders</button></div>`);
+}
+
+async function renderOrders() {
+  const content = $("#content");
+  let data;
+  try { data = await api("/api/orders"); } catch (err) { content.innerHTML = `<div class="empty"><h1>Orders unavailable</h1><p>${esc(err.message)}</p></div>`; return; }
+  state.orders = data;
+  const all = data.orders.filter((o) => state.showCancelled || o.status !== "cancelled");
+  const c = data.counts;
+  const connected = state.connect?.connected;
+  const column = ([key, title, statuses, hint]) => {
+    const items = all.filter((o) => statuses.includes(o.status)).sort((a, b) => b.updated_at - a.updated_at);
+    return `<section class="ord-col col-${key}"><header><strong>${title}</strong><span>${items.length}</span></header><p class="ord-hint">${hint}</p>
+      <div class="ord-list">${items.map(orderCard).join("") || `<div class="ord-empty">Nothing here.</div>`}</div></section>`;
+  };
+  const cancelled = all.filter((o) => o.status === "cancelled");
+  content.innerHTML = `
+    <div class="kicker">Project / ${esc(projectTitle())}</div>
+    <h1 class="title">Agent Orders</h1>
+    <p class="lede">Your coding agent orders the assets the game needs while it builds with placeholders. Sort them into the workspace, make them, and finished orders are delivered to the game on their own.</p>
+    ${connected ? `<div class="ord-conn"><span class="dot live"></span>Delivering to <code>${esc(state.connect.game_name)}/glob_delivery/</code>${state.connect.auto_deliver ? " automatically" : " when you press Deliver"} · <button class="link-btn" data-settings-connect>Settings</button></div>`
+      : `<div class="ord-conn off"><span class="dot"></span>No coding agent connected yet: connect your game folder so your agent can order assets and receive them. <button class="primary" data-settings-connect>Connect</button></div>`}
+    <div class="vault-bar">
+      <button class="primary" data-order-new>＋ New order</button>
+      ${c.draft ? `<button class="ghost" data-order-sort>${icon("sparkle")} Sort ${plural(c.draft, "draft")} with Glob</button>` : ""}
+      <span class="grow"></span>
+      ${c.cancelled ? `<label class="inline"><input type="checkbox" data-order-cancelled ${state.showCancelled ? "checked" : ""}> Show ${c.cancelled} cancelled</label>` : ""}
+    </div>
+    ${data.orders.length ? `<div class="ord-board">${ORDER_COLUMNS.map(column).join("")}</div>
+      ${state.showCancelled && cancelled.length ? `<h2 class="group-title">Cancelled <span>${cancelled.length}</span></h2><div class="ord-list row">${cancelled.map(orderCard).join("")}</div>` : ""}`
+      : `<div class="empty"><h1>No orders yet</h1><p>Ask your coding agent for something that needs art, for example:</p>
+        <p><em>“Add three enemy types with placeholder models and order the real ones from Glob.”</em></p>
+        <p>Or add one yourself with <b>New order</b>.</p></div>`}`;
+}
+
+function folderOptions(nodes, depth = 0) {
+  return (nodes || []).flatMap((n) => [`<option value="${esc(n.path)}">${"  ".repeat(depth)}${esc(n.title || n.path)}</option>`, ...folderOptions(n.children, depth + 1)]);
+}
+
+function fileOrderDialog(id) {
+  const order = state.orders?.orders.find((o) => o.id === id);
+  if (!order) return;
+  const options = folderOptions(state.overview?.sections || []).join("");
+  openDialog(`<form class="dlg" id="fileOrderForm">
+    <h2>${icon("folder")} File “${esc(order.title)}”</h2>
+    <p>Creates an asset page for the order in this folder, with the agent's brief as its prompt. Glob can do this for all drafts at once.</p>
+    <label>Folder<select name="folder">${options}<option value="__new">New folder…</option></select></label>
+    <label class="new-folder" hidden>New folder path<input name="newFolder" placeholder="02-characters/blue-faction"></label>
+    <label>File name<input name="name" value="${esc(order.id.replace(/_/g, "-"))}.md" spellcheck="false"></label>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">File it</button></div>
+  </form>`);
+  const form = $("#fileOrderForm");
+  form.folder.addEventListener("change", () => { form.querySelector(".new-folder").hidden = form.folder.value !== "__new"; });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const folder = form.folder.value === "__new" ? form.newFolder.value.trim().replace(/^\/+|\/+$/g, "") : form.folder.value;
+    if (!folder) return toast("Pick or name a folder.", true);
+    const name = form.name.value.trim().replace(/\.md$/i, "") || order.id;
+    try {
+      const filed = await api(`/api/orders/${encodeURIComponent(id)}/file`, { method: "POST", body: { path: `${folder}/${name}.md` } });
+      closeDialog();
+      toast(`Filed into ${folder}`, false, { label: "Open", run: () => go({ type: "doc", path: filed.asset }) });
+      await renderOrders();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+function orderDialog(id) {
+  const order = id ? state.orders?.orders.find((o) => o.id === id) : null;
+  const kinds = state.orders?.kinds || Object.keys(ORDER_KIND_NEEDS);
+  const kind = order?.kind || "character";
+  const needs = order?.needs || ORDER_KIND_NEEDS[kind];
+  openDialog(`<form class="dlg" id="orderForm">
+    <h2>${order ? `Order ${esc(order.id)}` : "New order"}</h2>
+    <label>What is it?<input name="title" value="${esc(order?.title || "")}" placeholder="Orc warrior (blue faction)" required ${order ? "disabled" : ""}></label>
+    <label>Kind<select name="kind">${kinds.map((k) => `<option value="${k}" ${k === kind ? "selected" : ""}>${k}</option>`).join("")}</select></label>
+    <label>Brief<textarea name="brief" rows="4" placeholder="Look, size, materials, where it's used…">${esc(order?.brief || "")}</textarea></label>
+    <label>Placeholder in the game (optional)<input name="placeholder" value="${esc(order?.placeholder || "")}" placeholder="res://enemies/orc.tscn" spellcheck="false"></label>
+    <div class="dlg-field"><span>Done when it has</span><div class="kind-tags">${Object.entries(NEED_LABEL).map(([n, label]) => `<label class="kind-chip"><input type="checkbox" name="need" value="${n}" ${needs.includes(n) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div></div>
+    <div class="row">${order ? `<button type="button" class="ghost danger-text" data-order-cancel="${esc(order.id)}">${order.status === "cancelled" ? "Delete" : "Cancel order"}</button><span class="grow"></span>` : ""}<button type="button" class="ghost" data-close>Close</button><button class="primary">${order ? "Save" : "Add order"}</button></div>
+  </form>`);
+  const form = $("#orderForm");
+  form.kind.addEventListener("change", () => {
+    const defaults = ORDER_KIND_NEEDS[form.kind.value] || ["image"];
+    form.querySelectorAll("input[name=need]").forEach((box) => { box.checked = defaults.includes(box.value); });
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = {
+      kind: form.kind.value, brief: form.brief.value.trim(), placeholder: form.placeholder.value.trim(),
+      needs: [...form.querySelectorAll("input[name=need]:checked")].map((b) => b.value),
+    };
+    try {
+      if (order) await api(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PATCH", body });
+      else await api("/api/orders", { method: "POST", body: { ...body, title: form.title.value.trim() } });
+      closeDialog();
+      toast(order ? "Order saved" : "Order added");
+      await renderOrders();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function sortDraftsWithGlob() {
+  const shell = document.querySelector(".shell");
+  if (!shell.classList.contains("chat-off") && !shell.classList.contains("chat-hidden") && state.models.some((m) => m.ready)) {
+    $("#input").value = "Sort the new agent orders into the workspace and write a good prompt for each.";
+    return send();
+  }
+  try { await navigator.clipboard.writeText(SORT_PROMPT); } catch { /* shown below anyway */ }
+  openDialog(`<div class="dlg"><h2>${icon("sparkle")} Sort drafts with Glob</h2>
+    <p>Say this to your coding agent (ideally in a second session). It loads the <code>glob</code> skill and files every draft into the right folder:</p>
+    <pre class="cn-cmd"><code>${esc(SORT_PROMPT)}</code></pre>
+    <p class="st-note">Copied to your clipboard. Prefer the built-in chat? Turn it on in Settings → Glob chat.</p>
+    <div class="row"><button class="primary" data-close>Got it</button></div></div>`);
+}
+
+document.addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-order-new],[data-order-edit],[data-order-file],[data-order-deliver],[data-order-reopen],[data-order-cancel],[data-order-sort],[data-settings-connect]");
+  if (!t) return;
+  const d = t.dataset;
+  if (d.orderNew !== undefined) return orderDialog(null);
+  if (d.orderEdit) return orderDialog(d.orderEdit);
+  if (d.orderFile) return fileOrderDialog(d.orderFile);
+  if (d.orderSort !== undefined) return sortDraftsWithGlob();
+  if (d.settingsConnect !== undefined) return settingsDialog("connect");
+  try {
+    if (d.orderDeliver) {
+      t.disabled = true;
+      await api(`/api/orders/${encodeURIComponent(d.orderDeliver)}/deliver`, { method: "POST" });
+      toast(`Delivered to ${state.connect?.game_name || "the game"}`);
+    }
+    if (d.orderReopen) await api(`/api/orders/${encodeURIComponent(d.orderReopen)}`, { method: "PATCH", body: { status: "reopen" } });
+    if (d.orderCancel) {
+      const order = state.orders?.orders.find((o) => o.id === d.orderCancel);
+      if (order?.status === "cancelled") { if (!confirm("Delete this order for good?")) return; await api(`/api/orders/${encodeURIComponent(d.orderCancel)}`, { method: "DELETE" }); }
+      else await api(`/api/orders/${encodeURIComponent(d.orderCancel)}`, { method: "PATCH", body: { status: "cancelled" } });
+      closeDialog();
+    }
+  } catch (err) { toast(err.message, true); }
+  if (state.view.type === "orders") renderOrders();
+  else renderView();
+});
+
+document.addEventListener("change", (event) => {
+  if (!event.target.matches?.("[data-order-cancelled]")) return;
+  state.showCancelled = event.target.checked;
+  renderOrders();
+});
 
 // ---------- final vault ----------
 
@@ -1515,6 +1714,8 @@ const ICON = {
   upload: `<path d="M12 20V9M7 13l5-5 5 5M5 4h14"/>`,
   box: `<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/>`,
   copy: `<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.2"/><path d="M15.5 8.5V6.2A2.2 2.2 0 0 0 13.3 4H6.2A2.2 2.2 0 0 0 4 6.2v7.1a2.2 2.2 0 0 0 2.2 2.2h2.3"/>`,
+  inbox: `<path d="M4 13.5 6.5 5h11l2.5 8.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z"/><path d="M4 13.5h4.5l1.5 2.5h4l1.5-2.5H20"/>`,
+  send: `<path d="M4 12 20 4l-5 16-3.5-6.5z"/><path d="M11.5 13.5 20 4"/>`,
   film: `<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M8 4.5v15M16 4.5v15M3.5 9h4.5M3.5 15h4.5M16 9h4.5M16 15h4.5"/>`,
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
@@ -1546,6 +1747,7 @@ function outputGrid(all, winner, kind = "candidates") {
   }).join("")}</div>` : "";
   return (items.length ? "" : chips) + (items.length ? `<div class="out-grid">${items.map((o) => {
     if (o.type === "model") return modelCard(o, kind);
+    if (o.type === "audio") return audioCard(o, winner);
     const isWinner = o.path === winner;
     const img = `<a class="out-img" href="${esc(fileUrl(o.path))}" target="_blank" rel="noopener"><img src="${esc(fileUrl(o.path))}" alt="" loading="lazy">${isWinner ? `<span class="out-badge win">${icon("star")}Winner</span>` : ""}</a>`;
     if (!WORK_KINDS.has(kind)) {
@@ -1563,8 +1765,26 @@ function outputGrid(all, winner, kind = "candidates") {
   }).join("")}</div>${chips}` : "");
 }
 
+const AUDIO_KINDS = ["sfx", "voice", "music"];
+const AUDIO_RE = /\.(mp3|wav|ogg|flac)$/i;
+const AUDIO_COPY = {
+  sfx: { prompt: "Prompt: what this sound is", run: "Generate sounds", empty: "No sound picked yet." },
+  voice: { prompt: "Line: what the character says", run: "Generate line", empty: "No take picked yet." },
+  music: { prompt: "Prompt: mood, instruments, tempo", run: "Generate music", empty: "No track picked yet." },
+};
+
+function audioCard(o, winner) {
+  const isWinner = o.path === winner;
+  const name = o.path.split("/").pop();
+  return `<div class="out audio${isWinner ? " winner" : ""}">${removeBtn(o.path)}
+    <div class="audio-face">${isWinner ? `<span class="out-badge win">${icon("star")}Winner</span>` : ""}<span class="wave" aria-hidden="true">${"<i></i>".repeat(18)}</span><small>${esc(name)}</small></div>
+    <audio controls preload="none" src="${esc(fileUrl(o.path))}"></audio>
+    <div class="out-bar">${isWinner ? "" : `<button class="act wide hero-act" data-winner="${esc(o.path)}">${icon("star")}Pick winner</button>`}
+      <a class="act wide" href="${esc(fileUrl(o.path))}" download>${icon("download")}Download</a></div></div>`;
+}
+
 const OUTPUT_SECTIONS = [
-  ["3d", "3D models"], ["rig", "Rigged"], ["animations", "Animations"], ["sprites", "Sprite sheets"], ["icons", "Icons"],
+  ["audio", "Takes"], ["3d", "3D models"], ["rig", "Rigged"], ["animations", "Animations"], ["sprites", "Sprite sheets"], ["icons", "Icons"],
   ["views", "Turnaround views"], ["candidates", "Candidates"], ["variants", "Variants"], ["edits", "Edits"], ["textures", "Textures"], ["parts", "Parts"],
 ];
 
@@ -1576,6 +1796,7 @@ function renderAssetPage(a) {
   const o = a.outputs;
   // With no winner image, the newest model fills the hero slot: animated first, then rigged, then plain 3D.
   const heroModel = ["animations", "rig", "3d"].flatMap((k) => o[k] || []).find((m) => m.type === "model");
+  if (AUDIO_KINDS.includes(a.kind)) return renderAudioAsset(a, title, jobs);
   return `
     <div class="kicker">Asset / ${esc(a.path)}</div>
     <div class="asset-head"><h1 class="title">${esc(title)}</h1><span class="kind-tag">${esc(a.kind)}</span></div>
@@ -1613,6 +1834,88 @@ function renderAssetPage(a) {
     <div class="md">${renderMarkdown(a.body.replace(/^#\s+.+$/m, ""), dirOf(a.path))}</div>`;
 }
 
+// Sound assets: a player for the winner take, the prompt (or the line to speak), and the takes below.
+function renderAudioAsset(a, title, jobs) {
+  const copy = AUDIO_COPY[a.kind];
+  const takes = a.outputs.audio || [];
+  return `
+    <div class="kicker">Asset / ${esc(a.path)}</div>
+    <div class="asset-head"><h1 class="title">${esc(title)}</h1><span class="kind-tag">${esc(a.kind)}</span></div>
+    ${problemJobs(a.path).map((j) => `<div class="job-banner bad"><span class="bad-dot">!</span><span class="grow">${esc(copy.run)} failed: ${esc(j.error || "no details")}</span><button type="button" class="mini" data-action="candidates">Try again</button><button type="button" class="mini" data-dismiss-job="${esc(j.id)}">Dismiss</button></div>`).join("")}
+    ${jobs.length ? `<div class="job-banner"><span class="spinner"></span>${esc(copy.run)} running… takes appear here automatically.</div>` : ""}
+    <div class="asset-top">
+      <div class="winner-box audio-hero drop-zone" data-drop-winner title="Drop an audio file here">${a.winner && AUDIO_RE.test(a.winner)
+        ? `<div class="audio-big"><span class="wave big" aria-hidden="true">${"<i></i>".repeat(28)}</span><audio controls src="${esc(fileUrl(a.winner))}"></audio><small>${esc(a.winner.split("/").pop())}</small></div><span class="drop-hint">Drop an audio file to add a take</span>`
+        : `<div class="no-thumb big"><p class="drop-copy"><span class="drop-icon">♪</span>${copy.empty}<br>Generate takes or <b>drop an MP3 / WAV here</b>.</p></div>`}</div>
+      <div class="asset-side">
+        <label class="field-label" for="assetPrompt">${copy.prompt}</label>
+        <textarea id="assetPrompt" class="prompt-box" rows="6" data-asset="${esc(a.path)}">${esc(a.prompt)}</textarea>
+        <div class="action-row"><button class="primary" data-action="candidates">${icon("sparkle")}${copy.run}</button></div>
+        ${a.kind === "voice" ? `<p class="hint-line">Voice: <b>${esc(a.meta.voice_name || a.meta.voice || "pick one when you generate")}</b></p>` : ""}
+      </div>
+    </div>
+    ${takes.length ? `<h2 class="block-title">Takes</h2>${outputGrid(takes, a.winner, "audio")}` : ""}
+    <h2 class="block-title">Notes</h2>
+    <div class="doc-bar"><span class="path">${esc(a.path)}</span><button class="ghost" data-edit>Edit document</button></div>
+    <div class="md">${renderMarkdown(a.body.replace(/^#\s+.+$/m, ""), dirOf(a.path))}</div>`;
+}
+
+async function uploadAudio(files) {
+  const sounds = [...files].filter((f) => AUDIO_RE.test(f.name));
+  if (!sounds.length) return;
+  const form = new FormData();
+  sounds.forEach((f) => form.append("files", f));
+  try {
+    const res = await fetch(`/api/studio/audio-upload?project=${encodeURIComponent(state.project)}&path=${encodeURIComponent(state.view.path)}`, { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Upload failed");
+    toast(`Added ${plural(data.saved.length, "take")}`);
+    renderView();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function renderAudioSheet() {
+  const p = state.preview;
+  const copy = AUDIO_COPY[p.kind];
+  const s = p.settings;
+  if (p.kind === "voice" && !state.voices) {
+    state.voices = (await api("/api/studio/voices").catch(() => ({ voices: [] }))).voices || [];
+  }
+  const voices = state.voices || [];
+  if (p.kind === "voice" && !s.voice_id && voices[0]) s.voice_id = voices[0].id;
+  const model = p.models.find((m) => m.id === p.model);
+  openDialog(`
+    <div class="dlg sheet tone-sakura">
+      <header class="sheet-head"><span class="sheet-icon">${icon("sparkle")}</span>
+        <div><h2>${esc(copy.run)} <span>· ${esc(humanize(p.asset.split("/").pop()))}</span></h2><p>${p.kind === "voice" ? "The line is spoken by the voice you pick." : "Takes land under the asset; pick the winner by ear."}</p></div></header>
+      <div class="sheet-model">
+        <label class="model-pick">Generator<select id="auModel">${p.models.map((m) => `<option value="${esc(m.id)}" ${m.id === p.model ? "selected" : ""} ${m.available ? "" : "disabled"}>${esc(m.label)}${m.available ? "" : " · no key"}</option>`).join("")}</select></label>
+      </div>
+      <div class="sheet-body"><section>
+        <label class="field-label" for="pvPrompt">${p.kind === "voice" ? "Line to speak" : "Prompt"} <em>exactly what is sent</em></label>
+        <textarea id="pvPrompt" class="final-prompt" rows="4">${esc(p.prompt)}</textarea>
+      </section><section class="audio-opts">
+        ${p.kind === "voice" ? `<label>Voice<select id="auVoice">${voices.map((v) => `<option value="${esc(v.id)}" ${v.id === s.voice_id ? "selected" : ""}>${esc(v.name)}${v.category ? ` · ${esc(v.category)}` : ""}</option>`).join("") || `<option value="">${model?.available ? "Loading voices failed" : "Add an ElevenLabs key first"}</option>`}</select></label>` : ""}
+        ${p.kind !== "voice" ? `<label>Length<select id="auDuration">${(p.kind === "music" ? [15, 30, 60, 90, 120, 180] : [0, 1, 2, 3, 5, 8, 12, 20, 30]).map((d) => `<option value="${d}" ${Number(s.duration) === d ? "selected" : ""}>${d ? `${d} s` : "Automatic"}</option>`).join("")}</select></label>
+          <label class="mesh-toggle"><span class="switch"><input type="checkbox" id="auLoop" ${s.loop ? "checked" : ""}><span></span></span><span>Seamless loop<small>For ambience, engines, music beds</small></span></label>` : ""}
+      </section></div>
+      <footer class="sheet-foot">
+        <label class="inline">Takes <select id="pvCount">${[1, 2, 3, 4].map((n) => `<option ${n === p.count ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <span class="grow"></span>
+        <button type="button" class="ghost" data-close>Cancel</button><button type="button" class="run-btn" data-run>${icon("sparkle")}${esc(copy.run)}</button>
+      </footer>
+    </div>`);
+}
+
+function syncAudioFields() {
+  const p = state.preview;
+  if (!p?.audio) return;
+  if ($("#auModel")) p.model = $("#auModel").value;
+  if ($("#auVoice")) p.settings.voice_id = $("#auVoice").value;
+  if ($("#auDuration")) p.settings.duration = Number($("#auDuration").value);
+  if ($("#auLoop")) p.settings.loop = $("#auLoop").checked;
+}
+
 async function saveAssetPrompt() {
   const box = $("#assetPrompt");
   if (!box) return;
@@ -1627,6 +1930,7 @@ async function openPreview(action, source = "", instruction = "") {
     // A variant or edit starts from an existing image, so the style bible stays off unless switched on.
     if (action === "rig") { state.preview = req; return renderRigSheet(); }
     if (action === "animate") { state.preview = { ...req, picked: [], search: "" }; return renderAnimateSheet(); }
+    if (req.audio) { state.preview = req; return renderAudioSheet(); }
     const bible = action === "variant" || action === "edit" || action === "views" ? false : req.use_bible !== false;
     state.preview = applyBible({ ...req, use_bible: bible, instruction, references: req.references.map((r) => ({ ...r, on: true })) });
     renderPreview();
@@ -1802,6 +2106,7 @@ function syncPreviewFields() {
   if ($("#pvInstruction")) p.instruction = $("#pvInstruction").value;
   if ($("#pvModel")) p.model = $("#pvModel").value;
   syncMesh();
+  syncAudioFields();
 }
 
 async function rebuildPreview() {
@@ -1822,11 +2127,19 @@ async function runPreview() {
   const p = state.preview;
   if ((p.action === "variant" || p.action === "edit") && !String(p.instruction || "").trim()) { toast("Describe what should change, then press Update prompt.", true); return; }
   const request = { action: p.action, asset: p.asset, prompt: p.prompt, count: p.count, settings: p.settings, action_ids: p.action_ids, names: p.names, model: p.action === "make_3d" ? "" : p.model, use_bible: p.use_bible !== false, references: p.references.filter((r) => r.on).map(({ path, source, role }) => ({ path, source, role })) };
+  if (p.audio) {
+    Object.assign(request, { audio: true, kind: p.kind });
+    if (p.kind === "voice") {
+      if (!p.settings.voice_id) { toast("Pick a voice first.", true); return; }
+      const voice = (state.voices || []).find((v) => v.id === p.settings.voice_id);
+      await api("/api/studio/asset", { method: "PATCH", body: { path: p.asset, fields: { voice: p.settings.voice_id, voice_name: voice?.name || "" } } }).catch(() => {});
+    }
+  }
   try {
     const job = await api("/api/studio/run", { method: "POST", body: { request } });
     if (!state.jobs[job.id]) state.jobs[job.id] = job; // the socket may already have reported it finished
     closeDialog();
-    toast(`${ACTION_LABEL[p.action]} started`);
+    toast(`${p.audio ? AUDIO_COPY[p.kind].run : ACTION_LABEL[p.action]} started`);
     renderView();
   } catch (err) { toast(err.message, true); }
 }
@@ -1897,16 +2210,17 @@ async function makeAsset() {
 
 // The current page and the pages before it survive a refresh, per project.
 const viewKey = () => `forge.view.${state.project}`;
-const plainView = (v) => (v.type === "home" || v.type === "vault" ? { type: v.type } : { type: v.type, path: v.path });
+const PLAIN_VIEWS = ["home", "vault", "orders"];
+const plainView = (v) => (PLAIN_VIEWS.includes(v.type) ? { type: v.type } : { type: v.type, path: v.path });
 
 function saveView() {
-  const hash = state.view.type === "home" ? "" : state.view.type === "vault" ? "#vault" : `#${state.view.type}=${encodeURIComponent(state.view.path)}`;
+  const hash = state.view.type === "home" ? "" : PLAIN_VIEWS.includes(state.view.type) ? `#${state.view.type}` : `#${state.view.type}=${encodeURIComponent(state.view.path)}`;
   try { history.replaceState(null, "", hash || location.pathname); } catch { /* ignore */ }
   storeSet(viewKey(), JSON.stringify({ view: plainView(state.view), trail: state.trail.slice(-30).map(plainView) }));
 }
 
 function restoreView() {
-  if (location.hash === "#vault") { state.view = { type: "vault" }; return; }
+  if (location.hash === "#vault" || location.hash === "#orders") { state.view = { type: location.hash.slice(1) }; return; }
   const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
   if (hash) {
     state.view = { type: hash[1], path: decodeURIComponent(hash[2]) };
@@ -1915,7 +2229,7 @@ function restoreView() {
   }
   try {
     const saved = JSON.parse(storeGet(viewKey()) || "null");
-    const ok = (v) => v && (v.type === "home" || v.type === "vault" || ((v.type === "folder" || v.type === "doc") && typeof v.path === "string"));
+    const ok = (v) => v && (PLAIN_VIEWS.includes(v.type) || ((v.type === "folder" || v.type === "doc") && typeof v.path === "string"));
     if (!ok(saved?.view)) return;
     state.view = plainView(saved.view);
     state.trail = (saved.trail || []).filter(ok);
@@ -2471,16 +2785,8 @@ function connectSocket() {
       else if (msg.job.status === "done" && known?.status !== "done") toast(`${ACTION_LABEL[msg.job.action] || "Job"} finished`);
       if (state.view.path === msg.job.asset && !state.view.editing) renderView();
     }
-    if (msg.type === "cli_event" && msg.project === state.project) {
-      const live = (state.live[msg.session_id] ||= { text: "", tools: [] });
-      if (msg.event.kind === "text") live.text += (live.text ? "\n\n" : "") + msg.event.text;
-      else if (msg.event.kind === "tool") live.tools.push(msg.event.text);
-      if (msg.session_id === state.sessionId) renderMessages();
-    }
-    if (msg.type === "cli_done" && msg.project === state.project) {
-      delete state.live[msg.session_id];
-      if (msg.session_id === state.sessionId) openSession(msg.session_id).catch(() => {});
-      else renderTabs();
+    if (msg.type === "orders_delivered" && msg.project === state.project) {
+      toast(`Delivered ${plural(msg.orders.length, "order")} to ${state.connect?.game_name || "the game"}`);
     }
     if (msg.type === "workspace_changed" && (!msg.project || msg.project === state.project) && !state.view.editing) {
       clearTimeout(pending);
@@ -2493,7 +2799,7 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-compact-now],[data-pick-winner-file],[data-bible-toggle],[data-bible-view],[data-new-chat],[data-settings-coding],[data-cli-login],[data-pick-model],[data-pick-effort],[data-pick-cli-model],[data-pick-cli-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  const t = event.target.closest("[data-compact-now],[data-pick-winner-file],[data-bible-toggle],[data-bible-view],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-orders],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
@@ -2512,8 +2818,6 @@ document.addEventListener("click", async (event) => {
   }
   if (t.dataset.bibleToggle !== undefined) { if (event.target.tagName !== "INPUT") return; syncPreviewFields(); state.preview.use_bible = event.target.checked; applyBible(state.preview); return renderPreview(); }
   if (t.dataset.bibleView !== undefined) { syncPreviewFields(); state.preview.showBible = !state.preview.showBible; return renderPreview(); }
-  if (t.dataset.pickCliModel !== undefined) return pickCli({ cli_model: t.dataset.pickCliModel });
-  if (t.dataset.pickCliEffort) return pickCli({ cli_effort: t.dataset.pickCliEffort === "default" ? "" : t.dataset.pickCliEffort });
   if (t.dataset.pickModel) return pickModel(t.dataset.pickModel);
   if (t.dataset.pickEffort) return pickEffort(t.dataset.pickEffort);
   if (t.dataset.closeSettings !== undefined) return closeSettings();
@@ -2534,6 +2838,10 @@ document.addEventListener("click", async (event) => {
   if (t.dataset.removeEndpoint) {
     try { await api(`/api/agent/endpoints/${t.dataset.removeEndpoint}`, { method: "DELETE" }); toast("Removed"); } catch (err) { toast(err.message, true); }
     return renderSettings();
+  }
+  if (t.dataset.cliLogin) {
+    try { await api(`/api/agent/cli/${t.dataset.cliLogin}/login`, { method: "POST" }); toast("Opened a terminal. Finish there, then come back."); } catch (err) { toast(err.message, true); }
+    return;
   }
   if (t.dataset.importVscode !== undefined) {
     try { const { imported } = await api("/api/agent/endpoints/import-vscode", { method: "POST" }); toast(`Imported ${imported.reduce((n, e) => n + e.models.length, 0)} models from VS Code`); } catch (err) { toast(err.message, true); }
@@ -2584,6 +2892,7 @@ document.addEventListener("click", async (event) => {
   if (t.dataset.folder !== undefined) return go({ type: "folder", path: t.dataset.folder });
   if (t.dataset.home !== undefined) return go({ type: "home" });
   if (t.dataset.vault !== undefined) return go({ type: "vault" });
+  if (t.dataset.orders !== undefined) return go({ type: "orders" });
   if (t.dataset.vaultFilter) { state.vaultHistory = !!$("#vaultHistory")?.checked; state.vaultFilter = t.dataset.vaultFilter; return renderVault(); }
   if (t.dataset.vaultZip !== undefined) return vaultZip(t.dataset.vaultZip);
   if (t.dataset.vaultFolder !== undefined) return vaultToFolder();
@@ -2593,13 +2902,7 @@ document.addEventListener("click", async (event) => {
     return renderPreview();
   }
   if (t.dataset.session) return openSession(t.dataset.session);
-  if (t.id === "newChatBtn") { await loadClis(); renderNewTabPop(); $("#newTabPop").hidden = !$("#newTabPop").hidden; return; }
-  if (t.dataset.newChat) { $("#newTabPop") && ($("#newTabPop").hidden = true); closeSettings(); return newChat(t.dataset.newChat); }
-  if (t.dataset.settingsCoding !== undefined) return settingsDialog("coding");
-  if (t.dataset.cliLogin) {
-    try { await api(`/api/agent/clis/${t.dataset.cliLogin}/login`, { method: "POST" }); toast("A terminal window opened. Finish there, then come back."); } catch (err) { toast(err.message, true); }
-    return;
-  }
+  if (t.id === "newChatBtn") return newChat();
   if (t.dataset.suggest) { const input = $("#input"); input.value = t.dataset.suggest; input.focus(); input.setSelectionRange(input.value.length, input.value.length); return; }
   if (t.dataset.unattach !== undefined) { state.attachments.splice(Number(t.dataset.unattach), 1); return renderAttachments(); }
   if (t.dataset.settings !== undefined) return settingsDialog("models");
@@ -2635,23 +2938,25 @@ $("#brandBtn").addEventListener("click", openProjects);
 $("#input").addEventListener("input", autoGrow);
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".model-pill-wrap")) toggleModelPop(false);
-  if (!event.target.closest("#newTabPop, #newChatBtn")) $("#newTabPop").hidden = true;
 });
-$("#stopBtn").addEventListener("click", stopCli);
 $("#backBtn").addEventListener("click", goBack);
-function setChatHidden(hidden) {
-  document.querySelector(".shell").classList.toggle("chat-hidden", hidden);
-  storeSet("forge.chatHidden", hidden ? "1" : "0");
+// The Glob chat is optional (Settings → Glob chat): "on", "off", or "auto", which hides it once a coding agent is
+// connected to the project. The hide/show buttons override that per project.
+function applyChatMode() {
+  const shell = document.querySelector(".shell");
+  const mode = state.agentCfg?.chat_mode || "auto";
+  const manual = storeGet(`forge.chatHidden.${state.project}`);
+  const hidden = mode === "off" || (manual !== null && manual !== "" ? manual === "1" : mode === "auto" && Boolean(state.connect?.connected));
+  shell.classList.toggle("chat-off", mode === "off");
+  shell.classList.toggle("chat-hidden", hidden);
+  if (hidden) showPanel("workspace");
 }
-setChatHidden(storeGet("forge.chatHidden") === "1");
+function setChatHidden(hidden) {
+  storeSet(`forge.chatHidden.${state.project}`, hidden ? "1" : "0");
+  applyChatMode();
+}
 document.addEventListener("click", (event) => {
   if (event.target.closest("[data-toggle-chat]")) setChatHidden(!document.querySelector(".shell").classList.contains("chat-hidden"));
-});
-document.addEventListener("submit", (event) => {
-  if (!event.target.matches("[data-cli-custom]")) return;
-  event.preventDefault();
-  const id = event.target.model.value.trim();
-  if (id) pickCli({ cli_model: id });
 });
 // Drag images from the desktop onto an asset's winner box.
 // Drag images or 3D models from the desktop onto an asset page: images become candidates (and the winner),
@@ -2688,8 +2993,10 @@ document.addEventListener("drop", (event) => {
     if (images.length < files.length) toast(images.length ? "Only images can be attached; the other files were skipped." : "Only images can be attached to a message.", !images.length);
     return;
   }
+  const sounds = files.filter((f) => AUDIO_RE.test(f.name));
+  if (sounds.length) uploadAudio(sounds);
   const models = files.filter((f) => MODEL_RE.test(f.name));
-  const images = files.filter((f) => !MODEL_RE.test(f.name));
+  const images = files.filter((f) => !MODEL_RE.test(f.name) && !AUDIO_RE.test(f.name));
   if (models.length) uploadModels(models);
   if (images.length) addCandidateImages(images);
 });
@@ -2704,7 +3011,7 @@ $("#settingsView").addEventListener("input", (event) => {
     await loadModels();
     state.agentCfg = await api("/api/config").catch(() => null);
     await loadGrants();
-    await loadClis();
+    await loadConnect();
     await loadJobs();
     await Promise.all([loadSessions(), loadOverview()]);
     connectSocket();
@@ -2805,18 +3112,30 @@ function renderImport() {
     const c = p.counts;
     const tiles = [["Characters", c.characters], ["3D models", c.models], ["Animations", c.animations], ["Textures", c.textures], ["Images", c.images], ["Sounds", c.audio], ["Needs art", c.needs_art], ["Docs", c.docs]].filter(([, n]) => n);
     const current = humanize(state.project || "");
-    body = `<div class="imp-preview enter">
+    body = `<div class="imp-preview${imp.shown === "preview" ? "" : " enter"}">
       <div class="imp-top"><div><p class="ob-kicker">${esc(p.engine_label)} project</p><h2>${esc(p.title)}</h2><code>${esc(p.folder)}</code></div>
         <button class="ob-back" data-imp-back>Choose another folder</button></div>
       <div class="imp-tiles">${tiles.map(([label, n]) => `<div><strong>${n}</strong><span>${label}</span></div>`).join("")}</div>
-      <div class="imp-sections">${p.sections.map((s) => `<section><h3>${esc(s.title)} <small>${s.units.length}</small></h3><div class="imp-units">${s.units.map((u) => `
-        <div class="imp-unit${u.shape === "data" ? " needs" : ""}" title="${esc(u.source || u.description || "")}"><strong>${esc(u.title)}</strong>
-          <small>${esc(unitStats(u) || (u.description ? u.description.slice(0, 70) : ""))}</small>${SHAPE_LABEL[u.shape] ? `<em>${SHAPE_LABEL[u.shape]}</em>` : ""}</div>`).join("")}</div></section>`).join("")}</div>
+      <p class="imp-review">Review before anything is copied: untick sections or click assets to leave them out, rename sections, or merge one into another.</p>
+      <div class="imp-sections">${p.sections.map((s) => {
+        const sp = imp.plan.sections[s.key] || {};
+        const off = sp.include === false;
+        const kept = s.units.filter((u) => !imp.plan.exclude.has(u.id)).length;
+        return `<section class="${off ? "off" : ""}${sp.into ? " merged" : ""}"><h3>
+          <label class="imp-sec-check"><input type="checkbox" data-imp-sec="${esc(s.key)}" ${off ? "" : "checked"}></label>
+          <input class="imp-sec-title" data-imp-title="${esc(s.key)}" value="${esc(sp.title || s.title)}" ${off || sp.into ? "disabled" : ""} maxlength="60" aria-label="Section name">
+          <small>${kept}/${s.units.length}</small>
+          <select class="imp-merge" data-imp-into="${esc(s.key)}" ${off ? "disabled" : ""} title="Merge into another section"><option value="">Own section</option>${p.sections.filter((o) => o.key !== s.key).map((o) => `<option value="${esc(o.key)}" ${sp.into === o.key ? "selected" : ""}>→ ${esc((imp.plan.sections[o.key] || {}).title || o.title)}</option>`).join("")}</select></h3>
+          <div class="imp-units">${s.units.map((u) => `
+          <button type="button" class="imp-unit${u.shape === "data" ? " needs" : ""}${imp.plan.exclude.has(u.id) ? " out" : ""}" data-imp-unit="${esc(u.id)}" title="${esc(u.source || u.description || "")}${imp.plan.exclude.has(u.id) ? " · left out" : " · click to leave out"}"><strong>${esc(u.title)}</strong>
+            <small>${esc(unitStats(u) || (u.description ? u.description.slice(0, 70) : ""))}</small>${SHAPE_LABEL[u.shape] ? `<em>${SHAPE_LABEL[u.shape]}</em>` : ""}</button>`).join("")}</div></section>`;
+      }).join("")}</div>
       <div class="imp-options">
         <label class="imp-radio"><input type="radio" name="impTarget" value="new" ${imp.target === "new" ? "checked" : ""}><span>New project</span>
           <input id="impName" class="imp-name" value="${esc(imp.name || p.title)}" maxlength="60"></label>
         ${state.project ? `<label class="imp-radio"><input type="radio" name="impTarget" value="current" ${imp.target === "current" ? "checked" : ""}><span>Into <b>${esc(current)}</b> (merges with its sections and assets)</span></label>` : ""}
         <label class="imp-check"><input type="checkbox" id="impDescribe" ${imp.describe ? "checked" : ""}><span>Let Glob look at the art and write a prompt for each asset (uses your chat model)</span></label>
+        ${c.needs_art ? `<label class="imp-check"><input type="checkbox" id="impOrders" ${imp.plan.orders ? "checked" : ""}><span>Put the ${c.needs_art} ${c.needs_art === 1 ? "entry" : "entries"} the game defines without art into <b>Agent Orders</b>, so you can make them next</span></label>` : ""}
         <p class="imp-note">Copies ${c.files} files (${fmtBytes(c.bytes)}) into the project. ${p.skipped.archives ? `${p.skipped.archives} archives (.zip) are skipped. ` : ""}Glob's agent may read this folder afterwards; change that in Settings → Storage & access.</p>
       </div>
       <div class="ob-nav"><button class="ob-back" data-imp-close>Cancel</button><button class="ob-next forge" data-imp-run>✦ Import ${esc(p.title)}</button></div>
@@ -2828,7 +3147,10 @@ function renderImport() {
       <ul class="ob-log">${imp.log.slice(-14).map((l) => `<li class="${l.cls || ""}">${esc(l.text)}</li>`).join("")}</ul>
       ${done ? `<div class="ob-nav"><button class="ob-next forge" data-imp-enter>Open the project →</button></div>` : ""}</div>`;
   }
+  const scroll = $("#importStage .imp-sections")?.scrollTop || 0;
   $("#importStage").innerHTML = body;
+  if (imp.shown === "preview" && imp.step === "preview") $("#importStage .imp-sections").scrollTop = scroll;
+  imp.shown = imp.step;
 }
 
 function syncImport() {
@@ -2838,6 +3160,25 @@ function syncImport() {
   const target = document.querySelector("input[name=impTarget]:checked");
   if (target) imp.target = target.value;
   if ($("#impDescribe")) imp.describe = $("#impDescribe").checked;
+  if ($("#impOrders")) imp.plan.orders = $("#impOrders").checked;
+  document.querySelectorAll("[data-imp-title]").forEach((el) => {
+    const sp = (imp.plan.sections[el.dataset.impTitle] ||= {});
+    const original = imp.preview?.sections.find((s) => s.key === el.dataset.impTitle)?.title;
+    sp.title = el.value.trim() && el.value.trim() !== original ? el.value.trim() : "";
+  });
+}
+
+// What the user approved in the preview, in the shape game_import.import_game expects.
+function importPlan() {
+  const imp = state.imp;
+  const move = {};
+  const sections = {};
+  for (const s of imp.preview.sections) {
+    const sp = imp.plan.sections[s.key] || {};
+    sections[s.key] = { include: sp.include !== false, ...(sp.title ? { title: sp.title } : {}) };
+    if (sp.into && sp.include !== false) for (const u of s.units) move[u.id] = sp.into;
+  }
+  return { exclude: [...imp.plan.exclude], move, sections, orders: Boolean(imp.plan.orders) };
 }
 
 async function scanImport() {
@@ -2848,6 +3189,7 @@ async function scanImport() {
   try {
     imp.preview = await api("/api/import/analyze", { method: "POST", body: { folder: imp.folder } });
     imp.name = imp.preview.title;
+    imp.plan = { exclude: new Set(), sections: {}, orders: true };
     imp.step = "preview";
   } catch (err) {
     imp.step = "pick";
@@ -2864,7 +3206,7 @@ async function runImport() {
   imp.phase = "Copying files";
   renderImport();
   try {
-    const body = { folder: imp.folder, title: imp.target === "new" ? imp.name : "" };
+    const body = { folder: imp.folder, title: imp.target === "new" ? imp.name : "", plan: importPlan() };
     if (imp.target === "current") body.project = state.project;
     else body.name = imp.name;
     let job = await api("/api/import/start", { method: "POST", body });
@@ -2879,6 +3221,7 @@ async function runImport() {
     if (job.status !== "done") throw new Error(job.error || "The import stopped.");
     const r = job.result;
     log(`${r.assets} assets in ${Object.keys(r.sections).length} sections · ${r.copied} files copied`, "ok");
+    if (r.orders) log(`${plural(r.orders, "order")} waiting in Agent Orders`, "ok");
     imp.result = { project };
     await loadGrants();
     state.project = project;
@@ -3003,11 +3346,16 @@ async function storageSettings() {
 
 // ----- first-run setup -----
 
-const SETUP_STEPS = 6;
+const SETUP_STEPS = 5;
 
 async function openSetup() {
   state.setup = { step: 0 };
   showScene($("#setup"));
+  // Seen once is enough: a reload mid-setup shouldn't bring it back (Settings can rerun it).
+  if (state.agentCfg && !state.agentCfg.onboarded) {
+    state.agentCfg.onboarded = true;
+    api("/api/config", { method: "PUT", body: { onboarded: true } }).catch(() => {});
+  }
   const petals = $("#setup .petals");
   if (!petals.childElementCount) petals.innerHTML = $("#onboarding .petals").innerHTML || Array.from({ length: 18 }, () => `<i style="--x:${Math.random() * 100}%;--d:${8 + Math.random() * 10}s;--delay:${-Math.random() * 18}s;--s:${0.5 + Math.random() * 0.9};--r:${Math.random() * 360}deg;--sway:${20 + Math.random() * 60}px"></i>`).join("");
   await renderSetup();
@@ -3026,52 +3374,45 @@ async function renderSetup() {
   const dots = `<div class="setup-dots">${Array.from({ length: SETUP_STEPS }, (_, i) => `<i class="${i === st.step ? "on" : i < st.step ? "done" : ""}"></i>`).join("")}</div>`;
   let body = "";
   if (st.step === 0) {
-    body = `<div class="ob-step intro enter"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">Welcome to Glob</p><h1>Let's set up<br>your <em>forge</em>.</h1>
-      <p class="ob-sub">A few quick steps, all optional: a brain for the chat, your coding agents, image and 3D keys, and the folders Glob may use. Change any of it later in Settings.</p>
+    body = `<div class="ob-step intro enter"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">Welcome to Glob</p><h1>Your game's<br><em>asset studio</em>.</h1>
+      <p class="ob-sub">Glob makes the art, 3D models and sounds your game needs. Code with any agent you like: it orders assets, you shape them here, Glob delivers them into the game. Three quick, optional steps.</p>
       <button class="ob-next" data-setup-next>Start setup</button></div>`;
   } else if (st.step === 1) {
-    await loadModels();
-    const ready = state.models.filter((m) => m.ready);
-    const info = state.modelInfo || {};
-    body = `<div class="ob-step enter"><p class="ob-kicker">1 / 4 · Brain</p><h1>Who should Glob<br>think with?</h1>
-      <p class="ob-sub">Glob's chat runs on any model: Anthropic, OpenAI, OpenRouter, Gemini, Ollama, LM Studio or any OpenAI-compatible URL.</p>
-      <div class="setup-list">${ready.length ? ready.slice(0, 6).map((m) => `<div><span class="dot live"></span>${esc(m.label)}<small>${esc(m.group || m.provider || "")}</small></div>`).join("") + (ready.length > 6 ? `<div><small>+ ${ready.length - 6} more</small></div>` : "") : `<div class="empty">Nothing connected yet.</div>`}</div>
-      <div class="setup-actions">${info.vscode_importable ? `<button class="ob-chip on" data-setup-vscode>⇣ Import ${plural(info.vscode_importable, "model")} from VS Code</button>` : ""}<button class="ob-chip" data-setup-settings="models">Connect a provider…</button></div>
-      ${nav(ready.length ? "Continue" : "Skip for now")}</div>`;
-  } else if (st.step === 2) {
-    await loadClis();
-    body = `<div class="ob-step enter"><p class="ob-kicker">2 / 4 · Coding agents</p><h1>Plug in your<br><em>agents</em>.</h1>
-      <p class="ob-sub">Claude Code, Codex, OpenCode and Gemini CLI run as chat tabs inside your project folder, with your own login. They get Glob's tools too.</p>
-      <div class="setup-clis">${state.clis.map((c) => `<div class="setup-cli${c.installed ? " on" : ""}">${agentIcon(c.id)}<div><strong>${esc(c.label)}</strong><small>${c.installed ? "Installed" : "Not installed"}</small></div>
-        <button class="ob-chip" data-cli-login="${c.id}">${c.installed ? "Log in" : "Install"}</button></div>`).join("")}</div>
-      <p class="ob-sub small">Install and Log in open a terminal; come back here when it's done. <button class="link-btn" data-setup-refresh>Refresh</button></p>
-      ${nav()}</div>`;
-  } else if (st.step === 3) {
     const cfg = await api("/api/config");
-    body = `<div class="ob-step enter"><p class="ob-kicker">3 / 4 · Image & 3D</p><h1>Keys for images<br>and <em>3D</em>.</h1>
-      <p class="ob-sub">Glob is free; generation runs on your own provider accounts. Without keys you're in Demo Mode, which still lets you try everything.</p>
+    body = `<div class="ob-step enter"><p class="ob-kicker">1 / 3 · Generators</p><h1>Keys for art,<br><em>3D</em> and sound.</h1>
+      <p class="ob-sub">Glob is free; generation runs on your own provider accounts, so you only pay them for what you make. One key is enough to start. Keys stay on this computer.</p>
       <form id="setupKeys" class="setup-keys">${KEY_PROVIDERS.map((k) => `<label><span><b>${k.name}</b> ${k.use} · <a href="${k.url}" target="_blank" rel="noopener">Get a key ↗</a></span>
         <input name="${k.key}_api_key" type="password" autocomplete="off" placeholder="${cfg[`${k.key}_configured`] ? "Connected. Paste to replace" : k.hint}"></label>`).join("")}</form>
       ${nav()}</div>`;
-  } else if (st.step === 4) {
-    const [info, grants] = await Promise.all([api("/api/storage"), loadGrants()]);
-    body = `<div class="ob-step enter"><p class="ob-kicker">4 / 4 · Folders</p><h1>Where things<br><em>live</em>.</h1>
-      <div class="setup-folder"><span>Projects are saved in</span><code>${esc(info.projects_dir)}</code><div><button class="ob-chip" data-st-open="projects">Open</button><button class="ob-chip" data-st-move>Change…</button></div></div>
-      <p class="ob-sub">Glob only sees its own projects folder. Give it your game folders so it can import characters, models and animations, and read your design docs.</p>
-      <div class="grant-list compact">${grantRows(grants)}</div>
-      <div class="setup-actions"><button class="ob-chip on" data-grant-add>+ Add a game folder</button></div>
-      ${nav()}</div>`;
+  } else if (st.step === 2) {
+    const cn = await loadConnect();
+    body = `<div class="ob-step enter"><p class="ob-kicker">2 / 3 · Coding agent</p><h1>Bring your<br><em>coding agent</em>.</h1>
+      <p class="ob-sub">Code with Claude Code, Codex, Cursor, Copilot or any other agent? Connect your game folder and it orders the art it needs from Glob on its own, and finds the finished files in <code>glob_delivery/</code>. You can do this later for each project.</p>
+      ${cn?.connected ? `<div class="setup-list"><div><span class="dot live"></span>${esc(cn.game_name)}<small>${esc(cn.game_folder)}</small></div></div>`
+        : `<div class="setup-actions"><button class="ob-chip on" data-setup-settings="connect">Connect a game folder…</button></div>`}
+      ${nav(cn?.connected ? "Continue" : "Skip for now")}</div>`;
+  } else if (st.step === 3) {
+    await loadModels();
+    const ready = state.models.filter((m) => m.ready);
+    const info = state.modelInfo || {};
+    body = `<div class="ob-step enter"><p class="ob-kicker">3 / 3 · Glob chat <small>optional</small></p><h1>Talk to Glob<br>right <em>here</em>?</h1>
+      <p class="ob-sub">Glob can also run in a chat next to your project, on any model: Anthropic, OpenAI, OpenRouter, Gemini, Ollama, LM Studio or a custom URL. Skip this if your coding agent does that work.</p>
+      <div class="setup-list">${ready.length ? ready.slice(0, 6).map((m) => `<div><span class="dot live"></span>${esc(m.label)}<small>${esc(m.group || m.provider || "")}</small></div>`).join("") + (ready.length > 6 ? `<div><small>+ ${ready.length - 6} more</small></div>` : "") : `<div class="empty">No chat model yet.</div>`}</div>
+      <div class="setup-actions">${info.vscode_importable ? `<button class="ob-chip on" data-setup-vscode>⇣ Import ${plural(info.vscode_importable, "model")} from VS Code</button>` : ""}<button class="ob-chip" data-setup-settings="models">Connect a model…</button></div>
+      ${nav(ready.length ? "Continue" : "Skip")}</div>`;
   } else {
+    const info = await api("/api/storage").catch(() => ({}));
     body = `<div class="ob-step enter"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">All set</p><h1>What are we<br><em>forging</em>?</h1>
-      <div class="setup-actions big"><button class="ob-next forge" data-setup-finish="import">Import a game project</button><button class="ob-next" data-setup-finish="new">Start a new project</button>
-      ${state.project ? `<button class="ob-back" data-setup-finish="open">Open ${esc(humanize(state.project))}</button>` : ""}</div></div>`;
+      <div class="setup-actions big"><button class="ob-next forge" data-setup-finish="new">Start a new project</button><button class="ob-next" data-setup-finish="import">Import a game project</button>
+      ${state.project ? `<button class="ob-back" data-setup-finish="open">Open ${esc(humanize(state.project))}</button>` : ""}</div>
+      ${info.projects_dir ? `<p class="ob-sub small">Projects are saved in <code>${esc(info.projects_dir)}</code> · <button class="link-btn" data-st-move>Change</button></p>` : ""}</div>`;
   }
   $("#setupStage").innerHTML = dots + body;
 }
 
 async function setupNext() {
   const st = state.setup;
-  if (st.step === 3) {
+  if (st.step === 1) {
     const form = $("#setupKeys");
     const updates = {};
     for (const input of form.querySelectorAll("input")) if (input.value.trim()) updates[input.name] = input.value.trim();
@@ -3086,7 +3427,7 @@ async function setupNext() {
 // ----- events -----
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh]");
+  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh]");
   if (!t) return;
   const d = t.dataset;
   if (d.accessAllow) return answerAccess(d.accessAllow, true, d.write === "1");
@@ -3108,6 +3449,12 @@ document.addEventListener("click", async (event) => {
   }
   if (d.impBack !== undefined) { state.imp.step = "pick"; return renderImport(); }
   if (d.impRun !== undefined) return runImport();
+  if (d.impUnit) {
+    syncImport();
+    const ex = state.imp.plan.exclude;
+    if (ex.has(d.impUnit)) ex.delete(d.impUnit); else ex.add(d.impUnit);
+    return renderImport();
+  }
   if (d.impEnter !== undefined) return finishImport();
   if (d.stOpen) {
     try { await api("/api/storage/open", { method: "POST", body: { target: d.stOpen, path: d.path || "" } }); } catch (err) { toast(err.message, true); }
@@ -3150,6 +3497,15 @@ document.addEventListener("click", async (event) => {
     if (d.setupFinish === "new") startOnboarding();
     await closeSetup();
   }
+});
+
+document.addEventListener("change", (event) => {
+  const el = event.target;
+  if (!state.imp?.plan || !el.matches?.("[data-imp-sec], [data-imp-into]")) return;
+  syncImport();
+  if (el.dataset.impSec) (state.imp.plan.sections[el.dataset.impSec] ||= {}).include = el.checked;
+  if (el.dataset.impInto) (state.imp.plan.sections[el.dataset.impInto] ||= {}).into = el.value;
+  renderImport();
 });
 
 document.addEventListener("change", async (event) => {

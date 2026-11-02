@@ -18,8 +18,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from forge.models import new_id
-from forge import access, asset_studio, game_import
-from forge.agent import cli_agents
+from forge import access, asset_studio, game_import, orders
 from forge.config import load_config
 from forge.overview import FRONT_PAGES, HIDDEN_NAMES, move_to_trash
 
@@ -34,107 +33,57 @@ MAX_COPY_BYTES = 2 * 1024 * 1024 * 1024
 EFFORTS = {"low", "medium", "high", "max"}
 _SESSION_ID_RE = re.compile(r"^chat_[a-z0-9]+$")
 
-SYSTEM_PROMPT = """You are Glob, the project agent (a cheerful pink slime blacksmith) for the game project "{project}".
-You work directly inside the project's workspace folder (all paths are relative to it) and you ACT:
-when the user asks for something, you create, edit, move and organize the files yourself.
+GLOB_PROMPT_PATH = Path(__file__).with_name("glob_prompt.md")
 
-The user sees a live Project Overview next to this chat that is built from the folder structure:
-- Every top-level folder is a section in the overview. Prefix folders with numbers to set their order
-  (e.g. "01-intro", "02-characters", "03-locations", "04-development").
-- A folder's README.md is that section's intro page; its first "# Heading" is the section title and
-  the first paragraph is its summary. Other .md files in a folder show up as cards.
-- The root README.md (or GAME.md) is the project's front page: a "# Title", a one-line pitch paragraph,
-  then whatever overview content fits the game.
-- An image called cover.png/jpg/webp in a folder becomes that section's hero image.
-There is no fixed structure: choose folders and documents that fit THIS game (a puzzle game, an RPG,
-a racing game and a visual novel all need different sections).
-Groups are folders, things are files: a collection (creatures, characters, factions, items, weapons,
-locations, UI screens…) is a FOLDER with a README.md describing the group, and every individual thing
-that will need art is its own asset file inside it (05-characters/creatures/sump-stalker.md), or a
-sub-folder when it groups further (05-characters/creatures/beasts/). Never put a roster of several
-characters/items into one .md; a .md is one topic or one asset.
 
+def glob_prompt(project: str) -> str:
+    """The Glob role prompt shared by the in-app chat, the MCP server and connected coding agents."""
+    text = GLOB_PROMPT_PATH.read_text(encoding="utf-8")
+    return text.replace("{project}", project).replace("{kinds}", ", ".join(asset_studio.ASSET_KINDS))
+
+
+# The in-app chat talks to plain model APIs, so it adds a JSON tool protocol on top of the shared role prompt.
+CHAT_PROTOCOL = """# Chat protocol (Glob app)
+
+You are talking to the user in the chat panel of the Glob app, next to the live Project Overview.
 Reply with ONLY one JSON object, no prose outside it:
-{{"reply": "<short markdown message to the user>", "actions": [<tool calls>], "done": true}}
+{"reply": "<short markdown message to the user>", "actions": [<tool calls>], "done": true}
 
 Tools (paths relative to the workspace):
-- {{"tool": "list", "path": ""}}                      list a folder ("" = workspace root)
-- {{"tool": "read", "path": "README.md"}}
-- {{"tool": "write", "path": "02-characters/hero.md", "content": "..."}}  create or overwrite; parent folders are created
-- {{"tool": "append", "path": "04-development/tasks.md", "content": "..."}}
-- {{"tool": "create_folder", "path": "03-locations/islands"}}
-- {{"tool": "move", "from": "old.md", "to": "new/old.md"}}     also renames folders
-- {{"tool": "delete", "path": "notes/old.md"}}                  moves a file or folder to .trash/ (recoverable)
-- {{"tool": "generate", "path": "02-characters/knight.md", "action": "candidates", "count": 2}}
-      starts image/3D generation for an asset. action: "candidates" (new images from the asset prompt),
-      "variant" or "edit" (needs "instruction", works on the winner image), "views" (side and back
-      turnaround views of the winner; make_3d then uses them for a better model), "make_3d" (3D model from
-      the winner), "rig" (skeleton for a humanoid GLB, also gives walk and run clips), "animate" (needs a rig
-      and "action_ids": up to 10 Meshy animation-library ids). Generation costs money: only run it when the
-      user asks for images, 3D, rigs or animations.
-      Splitting an image into parts, icons, sprite sheets, 3D preview and Godot/Unity/Unreal export are
-      buttons under "Game tools" on the asset page; point the user there for those.
-- {{"tool": "pick_winner", "path": "02-characters/knight.md", "file": "02-characters/knight/candidates/knight-1.png"}}
+- {"tool": "list", "path": ""}                      list a folder ("" = workspace root)
+- {"tool": "read", "path": "README.md"}
+- {"tool": "write", "path": "02-characters/hero.md", "content": "..."}  create or overwrite; parent folders are created
+- {"tool": "append", "path": "04-development/tasks.md", "content": "..."}
+- {"tool": "create_folder", "path": "03-locations/islands"}
+- {"tool": "move", "from": "old.md", "to": "new/old.md"}     also renames folders
+- {"tool": "delete", "path": "notes/old.md"}                  moves a file or folder to .trash/ (recoverable)
+- {"tool": "generate", "path": "02-characters/knight.md", "action": "candidates", "count": 2}
+      action: candidates | variant | edit (both need "instruction") | views | make_3d | rig | animate (needs "action_ids")
+- {"tool": "pick_winner", "path": "02-characters/knight.md", "file": "02-characters/knight/candidates/knight-1.png"}
+- {"tool": "list_orders", "status": "draft"}               the coding agent's orders (status optional)
+- {"tool": "file_order", "order_id": "orc_warrior", "path": "02-characters/blue-faction/orc-warrior.md"}
+      sorts an order into the workspace as an asset .md; then rewrite its prompt
 
 Folders elsewhere on the user's computer (their game project, an art folder): you can reach only folders the
 user granted, listed under "Granted folders" in the context. Use ABSOLUTE paths for those with list, read and
 copy_in. When the user mentions a folder that is not granted, call request_access right away (the user gets
 Allow / Deny buttons in the chat and you continue once they answer). Never tell the user you cannot access
 their computer, and never ask them to copy files by hand: ask for access instead.
-- {{"tool": "request_access", "path": "D:\\Games\\MyGame", "reason": "to import your characters", "write": false}}
-- {{"tool": "import_game", "path": "D:\\Games\\MyGame"}}  imports a Godot, Unity or Unreal project (or any asset
-      folder): characters with their models, animations, textures and variants, weapons and items with their stats
-      from the game data, kits, skies, textures and design docs. Files are copied into numbered sections; existing
-      sections and assets with the same names are merged (the real model lands in the asset you sketched).
-      Items the game defines without any art are added with `status: needs art`. Needs read access first.
-- {{"tool": "copy_in", "from": "D:\\Games\\MyGame\\art\\elia.png", "to": "02-characters/elia/candidates"}}
+- {"tool": "request_access", "path": "D:\\Games\\MyGame", "reason": "to import your characters", "write": false}
+- {"tool": "import_game", "path": "D:\\Games\\MyGame"}  imports a Godot, Unity or Unreal project (or any asset
+      folder) into numbered sections; existing sections and assets with the same names are merged. Items the game
+      defines without any art are added with `status: needs art`. Needs read access first.
+- {"tool": "copy_in", "from": "D:\\Games\\MyGame\\art\\elia.png", "to": "02-characters/elia/candidates"}
       copies a file or folder from a granted folder into the workspace.
 With write access the write tool also takes an absolute path inside that folder (for engine files).
 
-Assets: an asset is a .md whose header (YAML front matter) has `kind:` (one of the kinds listed below)
-and `prompt:` (a clear visual description of the subject only: silhouette, materials,
-colours, details; no style words, the pillars carry the style). Example:
----
-kind: character
-prompt: A stout knight in dented bronze armour with a red tabard and a round shield
----
-# Bronze Knight
-Lore and gameplay notes…
-Generated images land in <asset-name>/candidates|variants|edits|3d/ next to the asset; `winner:` in the
-header is the chosen image.
-Pillars: reference images in a `pillars/` folder keep the art style consistent. pillars/ at the workspace root
-is the project bible (sent with every generation); pillars/ inside any folder applies to everything below it.
-Text files in a `pillars/` folder (e.g. pillars/style-bible.md) are the style bible: their text is put in
-front of every image prompt below that folder (pose such as T-pose, polygon budget, palette, camera,
-rendering rules). Write the project-wide one at pillars/style-bible.md when the user describes the look.
-
-Writing prompts that survive generation. The image model gets: the asset prompt, then the style bible, then
-the reference images (the pillars, which show OTHER assets). So:
-- Asset `prompt:` leads with WHO or WHAT it is: gender, age, build, face and hair for people, then outfit,
-  materials and props. Keep the user's own words about appearance (beautiful, old, scarred, muscular, female…)
-  exactly as they said them; never soften or swap them for the look of the pillars or the project's mood.
-- Never describe the subject by pointing at the references ("like the others"); each prompt must stand alone.
-- The style bible is short (about 10-15 bullets, under ~150 words) and only says HOW things are drawn:
-  format, rendering and texture treatment, palette, lighting, camera, pose, polygon budget. Keep out
-  subject descriptions, lore, and mood words that would colour a face or body (grimy, ugly, wretched,
-  uncanny, vulnerable). Wear, dirt and horror belong to individual assets or to environment/creature
-  folders' own pillars/style-bible.md, not to the project-wide file that every character inherits.
-- Never write "match proportions/pose/anatomy exactly" in a style bible: references carry style only, and
-  the asset prompt decides who is in the picture.
-- Do not add a style-bible.md inside a sub-folder that just repeats the project one; add one there only
-  for rules that differ for that folder.
-When you create or edit a style bible, apply these rules. When the user complains that a generation looks
-wrong (wrong gender, ugly, copies the references), check the asset prompt, the style bible and the
-pillars for the cause, fix the text, and say what you changed.
-Use only these kinds: {kinds}.
-
 You may put many actions in one reply. Set "done": false only when you need list/read results before
-continuing; you will get the results back. When asked to create a project structure, create the
-folders AND write a README.md with real, specific starter content in each one, plus the root README.md,
-and give collections their first few asset files (each with `kind:` and `prompt:`).
-Write rich, concrete Markdown (headings, lists, tables), never placeholders like "TBD" or "lorem ipsum".
-Only ask a clarifying question when the request is genuinely impossible to act on; otherwise make
-sensible choices and say what you assumed. Keep the chat reply short: what you did and what's next."""
+continuing; you will get the results back."""
+
+
+def chat_system_prompt(project: str) -> str:
+    return f"{glob_prompt(project)}\n\n{CHAT_PROTOCOL}"
+
 
 COMPACT_PROMPT = """Summarize the earlier part of this chat so the conversation can continue without it.
 Keep every decision, name, path, number, style rule and open task; drop chit-chat. Use short Markdown bullets
@@ -214,8 +163,8 @@ class WorkspaceAgent:
                 continue
             sessions.append({
                 key: data.get(key)
-                for key in ("id", "title", "group", "created_at", "updated_at", "handoff_from", "handoff_to", "model", "effort", "agent")
-            } | {"message_count": len(data.get("messages", [])), "running": cli_agents.is_running(data.get("id", ""))})
+                for key in ("id", "title", "group", "created_at", "updated_at", "handoff_from", "handoff_to", "model", "effort")
+            } | {"message_count": len(data.get("messages", []))})
         return sorted(sessions, key=lambda entry: entry.get("created_at") or 0)
 
     def create_session(self, project: str, title: str = "New chat", group: str = "General", **extra: Any) -> dict[str, Any]:
@@ -227,12 +176,6 @@ class WorkspaceAgent:
             "updated_at": _now(),
             "model": extra.get("model") or "",
             "effort": extra.get("effort") if extra.get("effort") in EFFORTS else "medium",
-            # "glob" is the built-in agent; otherwise a coding-agent CLI id (claude, codex, …).
-            "agent": extra.get("agent") if extra.get("agent") in cli_agents.CLIS else "glob",
-            "cli_session": "",
-            # Coding-agent model and effort; "" uses the CLI's own default.
-            "cli_model": "",
-            "cli_effort": "",
             "handoff_from": extra.get("handoff_from"),
             "handoff_to": None,
             "messages": list(extra.get("messages") or []),
@@ -246,9 +189,6 @@ class WorkspaceAgent:
                 session[key] = fields[key].strip()[:80] or session[key]
         if fields.get("effort") in EFFORTS:
             session["effort"] = fields["effort"]
-        for key in ("cli_model", "cli_effort"):
-            if isinstance(fields.get(key), str):
-                session[key] = fields[key].strip()[:120]
         return self._save(project, session)
 
     def delete_session(self, project: str, session_id: str) -> str | None:
@@ -432,6 +372,13 @@ class WorkspaceAgent:
                 request["action_ids"] = [int(a) for a in call.get("action_ids") or []]
             job = self.job_starter(project, request)
             return {"tool": tool, "path": path, "summary": f"Started {action.replace('_', ' ')} for {path}", "changed": True, "job": job["id"]}
+        if tool == "list_orders":
+            listed = orders.list_orders(ws, str(call.get("status") or "") or None)
+            lines = [f"- {o['id']} [{o['status']}] {o['kind']}: {o['title']}" + (f" (asset {o['asset']})" if o.get("asset") else "") + (f" for {o['placeholder']}" if o.get("placeholder") else "") + (f"\n  brief: {o['brief'][:300]}" if o.get("brief") else "") for o in listed]
+            return {"tool": tool, "path": "", "result": "\n".join(lines) or "(no orders)", "summary": f"Listed {len(listed)} orders"}
+        if tool == "file_order":
+            filed = orders.file_order(ws, str(call.get("order_id") or ""), str(call.get("path") or ""))
+            return {"tool": tool, "path": filed["asset"], "summary": f"Filed order {filed['id']} → {filed['asset']}", "changed": True}
         if tool == "pick_winner":
             path = str(call.get("path") or "")
             asset_studio.update_asset(ws, path, {"winner": str(call.get("file") or "")})
@@ -590,7 +537,7 @@ class WorkspaceAgent:
 
         context, ref_images = self._context_block(project, session, page or {}, refs or [])
         images = (uploaded_images + ref_images)[:4]
-        system = SYSTEM_PROMPT.format(project=project, kinds=", ".join(asset_studio.ASSET_KINDS)) + f"\n\nReasoning effort: {session.get('effort', 'medium')} — scale the depth of your analysis accordingly."
+        system = chat_system_prompt(project) + f"\n\nReasoning effort: {session.get('effort', 'medium')} — scale the depth of your analysis accordingly."
         session = await self.compact(project, session)
         transcript = self._transcript(session)
         tool_log: list[str] = []
@@ -629,7 +576,7 @@ class WorkspaceAgent:
                 result_text = outcome.pop("result", None)
                 performed.append(outcome)
                 tool_log.append(f"{json.dumps(call)[:300]}\n→ {result_text if result_text is not None else outcome['summary']}"[: MAX_FILE_CHARS + 400])
-                if call.get("tool") in ("list", "read", "import_game") and outcome.get("ok"):
+                if call.get("tool") in ("list", "read", "import_game", "list_orders") and outcome.get("ok"):
                     needs_results = True
                 if outcome.get("access_request"):
                     waiting = True
@@ -638,34 +585,6 @@ class WorkspaceAgent:
         session = self.get_session(project, session_id)
         session["messages"].append({"role": "agent", "text": reply_text or "Done.", "actions": performed, "model": used_model, "at": _now()})
         session["context_tokens"] = self.context_tokens(session)
-        return self._save(project, session)
-
-    async def send_cli(self, project: str, session_id: str, text: str, on_event: Callable[[dict[str, Any]], Any], allow_edits: bool = True) -> dict[str, Any]:
-        """One turn with the session's coding-agent CLI, running in the workspace folder."""
-        session = self.get_session(project, session_id)
-        cli_id = session.get("agent")
-        if cli_id not in cli_agents.CLIS:
-            raise ValueError("This chat is not a coding-agent chat.")
-        text = str(text or "").strip()
-        if not text:
-            raise ValueError("Write a message.")
-        session["messages"].append({"role": "user", "text": text, "attachments": [], "at": _now()})
-        if session.get("title") in ("", "New chat"):
-            session["title"] = text[:48] + ("…" if len(text) > 48 else "")
-        self._save(project, session)
-        try:
-            result = await cli_agents.run_turn(
-                session_id, cli_id, self._ws(project), text, session.get("cli_session") or "", allow_edits, on_event,
-                model=session.get("cli_model") or "", effort=session.get("cli_effort") or "",
-            )
-            message = {"role": "agent", "text": result["text"], "actions": result["actions"], "model": session.get("cli_model") or cli_agents.CLIS[cli_id]["label"], "at": _now()}
-        except Exception as exc:  # noqa: BLE001 — show CLI failures in the chat
-            result = {}
-            message = {"role": "agent", "text": str(exc), "actions": [], "model": cli_agents.CLIS[cli_id]["label"], "error": True, "at": _now()}
-        session = self.get_session(project, session_id)
-        if result.get("session_id"):
-            session["cli_session"] = result["session_id"]
-        session["messages"].append(message)
         return self._save(project, session)
 
     async def handoff(self, project: str, session_id: str) -> dict[str, Any]:
