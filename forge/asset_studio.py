@@ -58,6 +58,8 @@ POLYCOUNT_PRESETS = (1500, 3000, 6000, 12000, 30000, 100000)
 ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "vehicle", "ui", "vfx", "sfx", "voice", "music")
 # The framing each kind usually wants when the asset has no `aspect:` of its own (else the Settings default).
 KIND_ASPECT = {"environment": "16:9", "vfx": "16:9", "ui": "3:4"}
+# Kinds that are a whole picture: their background is part of the image, so it is never cut out.
+SCENE_KINDS = ("environment",)
 # How strongly the pillars steer an asset (`pillars:` in its header): off, light, normal (default) or strong.
 PILLAR_STRENGTHS = ("off", "light", "normal", "strong")
 # Sound assets: their "candidates" are audio files in <asset>/audio/, the prompt describes the sound (or, for a voice,
@@ -201,6 +203,19 @@ def make_pillar(ws_dir: Path, image_rel: str, folder_rel: str) -> str:
         index += 1
     shutil.copy2(image, target)
     return _ws_rel(ws_dir, target)
+
+
+def default_image_model(cfg: Any) -> str:
+    """The Settings default image model, or, when that one has no key, the first model that can run.
+
+    A user with only a Meshy key (or sign-in) must not get every first generation sent to Gemini without a key."""
+    chosen = cfg.default_image_model
+    if chosen.startswith("svc:") or cfg.demo_mode:
+        return chosen
+    models = list_image_models()
+    if any(m["id"] == chosen and m["available"] for m in models):
+        return chosen
+    return next((m["id"] for m in models if m["available"]), chosen)
 
 
 def list_image_models() -> list[dict[str, Any]]:
@@ -531,7 +546,7 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
             "bible": [],
             "use_bible": False,
             "references": [{"path": source, "source": "Source image", "role": "source"}],
-            "model": model or cfg.default_image_model,
+            "model": model or default_image_model(cfg),
             "settings": {"views": ", ".join(TURNAROUND_VIEWS[:2])},
             "count": 2,
         }
@@ -562,8 +577,8 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
         "bible": asset["text_pillars"],
         "use_bible": True,
         "references": references[:MAX_REFERENCES],
-        "model": model or cfg.default_image_model,
-        "settings": {"aspect_ratio": aspect, "transparent_background": cfg.image_remove_bg},
+        "model": model or default_image_model(cfg),
+        "settings": {"aspect_ratio": aspect, "transparent_background": cutout_background(asset, cfg)},
         "pillar_strength": strength,
         "count": 2 if action == "candidates" else 1,
     }
@@ -572,6 +587,13 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
 def asset_aspect(asset: dict[str, Any], cfg: Any) -> str:
     """The asset's own framing, else the usual one for its kind, else the Settings default."""
     return str(asset["meta"].get("aspect") or KIND_ASPECT.get(asset["kind"]) or cfg.image_aspect_ratio)
+
+
+def cutout_background(asset: dict[str, Any], cfg: Any) -> bool:
+    """Whether new images are cut out: the Settings default, except for scenes and the key art."""
+    if asset["kind"] in SCENE_KINDS or asset["meta"].get("cover"):
+        return False
+    return bool(cfg.image_remove_bg)
 
 
 def pillar_strength(meta: dict[str, Any]) -> str:

@@ -422,23 +422,9 @@ class WorldPipelineManager:
         self._ensure_initialized()
 
     def _ensure_initialized(self) -> None:
-        if not self.style_rules_file.exists():
-            self.style_rules_file.write_text(
-                json.dumps(
-                    {
-                        "categories": DEFAULT_CATEGORY_PROMPTS,
-                        "materials": DEFAULT_MATERIAL_TAGS,
-                        "workflows": WORKFLOW_PRESETS,
-                        "linked_game_folder": "",
-                        "pinned": False,
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-        if not self.pipeline_file.exists():
-            self.save_pipeline_items([])
-        else:
+        # STYLE_RULES.json and PIPELINE.json belong to the old blueprint pipeline. They are written on first use,
+        # not into every new workspace: a fresh project starts with no style of someone else's game in it.
+        if self.pipeline_file.exists():
             # Keep existing human-edited blueprints intact; only create missing files.
             for item in self.list_pipeline_items():
                 ensure_workspace_folder(self.ws_dir, self.store, item.full_folder_path)

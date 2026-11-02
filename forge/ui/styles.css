@@ -1658,6 +1658,14 @@ body.gallery-mode .asset-img img { object-fit: cover; }
 body.gallery-mode .board { height: calc(100vh - 250px); }
 body.gallery-mode .board-col { width: 280px; }
 .empty .sample-cta { margin: 28px auto 0; max-width: 460px; }
+.empty.game-start { max-width: 620px; }
+.empty.game-start code { color: var(--text); word-break: break-all; }
+.empty.game-start > .keyart-cta { margin: 24px auto 0; max-width: 520px; }
+.game-start-agent { margin: 18px auto 0; max-width: 520px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; text-align: left; display: flex; flex-direction: column; gap: 4px; }
+.game-start-agent strong { color: var(--text); font-size: 14px; }
+.game-start-agent small { font-size: 12.5px; }
+.game-start-agent .cmd-line { display: flex; gap: 10px; align-items: flex-start; margin-top: 6px; }
+.game-start-agent .cmd-line code { flex: 1; font-size: 12.5px; line-height: 1.5; }
 .lightbox[hidden], .job-dock[hidden] { display: none; }
 body.gallery-mode .asset-tile.add, body.gallery-mode .actions-row { display: none; }
 .dlg .batch-list label { display: flex; flex-direction: row; align-items: center; gap: 10px; margin: 0; text-align: left; font-size: 13.5px; color: var(--text); }

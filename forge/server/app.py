@@ -1804,6 +1804,13 @@ async def api_overview(project: str = "default") -> dict[str, Any]:
     workspace_watcher.touch(project)
     overview = project_overview.build_overview(_ws_dir(project), project)
     overview["orders"] = orders.summary(await asyncio.to_thread(orders.list_orders, _ws_dir(project)))
+    folder = game_link.game_folder(project, actions.root_dir)
+    if overview.get("empty") and folder and folder.is_dir():
+        # An empty project made for a game: the overview offers to build its workspace from the game itself.
+        from forge.game_import import _engine
+
+        _, engine, title = _engine(folder)
+        overview["game"] = {"folder": str(folder), "title": title, "engine": engine}
     return overview
 
 
@@ -2159,7 +2166,7 @@ async def api_studio_run(payload: dict[str, Any], project: str = "default") -> d
 
 @app.get("/api/studio/options")
 async def api_studio_options() -> dict[str, Any]:
-    return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": load_config().default_image_model, "selected_3d": load_config().default_3d_service_model, "kinds": list(asset_studio.ASSET_KINDS)}
+    return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": asset_studio.default_image_model(load_config()), "selected_3d": load_config().default_3d_service_model, "kinds": list(asset_studio.ASSET_KINDS)}
 
 
 @app.get("/api/studio/voices")
@@ -2276,11 +2283,17 @@ async def api_studio_cancel_job(job_id: str, project: str = "default") -> dict[s
 
 
 @app.post("/api/overview/key-art")
-async def api_overview_key_art(project: str = "default") -> dict[str, Any]:
-    """Make (or reuse) the project's key-art asset and start two candidates; the first becomes the cover."""
+async def api_overview_key_art(project: str = "default", start: bool = True) -> dict[str, Any]:
+    """Make (or reuse) the project's key-art asset and start two candidates; the first becomes the cover.
+
+    With start=false only the asset is made: the app then opens its Generate sheet, so the user sees and can change
+    the prompt, model and framing before anything is spent."""
     ws_dir = _ws_dir(project)
     ov = project_overview.build_overview(ws_dir, project)
-    rel = _overview_call(asset_studio.key_art_asset, ws_dir, ov["title"], ov["excerpt"] or "")
+    rel = _overview_call(asset_studio.key_art_asset, ws_dir, ov["title"], ov.get("pitch") or ov["excerpt"] or "")
+    if not start:
+        await workspace_changed(project)
+        return {"asset": rel, "job": None}
     request = _overview_call(asset_studio.build_request, ws_dir, rel, "candidates")
     job = _overview_call(start_studio_job, project, request)
     await workspace_changed(project)

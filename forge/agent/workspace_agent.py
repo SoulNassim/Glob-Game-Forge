@@ -80,7 +80,7 @@ def generation_setup() -> str:
     ready = [m["id"] for m in image if m["available"]]
     meshy = "API key" if cfg.get_key("meshy", logins=False) else "Meshy sign-in" if meshy_login.signed_in() else "not set up"
     lines = [
-        f"- Default image model (used when generate has no model): {cfg.default_image_model} = {describe_model(cfg.default_image_model)}",
+        f"- Default image model (used when generate has no model): {(chosen := asset_studio.default_image_model(cfg))} = {describe_model(chosen)}",
         f"- Image models on API keys / Meshy sign-in: {', '.join(ready) or '(none set up)'}",
         (f"- Make 3D without a model: {cfg.default_3d_service_model} = {describe_model(cfg.default_3d_service_model)}" if cfg.default_3d_service_model else
          f"- Make 3D without a model: {cfg.default_3d_provider} ({'Meshy' if cfg.default_3d_provider == 'meshy' else cfg.default_3d_provider} via {meshy if cfg.default_3d_provider == 'meshy' else 'API key'})"),

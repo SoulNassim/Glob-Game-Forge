@@ -50,6 +50,20 @@ def _search_path() -> str:
     return os.pathsep.join(parts + [str(p) for p in extra if str(p) not in parts])
 
 
+# Set by a running Claude Code session for its own child processes. A coding agent that started Glob passes them
+# on, and a `claude` Glob runs with them would talk to that session's (soon gone) proxy instead of the user's login.
+_SESSION_PREFIXES = ("CLAUDECODE", "CLAUDE_CODE_", "CLAUDE_AGENT_SDK_")
+
+
+def child_env() -> dict[str, str]:
+    """The environment for a CLI Glob runs: the user's own, with the PATH widened and no parent agent session."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(_SESSION_PREFIXES)}
+    if "CLAUDE_CODE_ENTRYPOINT" in os.environ:
+        env.pop("ANTHROPIC_BASE_URL", None)
+    env["PATH"] = _search_path()
+    return env
+
+
 def find(cli_id: str) -> str | None:
     return shutil.which(CLIS[cli_id]["bin"], path=_search_path())
 
@@ -61,7 +75,7 @@ def detect() -> list[dict[str, Any]]:
 def _opencode_models(exe: str) -> list[tuple[str, str]]:
     try:
         out = subprocess.run([exe, "models"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
-                             env={**os.environ, "PATH": _search_path()}, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+                             env=child_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
     except (OSError, subprocess.SubprocessError):
         return []
     return [(line.strip(), line.strip()) for line in out.splitlines() if "/" in line and " " not in line.strip()]
@@ -103,8 +117,10 @@ def build_command(cli_id: str, exe: str, model: str, effort: str, system_prompt:
     combined = f"{system_prompt}\n\n---\n\n{prompt}"
     if cli_id == "claude":
         # stream-json input carries images; --tools "" leaves only text, and no user MCP servers are loaded.
+        # The system prompt goes in a file: on Windows `claude` is a .cmd, and cmd.exe stops at 8191 characters.
+        (folder / "system.md").write_text(system_prompt, encoding="utf-8")
         cmd = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-               "--system-prompt", system_prompt, "--tools", "", "--strict-mcp-config"]
+               "--system-prompt-file", str(folder / "system.md"), "--tools", "", "--strict-mcp-config"]
         cmd += (["--model", model] if model else []) + (["--effort", effort] if effort else [])
         content: list[dict[str, Any]] = [{"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}} for mime, data in images[:4]]
         content.append({"type": "text", "text": prompt})
@@ -171,7 +187,7 @@ async def call(model_id: str, prompt: str, system_prompt: str, images: list[tupl
         try:
             proc = await asyncio.to_thread(
                 subprocess.run, cmd, input=stdin_text, cwd=tmp, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=TIMEOUT, env={**os.environ, "PATH": _search_path(), "NO_COLOR": "1"},
+                timeout=TIMEOUT, env={**child_env(), "NO_COLOR": "1"},
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except subprocess.TimeoutExpired as exc:
@@ -213,7 +229,7 @@ def open_login(cli_id: str) -> None:
     spec = CLIS[cli_id]
     command = spec["login"] if find(cli_id) else spec["install"]
     if sys.platform == "win32":
-        subprocess.Popen(["cmd", "/c", "start", "cmd", "/k", command])
+        subprocess.Popen(["cmd", "/c", "start", "cmd", "/k", command], env=child_env())
     elif sys.platform == "darwin":
         subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to do script "{command}"'])
     else:

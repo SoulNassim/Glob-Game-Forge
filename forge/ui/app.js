@@ -1565,6 +1565,18 @@ async function renderViewBody() {
   const view = state.view;
 
   if (view.type === "home") {
+    if (ov.empty && ov.game) {
+      const g = ov.game;
+      content.innerHTML = `<div class="empty game-start"><h1>Let's set up ${esc(g.title)}</h1>
+        <p>Glob is connected to your ${esc(g.engine)} game in <code>${esc(g.folder)}</code>. Describe the game once and Glob builds its workspace:
+        a front page, a section per part of the game, a style bible, and a page for every character, creature, item, place and sound to make.
+        Nothing is generated until you say so.</p>
+        <button class="keyart-cta" data-game-build>${icon("sparkle")}<span><strong>Build it in Glob's chat</strong><small>Paste your pitch or design notes, or let Glob read the docs in your game folder</small></span></button>
+        <div class="game-start-agent"><strong>Or ask your coding agent</strong><small>It has Glob's tools after you restart it:</small>
+          <div class="cmd-line"><code>${esc(gameBuildPrompt(g, true))}</code><button class="mini" data-cn-copy="${esc(gameBuildPrompt(g, true))}">Copy</button></div></div>
+        <button class="keyart-cta sample-cta" data-install-sample>${icon("eye")}<span><strong>Or explore a finished project first</strong><small>Pocket Kaiju: characters, 3D models, sounds and an agent order. Opens as its own project; no credits used.</small></span></button></div>`;
+      return;
+    }
     if (ov.empty) {
       content.innerHTML = `<div class="empty"><h1>This project is empty</h1>
         <p>Tell the agent on the left about your game, for example:</p>
@@ -3836,11 +3848,8 @@ async function openSetup() {
   state.setup = { step: 0, agents: {} };
   spawnPetals($("#setup"));
   showScene($("#setup"));
-  // Seen once is enough: a reload mid-setup shouldn't bring it back (Settings can rerun it).
-  if (state.agentCfg && !state.agentCfg.onboarded) {
-    state.agentCfg.onboarded = true;
-    api("/api/config", { method: "PUT", body: { onboarded: true } }).catch(() => {});
-  }
+  // Setup counts as done when it is finished or skipped, not when it is seen: `glob connect` opens it in a
+  // browser tab the user may close unread, and the next visit must still start with it.
   await renderSetup();
 }
 
@@ -3852,6 +3861,7 @@ async function closeSetup(done = true) {
   stopAgentPolls();
   hideScene($("#setup"));
   state.setup = null;
+  if (done && state.agentCfg) state.agentCfg.onboarded = true;
   if (done) await api("/api/config", { method: "PUT", body: { onboarded: true } }).catch(() => {});
 }
 
@@ -4398,14 +4408,34 @@ async function batchDialog(folder) {
   });
 }
 
+// The key art is an ordinary asset: make it, open its page and its Generate sheet, so the prompt, model and
+// framing are on screen before anything is spent. Its first winner becomes the cover.
+// The first message that turns an empty game project into a workspace, for Glob's chat or a coding agent.
+function gameBuildPrompt(game, agent = false) {
+  return agent
+    ? `Build the Glob workspace for this game (${game.title}) from its design docs, using Glob's tools. Don't generate any images yet.`
+    : `Build the workspace for my game ${game.title}. Read its design docs in ${game.folder} (README, design notes), then make the front page with the pitch, one section per part of the game, pillars/style-bible.md from the art direction, and an asset page for every character, creature, item, place and sound it names. Don't generate anything yet.\n\nMy pitch, if you want it on top: `;
+}
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("[data-game-build]") || !state.overview?.game) return;
+  setChatHidden(false);
+  showPanel("chat");
+  const input = $("#input");
+  input.value = gameBuildPrompt(state.overview.game);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+});
+
 async function makeKeyArt(project, btn) {
   if (btn) btn.disabled = true;
   try {
-    const res = await apiIn(project, "/api/overview/key-art", { method: "POST" });
-    if (project === state.project) { state.jobs[res.job.id] = res.job; renderJobDock(); }
-    toast("Painting the key art… it becomes the cover when it lands. Pick another candidate on its page to change it.");
-    if (project === state.project) renderView();
-  } catch (err) { toast(err.message, true); if (btn) btn.disabled = false; }
+    if (project !== state.project) await switchProject(project);
+    const res = await api("/api/overview/key-art?start=false", { method: "POST" });
+    go({ type: "doc", path: res.asset });
+    await openPreview("candidates");
+  } catch (err) { toast(err.message, true); } finally { if (btn) btn.disabled = false; }
 }
 
 async function installSample(btn) {

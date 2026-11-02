@@ -294,6 +294,7 @@ def connect_game(folder: str, targets: list[str] | None = None, root: Path | Non
 
     Does what choosing the game in Glob's New project screen does, for a coding agent that set Glob up from a terminal."""
     from forge.agent.action_layer import ForgeActionLayer
+    from forge.game_import import _engine
     from forge.storage.project_store import home_owner, make_home, sanitize_project_name
 
     game = Path(folder).expanduser()
@@ -304,10 +305,15 @@ def connect_game(folder: str, targets: list[str] | None = None, root: Path | Non
     name = home_owner(game, base)
     created = name is None
     if created:
-        name = stem = sanitize_project_name(game.name) or "my_game"
+        # Named like the game itself (project.godot's name, Unity's productName), not like its folder.
+        title = _engine(game)[2].strip() or game.name
+        name = stem = sanitize_project_name(title) or "my_game"
         index = 2
         while (base / name).exists():
             name, index = f"{stem}-{index}", index + 1
         make_home(name, game, base)
-        ForgeActionLayer(root_dir=base).get_store(name)
+        store = ForgeActionLayer(root_dir=base).get_store(name)
+        bible = store.get_bible()
+        if title != name and not bible.display_name:
+            store.save_bible(bible.model_copy(update={"display_name": title}))
     return connect(name, str(game), targets, root) | {"project": name, "created": created}

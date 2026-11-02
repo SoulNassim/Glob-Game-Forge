@@ -102,7 +102,9 @@ def read_markdown_meta(path: Path) -> dict[str, str]:
             excerpt = re.sub(r"[*_`]", "", stripped)
         if title and excerpt:
             break
-    return {"title": title or humanize(path.name), "excerpt": excerpt[:220]}
+    # The whole first paragraph is the pitch (the key art is painted from it); the excerpt is its card-sized start.
+    short = excerpt if len(excerpt) <= 220 else excerpt[:220].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return {"title": title or humanize(path.name), "excerpt": short, "pitch": excerpt}
 
 
 def _kind(path: Path) -> str:
@@ -276,6 +278,7 @@ def describe_folder(ws_dir: Path, rel: str = "") -> dict[str, Any]:
         "path": "" if directory == root else to_rel(directory),
         "title": page_meta["title"],
         "excerpt": page_meta["excerpt"],
+        "pitch": page_meta.get("pitch", ""),
         "page": to_rel(page) if page else None,
         "cover": to_rel(cover) if cover else None,
         "folders": folders,

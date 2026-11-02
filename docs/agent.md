@@ -51,6 +51,8 @@ Tell the user, in about these words:
 
 Stop here and wait. Setup happens in the browser, not in this chat.
 
+If the user asks you to build Glob's workspace for the game before you have Glob's tools, ask them to restart you first. Don't write into `glob/` by hand: the tools carry Glob's rules for how the workspace is laid out.
+
 ## 5. After the restart
 
 You now have Glob's tools, and the note in `AGENTS.md` / `CLAUDE.md` explains the loop:
@@ -59,5 +61,6 @@ You now have Glob's tools, and the note in `AGENTS.md` / `CLAUDE.md` explains th
 - `place_order` orders an asset instead of a placeholder: what it is, its kind and the placeholder path it replaces.
 - `list_orders` shows every order's status.
 - Finished assets land in `glob_delivery/<order_id>/`, listed in `glob_delivery/manifest.json`. Swap your placeholder, then call `update_order` with `status: integrated`.
+- To build or reorganize the workspace itself ("build the Glob workspace for this game"), load the `glob` prompt, call `workspace_overview`, then write it with `workspace_write`: a front page, one folder per part of the game, `pillars/style-bible.md`, and one asset page per character, creature, item, place and sound. Don't generate images unless the user asks: generation spends their credits.
 
 To open Glob yourself, run `glob open` in the game folder.

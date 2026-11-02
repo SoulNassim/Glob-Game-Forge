@@ -1584,7 +1584,8 @@ async def test_project_scaffold_bible_and_queue_options_are_independent(tmp_path
         assert len(queue_data["requirements"]) >= 4
         assert len(queue_workspace.parse_requirements()) >= 4
         assert not (actions.get_store(queue_data["project"]).project_dir / "game_profile.json").exists()
-        queue_style_rules = json.loads((queue_workspace.ws_dir / "STYLE_RULES.json").read_text(encoding="utf-8"))
+        rules_file = queue_workspace.ws_dir / "STYLE_RULES.json"
+        queue_style_rules = json.loads(rules_file.read_text(encoding="utf-8")) if rules_file.exists() else {}
         assert "art_style" not in queue_style_rules
 
         bible_only = await client.post("/api/projects/scaffold", json={
