@@ -15,6 +15,7 @@ dependencies = [
     "pillow>=10.4.0",
     "python-multipart>=0.0.12",
     "anthropic>=2.0",
+    "pystray>=0.19.5; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -22,15 +23,14 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
 ]
-desktop = [
-    "pywebview>=5.0",
-]
 
 [project.scripts]
 forge = "forge.cli:main"
 forge-mcp = "forge.mcp.server:main"
 glob = "forge.cli:main"
-glob-desktop = "forge.desktop:main"
+
+[project.gui-scripts]
+glob-app = "forge.desktop:main"
 
 [build-system]
 requires = ["hatchling"]

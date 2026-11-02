@@ -132,7 +132,7 @@ cd Glob-Game-Forge
 uv run forge
 ```
 
-The desktop app (`glob-desktop`, or the installers on the [releases page](https://github.com/SoulNassim/Glob-Game-Forge/releases)) still works, but you don't need it: Glob is made for the browser.
+Glob opens in its own app window (`glob-app`, the Glob shortcut, or the installers on the [releases page](https://github.com/SoulNassim/Glob-Game-Forge/releases)). It keeps running in the background after you close the window; its tray icon opens or quits it.
 
 </details>
 
@@ -294,8 +294,8 @@ Found a problem? Please open a private [security advisory](https://github.com/So
 uv run --extra dev pytest -v                 # tests
 uv run forge --port 8421 --no-browser        # another port, no browser tab
 uv run forge --mcp --project <name>          # MCP server over stdio
-uv run --extra desktop forge --desktop       # native window
-uv run --extra desktop --with pyinstaller python scripts/build_desktop.py   # standalone app
+uv run forge --desktop                       # Glob's app window
+uv run --with pyinstaller python scripts/build_desktop.py   # standalone app
 ```
 
 | Path | What's there |

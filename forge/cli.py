@@ -13,7 +13,6 @@ import argparse
 import os
 import sys
 from pathlib import Path
-import webbrowser
 import threading
 import time
 import uvicorn
@@ -40,7 +39,7 @@ def main() -> None:
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open browser on start")
     parser.add_argument("--mcp", action="store_true", help="Run as stdio MCP server instead of HTTP server")
     parser.add_argument("--project", default=None, help="With --mcp: the Glob project this agent works on")
-    parser.add_argument("--desktop", action="store_true", help="Open Glob in a native window (needs the 'desktop' extra)")
+    parser.add_argument("--desktop", action="store_true", help="Open Glob in its app window, starting it in the background if needed")
     args = parser.parse_args()
     # A redirected Windows console is cp1252: the banner's arrows must not crash the start.
     for stream in (sys.stdout, sys.stderr):
@@ -74,16 +73,17 @@ def main() -> None:
     if not args.no_browser:
         def _open() -> None:
             time.sleep(1.1)
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass
+            from forge.appwindow import open_window
+            open_window(url)
         threading.Thread(target=_open, daemon=True).start()
 
     if not is_loopback(host):
         print("  !! WARNING: Glob has no login. Binding to a non-local address lets anyone on your network\n"
               "     use your API keys and write project files.\n")
     os.environ["FORGE_BIND_HOST"] = host
+    if os.environ.get("FORGE_BACKGROUND") == "1":
+        from forge import tray
+        tray.start(f"http://127.0.0.1:{port}")  # no window or terminal: the tray icon opens and quits Glob
     uvicorn.run("forge.server.app:app", host=host, port=port, log_level="info")
 
 

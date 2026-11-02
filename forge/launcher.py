@@ -1,9 +1,9 @@
 """Start Glob for a coding agent: the agent says "open Glob" and the studio opens on its project.
 
 The MCP server a coding agent runs (`forge --mcp`) uses this when Glob isn't running yet. It starts the local
-studio in the background on the same projects folder, waits until it answers, and opens the browser on the
-agent's project. The server keeps running after the agent stops, like `glob` started by hand. The desktop app
-is optional: a home for all your projects in its own window.
+studio in the background on the same projects folder, waits until it answers, and opens Glob's app window on
+the agent's project. The server keeps running after the agent stops (its tray icon quits it). The Glob shortcut
+and the installed app use the same path.
 
 `FORGE_NO_AUTOSTART=1` turns the automatic start off; `open_glob` still works when asked for.
 """
@@ -16,10 +16,10 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-import webbrowser
 from pathlib import Path
 from typing import Any
 
+from forge.appwindow import open_window
 from forge.config import get_config_dir, get_projects_root, load_config
 
 START_TIMEOUT = 30.0
@@ -59,11 +59,6 @@ def project_url(project: str, base: str | None = None) -> str:
     return f"{base or app_url()}/?{urllib.parse.urlencode({'project': project})}" if project else f"{base or app_url()}/"
 
 
-def opens_window() -> bool:
-    """The installed app (a frozen build) starts as the desktop window; a source or terminal install as a server."""
-    return bool(getattr(sys, "frozen", False))
-
-
 def _spawn(port: int, project: str) -> None:
     log_dir = get_config_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -75,7 +70,9 @@ def _spawn(port: int, project: str) -> None:
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
     else:
         kwargs["start_new_session"] = True
-    command = [sys.executable] if opens_window() else [sys.executable, "-m", "forge.cli", "--no-browser", "--port", str(port)]
+    # The installed app (a frozen build) is its own CLI: any argument makes it run the server, not the launcher.
+    server = ["--no-browser", "--port", str(port)]
+    command = [sys.executable, *server] if getattr(sys, "frozen", False) else [sys.executable, "-m", "forge.cli", *server]
     subprocess.Popen(command, **kwargs)
 
 
@@ -101,10 +98,5 @@ def open_glob(project: str, *, browser: bool = True, start: bool = True) -> dict
     """Make sure the studio runs and show it on `project`."""
     started = ensure_running(project) if start else False
     url = project_url(project)
-    opened = started and opens_window()  # the desktop window opened on the project by itself
-    if browser and not opened:
-        try:
-            opened = webbrowser.open(url)
-        except Exception:  # noqa: BLE001 — no browser (CI, SSH): the URL is still returned
-            opened = False
+    opened = open_window(url) if browser else False
     return {"url": url, "started": started, "opened": opened, "project": project}

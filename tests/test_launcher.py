@@ -30,7 +30,7 @@ def test_open_glob_uses_a_running_studio(projects: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(launcher, "_health", lambda base: {"projects_dir": str(projects)})
     monkeypatch.setattr(launcher, "_spawn", lambda *a: pytest.fail("must not start a second Glob"))
     opened: list[str] = []
-    monkeypatch.setattr(launcher.webbrowser, "open", lambda url: opened.append(url) or True)
+    monkeypatch.setattr(launcher, "open_window", lambda url: opened.append(url) or True)
     result = launcher.open_glob("demo")
     assert result == {"url": "http://127.0.0.1:9/?project=demo", "started": False, "opened": True, "project": "demo"}
     assert opened == ["http://127.0.0.1:9/?project=demo"]
@@ -42,7 +42,7 @@ def test_open_glob_starts_the_studio_when_it_is_closed(projects: Path, monkeypat
     spawned: list[tuple[int, str]] = []
     monkeypatch.setattr(launcher, "_spawn", lambda port, project: spawned.append((port, project)))
     monkeypatch.setattr(launcher.time, "sleep", lambda s: None)
-    monkeypatch.setattr(launcher.webbrowser, "open", lambda url: True)
+    monkeypatch.setattr(launcher, "open_window", lambda url: True)
     assert launcher.open_glob("demo")["started"] is True
     assert spawned == [(9, "demo")]
 

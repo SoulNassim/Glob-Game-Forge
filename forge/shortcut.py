@@ -1,6 +1,7 @@
 """A "Glob" shortcut on the desktop and in the Start menu / app list, so the user can open Glob without an agent.
 
-The shortcut runs `glob open`: it starts Glob in the background when it isn't running and opens it in the browser.
+The shortcut runs `glob-app` (or `glob open`): it starts Glob in the background when it isn't running and opens
+its app window.
 `glob shortcut` (and the installers, and the first `glob connect`) make it.
 """
 
@@ -23,6 +24,15 @@ def glob_command() -> Path | None:
             return scripts / name
     found = shutil.which("glob")
     return Path(found) if found else None
+
+
+def app_command() -> Path | None:
+    """`glob-app`, which opens Glob's window without a console (Windows), next to `glob`."""
+    exe = glob_command()
+    if exe is None or sys.platform != "win32":
+        return None
+    app = exe.with_name("glob-app.exe")
+    return app if app.is_file() else None
 
 
 def _desktop() -> Path:
@@ -60,14 +70,16 @@ def create() -> list[Path]:
     exe = glob_command()
     if exe is None:
         raise RuntimeError("Couldn't find the installed `glob` command.")
+    app = app_command()
     made: list[Path] = []
     for path in locations():
         path.parent.mkdir(parents=True, exist_ok=True)
         if sys.platform == "win32":
-            # WindowStyle 7: the console `glob open` needs for a second starts minimised instead of flashing.
+            # glob-app has no console; the `glob open` fallback's console starts minimised (WindowStyle 7).
+            target, arguments = (app, "") if app else (exe, "open")
             script = (
                 f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut({_ps_quote(str(path))}); "
-                f"$s.TargetPath = {_ps_quote(str(exe))}; $s.Arguments = 'open'; "
+                f"$s.TargetPath = {_ps_quote(str(target))}; $s.Arguments = {_ps_quote(arguments)}; "
                 f"$s.WorkingDirectory = {_ps_quote(str(Path.home()))}; $s.WindowStyle = 7; "
                 f"$s.IconLocation = {_ps_quote(str(ICON_DIR / 'glob.ico'))}; "
                 "$s.Description = 'Open Glob, the asset studio for your game'; $s.Save()"

@@ -1,6 +1,6 @@
 """Build Glob as a standalone desktop app (no Python needed on the target machine).
 
-    uv run --extra desktop --with pyinstaller python scripts/build_desktop.py
+    uv run --with pyinstaller python scripts/build_desktop.py
 
 Output: dist/Glob/ (Windows: Glob.exe) or dist/Glob.app (macOS). Projects and settings live in the
 user's home folder (~/Glob/projects and ~/.forge), never inside the app bundle.
@@ -28,7 +28,7 @@ def main() -> None:
         "from pathlib import Path\n"
         "os.environ.setdefault('FORGE_PROJECTS_DIR', str(Path.home() / 'Glob' / 'projects'))\n"
         "import sys\n"
-        "if '--mcp' in sys.argv:\n"
+        "if len(sys.argv) > 1:  # --mcp, or the background server (--no-browser --port N)\n"
         "    from forge.cli import main\n"
         "else:\n"
         "    from forge.desktop import main\n"

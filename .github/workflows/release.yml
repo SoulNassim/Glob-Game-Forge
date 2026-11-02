@@ -43,7 +43,7 @@ jobs:
         run: sed -i.bak -E "s/^__version__ = .*/__version__ = \"${{ steps.v.outputs.version }}\"/" forge/__init__.py && rm forge/__init__.py.bak
 
       - name: Build app with PyInstaller
-        run: uv run --extra desktop --with pyinstaller python scripts/build_desktop.py
+        run: uv run --with pyinstaller python scripts/build_desktop.py
 
       - name: Windows installer (Inno Setup)
         if: runner.os == 'Windows'

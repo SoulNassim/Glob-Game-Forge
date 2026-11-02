@@ -916,7 +916,7 @@ async function renderSettings() {
   const st = state.settings;
   await loadModels();
   const info = state.modelInfo || { presets: {}, endpoints: [] };
-  const nav = [["connect", "Coding agent"], ["images", "Generators"], ["agent", "Glob chat"], ["models", "Chat models"], ["storage", "Storage & access"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
+  const nav = [["connect", "Coding agent"], ["images", "Generators"], ["agent", "Glob chat"], ["models", "Chat models"], ["storage", "Storage & access"], ["about", "About"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
   let body = "";
   if (st.tab === "models") {
     const ready = state.models.filter((m) => m.ready);
@@ -966,6 +966,8 @@ async function renderSettings() {
     body = await connectSettings();
   } else if (st.tab === "storage") {
     body = await storageSettings();
+  } else if (st.tab === "about") {
+    body = await aboutSettings();
   } else {
     const cfg = await api("/api/config");
     const studio = await studioOptions();
@@ -3886,6 +3888,26 @@ async function storageSettings() {
     <p class="st-note">Settings and API keys are stored in <code>${esc(info.config_dir)}</code>.</p>`;
 }
 
+async function aboutSettings() {
+  const a = await api("/api/about");
+  const shortcut = a.shortcuts.length
+    ? `<p class="st-note">Open Glob any time with the <strong>Glob</strong> shortcut: ${a.shortcuts.map((p) => `<code>${esc(p)}</code>`).join(" and ")}. ${a.background ? "Closing the window leaves Glob running: its icon in the taskbar tray opens or quits it." : ""}</p>`
+    : `<p class="st-note">There's no Glob shortcut yet. Add one to open Glob without a terminal or an agent.</p>`;
+  return `
+    <h1>About Glob</h1><p class="st-lede">Glob ${esc(a.version)}, your game's asset studio. It runs on this computer at <code>${esc(location.origin)}</code>.</p>
+    <div class="st-label">Open Glob</div>
+    ${shortcut}
+    <div class="row"><button class="ghost" data-st-shortcut>${a.shortcuts.length ? "Make the shortcut again" : "Add a Glob shortcut"}</button></div>
+    <div class="st-label">Where Glob is installed · ${esc(INSTALL_KIND[a.install_kind] || a.install_kind)}</div>
+    <div class="path-row"><code>${esc(a.install_dir)}</code><button class="mini" data-st-open="install">Open</button></div>
+    <div class="st-label">Your projects</div>
+    <div class="path-row"><code>${esc(a.projects_dir)}</code><button class="mini" data-st-open="projects">Open</button></div>
+    <div class="st-label">Settings and keys</div>
+    <div class="path-row"><code>${esc(a.config_dir)}</code><button class="mini" data-st-open="config">Open</button></div>
+    <p class="st-note">If something goes wrong, the log is <code>${esc(a.log)}</code>.</p>
+    ${updateSettings()}`;
+}
+
 // ----- first-run setup -----
 
 const SETUP_STEPS = 4;
@@ -4094,7 +4116,7 @@ document.addEventListener("click", async (event) => {
   if (d.stExport) { event.stopPropagation(); return exportProject(d.stExport); }
   if (d.stImportZip !== undefined) return pickArchive();
   if (d.stShortcut !== undefined) {
-    try { const { shortcuts } = await api("/api/shortcut", { method: "POST" }); toast(`Glob shortcut added: ${shortcuts.join(", ")}`); } catch (err) { toast(err.message, true); }
+    try { const { shortcuts } = await api("/api/shortcut", { method: "POST" }); toast(`Glob shortcut added: ${shortcuts.join(", ")}`); if (state.settings?.tab === "about") renderSettings(); } catch (err) { toast(err.message, true); }
     return;
   }
   if (d.stQuit !== undefined) {

@@ -1484,6 +1484,32 @@ async def api_storage(project: str = "default") -> dict[str, Any]:
     }
 
 
+def _install_dir() -> Path:
+    """Where Glob itself is installed: the app folder (installed app) or the Python environment it runs in."""
+    import sys as _sys
+
+    return Path(_sys.executable).resolve().parent if getattr(_sys, "frozen", False) else Path(_sys.prefix).resolve()
+
+
+@app.get("/api/about")
+async def api_about() -> dict[str, Any]:
+    """Settings → About: what Glob is, where it lives, and how to open it again."""
+    from forge import __version__, shortcut, updater
+
+    kind = updater.install_kind()
+    places = await asyncio.to_thread(lambda: [str(p) for p in shortcut.locations() if p.exists()])
+    return {
+        "version": __version__,
+        "install_kind": kind,
+        "install_dir": str(_install_dir()),
+        "shortcuts": places,
+        "projects_dir": str((actions.root_dir or get_projects_root()).resolve()),
+        "config_dir": str(get_config_dir().resolve()),
+        "log": str(get_config_dir().resolve() / "logs" / "glob-server.log"),
+        "background": _background(),
+    }
+
+
 @app.post("/api/shortcut")
 async def api_shortcut() -> dict[str, Any]:
     """Put a Glob shortcut on the desktop and in the Start menu / app list (see forge/shortcut.py)."""
@@ -1502,6 +1528,10 @@ async def api_storage_open(payload: dict[str, Any], project: str = "default") ->
     sub = str(payload.get("path") or "")
     if target == "projects":
         path = (actions.root_dir or get_projects_root()).resolve()
+    elif target == "install":
+        path = _install_dir()
+    elif target == "config":
+        path = get_config_dir().resolve()
     elif target == "grant":
         path = access.check(sub) if sub else None
     else:
