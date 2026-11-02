@@ -12,6 +12,7 @@ import json
 from html import escape as html_escape
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -2034,6 +2035,17 @@ async def api_studio_preview(payload: dict[str, Any], project: str = "default") 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _is_offline_error(exc: BaseException) -> bool:
+    """True for a failed DNS lookup or refused connection anywhere in the exception chain."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (socket.gaierror, ConnectionRefusedError)) or type(exc).__name__ == "ConnectError"                 or "getaddrinfo failed" in str(exc) or "Name or service not known" in str(exc):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 async def _run_studio_job(project: str, job: dict[str, Any], request: dict[str, Any]) -> None:
     try:
         job["outputs"] = await asset_studio.run_action(actions, project, request)
@@ -2047,6 +2059,9 @@ async def _run_studio_job(project: str, job: dict[str, Any], request: dict[str, 
         reason = str(exc).strip() or type(exc).__name__
         if "Timeout" in type(exc).__name__:
             reason = "The request took too long (timed out). Large models upload slowly; try a remeshed, smaller model."
+        elif _is_offline_error(exc):
+            reason = ("Could not reach the image service: this computer is offline or could not look up its address "
+                      "(Wi-Fi, VPN or DNS). Check the connection and press Try again.")
         job["status"], job["error"] = "failed", reason[:400]
         _note_credits(request, "", reason, 0)
     job["finished_at"] = time.time()

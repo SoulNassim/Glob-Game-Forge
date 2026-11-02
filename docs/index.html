@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Glob — the game-asset forge</title>
-<meta name="description" content="Glob is a free, open-source game-asset forge for Windows and macOS. Describe your game; Glob turns prompts into consistent 2D art, 3D models and sounds on your own machine. Plug in Claude Code, Codex or any MCP agent.">
+<meta name="description" content="Paste one sentence into your coding agent and it sets up Glob for you. Glob is a free, open-source game-asset forge for Windows and macOS. Describe your game; Glob turns prompts into consistent 2D art, 3D models and sounds on your own machine. Plug in Claude Code, Codex or any MCP agent.">
 <meta property="og:title" content="Glob — the game-asset forge">
 <meta property="og:description" content="Describe your game. Glob builds the project and forges consistent 2D art, 3D models and sounds — locally.">
 <meta property="og:image" content="landing/key-art.webp">
@@ -83,6 +83,20 @@ h1 .y{color:var(--yel)}
 /* strips */
 section{padding:96px 0}
 #flow{padding-top:48px}
+.ask{border:1px solid rgba(255,122,156,.55);border-radius:20px;background:#0e080e;padding:16px 18px 14px;max-width:580px;box-shadow:0 24px 60px -34px rgba(255,122,156,.9)}
+.ask .lab{font:600 12px "JetBrains Mono";letter-spacing:.12em;color:var(--pink);text-transform:uppercase}
+.ask p{margin:8px 0 14px;font:600 16px/1.5 "JetBrains Mono";color:var(--ink);overflow-wrap:anywhere}
+.ask .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.ask small{color:var(--dim);font-size:13px}
+.ask .btn{padding:10px 18px}
+.first{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:40px;counter-reset:f}
+.first>div{min-width:0;border:1px solid var(--line);background:var(--card);border-radius:var(--r);padding:20px}
+.first>div::before{counter-increment:f;content:"0" counter(f);font:700 13px "JetBrains Mono";color:var(--lime)}
+.first h3{margin:6px 0 6px;font-size:19px}
+.first p{margin:0;color:var(--mute);font-size:15px}
+.then{margin:34px 0 0;font:600 13px "JetBrains Mono";letter-spacing:.12em;color:var(--pink);text-transform:uppercase}
+.bigshot{margin-top:36px;border-radius:var(--r);overflow:hidden;border:1px solid var(--line2);box-shadow:0 40px 100px -40px rgba(255,122,156,.45)}
+.bigshot img{width:100%}
 .flowimg{width:100%;height:auto;margin-top:36px;border-radius:24px;box-shadow:0 30px 80px rgba(255,122,156,.08)}
 .kicker{font:600 13px "JetBrains Mono";letter-spacing:.14em;color:var(--pink);text-transform:uppercase}
 h2{font-weight:900;font-size:clamp(34px,4.4vw,56px);line-height:1.02;letter-spacing:-.03em;margin:14px 0 18px}
@@ -180,15 +194,6 @@ ul.ticks b{color:var(--ink)}
 .install .cmd code{background:none;border:0;padding:0;font-size:14px;overflow-wrap:normal}
 .works{margin-top:16px;font-size:14px;color:var(--dim)}
 .works b{color:var(--mute);font-weight:600}
-.dl{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px}
-.dlbtn{display:flex;align-items:center;gap:16px;padding:18px 20px;border-radius:20px;text-decoration:none;border:1px solid var(--line2);background:#0e080e;transition:transform .16s,box-shadow .16s}
-.dlbtn:hover{transform:translateY(-2px)}
-.dlbtn svg{width:38px;height:38px;flex:none;color:var(--pink)}
-.dlbtn small{display:block;font-size:12.5px;color:var(--mute);line-height:1.3}
-.dlbtn b{display:block;font:800 23px/1.2 Inter;letter-spacing:-.01em}
-.dlbtn.you{background:var(--pink);color:#2a0612;border-color:transparent;box-shadow:0 10px 30px -10px rgba(255,122,156,.8),inset 0 -3px 0 rgba(0,0,0,.18)}
-.dlbtn.you svg{color:#2a0612}
-.dlbtn.you small{color:rgba(42,6,18,.72)}
 .note{font-size:13.5px;color:var(--dim);margin:14px 0 0}
 .note a{color:var(--mute)}
 .alt{margin-top:24px;padding-top:22px;border-top:1px solid var(--line)}
@@ -206,7 +211,7 @@ footer .wrap > :last-child{margin-left:auto}
 @media (prefers-reduced-motion:reduce){.rv{opacity:1;transform:none;transition:none}.ember{display:none}html{scroll-behavior:auto}}
 
 @media (max-width:980px){
-  .hero .wrap,.show,.agent,.install{grid-template-columns:1fr}
+  .hero .wrap,.show,.agent,.install,.first{grid-template-columns:1fr}
   .steps{grid-template-columns:1fr 1fr}
   .grid,.pains{grid-template-columns:1fr 1fr}
   .shots{grid-template-columns:1fr}
@@ -221,7 +226,6 @@ footer .wrap > :last-child{margin-left:auto}
   .steps,.grid,.pains{grid-template-columns:1fr}
   section{padding:72px 0}
   .install{padding:28px 20px}
-  .dl{grid-template-columns:1fr}
   .hero{padding-top:44px}
   .lede{font-size:18px}
 }
@@ -234,7 +238,7 @@ footer .wrap > :last-child{margin-left:auto}
   <div class="wrap">
     <a class="brand" href="#top"><img class="pixel" src="landing/glob-face.svg" alt=""><b>GLOB</b></a>
     <div class="links">
-      <a href="#problem">Why</a><a href="#how">How it works</a><a href="#demo">Live demo</a><a href="#features">Features</a><a href="#agents">For agents</a><a href="#install">Download</a>
+      <a href="#problem">Why</a><a href="#how">How it works</a><a href="#demo">Live demo</a><a href="#features">Features</a><a href="#agents">For agents</a><a href="#install">Get started</a>
     </div>
     <a class="btn ghost sm" href="https://github.com/SoulNassim/Glob-Game-Forge">★ GitHub</a>
   </div>
@@ -246,12 +250,12 @@ footer .wrap > :last-child{margin-left:auto}
       <span class="eyebrow"><i></i>Open source · free forever · runs on your machine</span>
       <h1>Tell your agent<br><em>“open Glob”</em><span class="y">.</span></h1>
       <p class="lede">Glob is a tiny slime blacksmith with a very big hammer. It opens right on the game your coding agent is building, takes its orders, and forges <b>consistent</b> 2D art, real 3D models and sounds straight into your game folder.</p>
-      <div class="cta">
-        <a class="btn pri" href="#install" id="hero-dl">Download free</a>
-        <a class="btn ghost" href="demo/">▶ Try the live demo</a>
+      <div class="ask">
+        <div class="lab">New here? Paste this into your coding agent</div>
+        <p id="ask">Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md</p>
+        <div class="row"><button class="btn pri" type="button" data-copy="ask">Copy</button><a class="btn ghost" href="demo/">▶ Try the live demo</a></div>
       </div>
-      <div class="cmd"><span>$</span><code id="cmd">curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh</code><button type="button" data-copy="cmd">Copy</button></div>
-      <div class="works">Plug &amp; play with <b>Claude Code</b> · <b>Codex</b> · <b>Gemini CLI</b> · <b>OpenCode</b> · any MCP agent</div>
+      <div class="works">Your agent installs Glob, connects your game and opens it in your browser. Works with <b>Claude Code</b> · <b>Codex</b> · <b>Gemini CLI</b> · <b>OpenCode</b> · <b>Cursor</b> · any MCP agent.</div>
     </div>
     <div class="phone rv">
       <video id="promo" src="landing/glob-promo.mp4" poster="landing/promo-poster.jpg" autoplay muted loop playsinline preload="metadata"></video>
@@ -266,9 +270,18 @@ footer .wrap > :last-child{margin-left:auto}
     <div class="rv">
       <div class="kicker">In one picture</div>
       <h2>One sentence to your agent.<br>Art in your <em>game folder</em>.</h2>
-      <p class="sub">Connect your game once. After that, your agent starts Glob on this computer and opens it on the project it’s working on. The desktop app is optional: one window for all your projects.</p>
+      <p class="sub">No download, no installer, no config files. Glob runs on your computer at <span class="mono">127.0.0.1:8420</span>, in your browser, and your coding agent drives it.</p>
     </div>
+    <div class="then rv">The first time · about two minutes</div>
+    <div class="first">
+      <div class="rv"><h3>Paste the sentence</h3><p>Your agent reads Glob's setup page, installs Glob and runs <span class="mono">glob connect</span> in your game folder.</p></div>
+      <div class="rv"><h3>Finish setup in the browser</h3><p>Glob opens on your game. Pick a model and paste your image and 3D keys there: they stay on your computer, never in the agent's chat.</p></div>
+      <div class="rv"><h3>Restart your agent</h3><p>It now has Glob's tools and a note in <span class="mono">AGENTS.md</span>. Ask it for art, or just say “open Glob”.</p></div>
+    </div>
+    <div class="then rv">Every time after that</div>
     <img class="flowimg rv" src="diagrams/how-it-works.svg" alt="1. Tell your agent: open glob. 2. Glob opens on your project, with every order on one board. 3. Finished assets land in your game's glob_delivery folder and the agent swaps its placeholder. You choose Manual, 2D auto or Full auto." loading="lazy">
+    <div class="bigshot rv"><img src="screenshots/workspace.webp" alt="Glob open in the browser: chat with Glob on the left, the game's art laid out on the right" loading="lazy"></div>
+    <div class="cap rv">This is Glob, open in your browser on your game: every order, prompt, image and model in one place.</div>
   </div>
 </section>
 
@@ -402,7 +415,7 @@ footer .wrap > :last-child{margin-left:auto}
       <div class="rv">
         <div class="kicker">For your coding agent</div>
         <h2>Say “open Glob”.<br>No more <em>placeholder</em> cubes.</h2>
-        <p class="sub">Plug in the agent you already use: Claude Code, Codex, Gemini CLI, OpenCode or any MCP client. Tell it to open Glob and the studio pops up in your browser, right on the project it’s working on. Nothing else to run.</p>
+        <p class="sub">Plug in the agent you already use: Claude Code, Codex, Gemini CLI, OpenCode, Cursor or any MCP client. One <span class="mono">glob connect</span> in your game folder sets it up. Then tell it to open Glob and the studio pops up in your browser, right on your game.</p>
         <ul class="ticks">
           <li><span><b>Your agent starts Glob</b> on localhost when you ask, or the moment it orders its first asset.</span></li>
           <li><span><b>Orders, not prompts</b>: the agent writes a brief and keeps its placeholder until the asset is ready.</span></li>
@@ -434,24 +447,25 @@ footer .wrap > :last-child{margin-left:auto}
   <div class="wrap">
     <div class="install rv">
       <div>
-        <div class="kicker">Download</div>
+        <div class="kicker">Get started</div>
         <h2>Free. Open source.<br>Forging in <em>a minute</em>.</h2>
         <p class="sub">Glob costs nothing and the code is MIT-licensed. You only bring API keys for the image and 3D providers you use (Gemini, Meshy, ElevenLabs) and pay them directly. No keys yet? Demo Mode is free.</p>
-        <div class="dl">
-          <a class="dlbtn" data-os="win" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 4.5 10.5 3.4v7.9H3zM11.7 3.2 21 2v9.3h-9.3zM3 12.6h7.5v7.9L3 19.4zM11.7 12.6H21V22l-9.3-1.3z"/></svg><span><small>Download for</small><b>Windows</b><small>10 / 11 · 64-bit installer</small></span></a>
-          <a class="dlbtn" data-os="mac" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5V16H4zm2 .5v8h12V6zM1.5 17.5h21l-1 2.1a1 1 0 0 1-.9.6H3.4a1 1 0 0 1-.9-.6z"/></svg><span><small>Download for</small><b>macOS</b><small>Apple silicon · .dmg</small></span></a>
+        <div class="ask" style="margin-top:28px">
+          <div class="lab">The easy way: paste this into your coding agent</div>
+          <p id="ask2">Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md</p>
+          <div class="row"><button class="btn pri" type="button" data-copy="ask2">Copy</button><small>Run it from your game's folder.</small></div>
         </div>
-        <p class="note">The apps aren’t code-signed yet. On first launch, Windows may show SmartScreen (<i>More info → Run anyway</i>) and macOS wants <i>right-click → Open</i>.</p>
         <div class="alt">
+          <div class="kicker" style="margin-bottom:10px">Or do it yourself</div>
           <div class="ostabs" role="tablist">
-            <button type="button" role="tab" data-tab="t-win" aria-selected="false">Windows terminal</button>
-            <button type="button" role="tab" data-tab="t-mac" aria-selected="true">macOS / Linux terminal</button>
+            <button type="button" role="tab" data-tab="t-win" aria-selected="false">Windows</button>
+            <button type="button" role="tab" data-tab="t-mac" aria-selected="true">macOS / Linux</button>
             <button type="button" role="tab" data-tab="t-src" aria-selected="false">From source</button>
           </div>
           <div class="cmd" id="t-win" hidden><span>&gt;</span><code id="c-win">irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.ps1 | iex</code><button type="button" data-copy="c-win">Copy</button></div>
           <div class="cmd" id="t-mac"><span>$</span><code id="c-mac">curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh</code><button type="button" data-copy="c-mac">Copy</button></div>
           <div class="cmd" id="t-src" hidden><span>$</span><code id="c-src">git clone https://github.com/SoulNassim/Glob-Game-Forge &amp;&amp; cd Glob-Game-Forge &amp;&amp; uv run forge</code><button type="button" data-copy="c-src">Copy</button></div>
-          <p class="note">The one-liners install <a href="https://docs.astral.sh/uv/">uv</a> if needed, then Glob. Connect your game once (run <code>glob</code>, then Settings → Coding agent); after that your agent opens Glob for you. The desktop app is optional: one window for all your projects.</p>
+          <p class="note">The one-liners install <a href="https://docs.astral.sh/uv/">uv</a> if needed, then Glob. Then, in a new terminal in your game folder, run <code>glob connect</code>: it connects your coding agents and opens Glob in your browser.</p>
         </div>
       </div>
       <img class="forge pixel" src="landing/glob-forge.svg" alt="Glob hammering on an anvil">
@@ -474,24 +488,12 @@ document.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click"
   try { await navigator.clipboard.writeText(text); b.textContent = "Copied"; } catch { b.textContent = "Select it"; }
   setTimeout(() => b.textContent = "Copy", 1600);
 }));
-// download: highlight the visitor's OS and show its one-line install
+// install: show the visitor's OS first
 const ua = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent;
-const isWin = /Win/i.test(ua), isMac = /Mac/i.test(ua);
-const mine = isWin ? "win" : isMac ? "mac" : null;
-document.querySelectorAll(".dlbtn").forEach(a => a.classList.toggle("you", a.dataset.os === mine));
 const tabs = document.querySelectorAll(".ostabs button");
 const pick = id => tabs.forEach(t => { const on = t.dataset.tab === id; t.setAttribute("aria-selected", on); document.getElementById(t.dataset.tab).hidden = !on; });
 tabs.forEach(t => t.addEventListener("click", () => pick(t.dataset.tab)));
-if (isWin) {
-  pick("t-win");
-  document.getElementById("cmd").textContent = document.getElementById("c-win").textContent;
-  document.querySelector(".hero .cmd span").textContent = ">";
-}
-if (mine) {
-  const btn = document.getElementById("hero-dl");
-  btn.href = document.querySelector(`.dlbtn[data-os="${mine}"]`).href;
-  btn.textContent = `Download for ${isWin ? "Windows" : "macOS"}`;
-}
+if (/Win/i.test(ua)) pick("t-win");
 // sound toggle
 const v = document.getElementById("promo"), s = document.getElementById("sound");
 s.addEventListener("click", () => { v.muted = !v.muted; if (!v.muted) { v.currentTime = 0; v.play(); } s.textContent = v.muted ? "🔊 Sound on" : "🔇 Mute"; });

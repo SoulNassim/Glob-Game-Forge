@@ -287,3 +287,27 @@ def status(project: str, root: Path | None = None) -> dict[str, Any]:
         "delivery_folder": str(game / DELIVERY_DIR),
         "targets": targets,
     }
+
+
+def connect_game(folder: str, targets: list[str] | None = None, root: Path | None = None) -> dict[str, Any]:
+    """`glob connect`: the Glob project for this game folder (made the first time, in `<game>/glob/`), connected.
+
+    Does what choosing the game in Glob's New project screen does, for a coding agent that set Glob up from a terminal."""
+    from forge.agent.action_layer import ForgeActionLayer
+    from forge.storage.project_store import home_owner, make_home, sanitize_project_name
+
+    game = Path(folder).expanduser()
+    if not game.is_dir():
+        raise ValueError(f"'{folder}' is not a folder.")
+    game = game.resolve()
+    base = root or get_projects_root()
+    name = home_owner(game, base)
+    created = name is None
+    if created:
+        name = stem = sanitize_project_name(game.name) or "my_game"
+        index = 2
+        while (base / name).exists():
+            name, index = f"{stem}-{index}", index + 1
+        make_home(name, game, base)
+        ForgeActionLayer(root_dir=base).get_store(name)
+    return connect(name, str(game), targets, root) | {"project": name, "created": created}

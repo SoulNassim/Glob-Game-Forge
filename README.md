@@ -10,7 +10,13 @@ Glob opens in your browser, on the game your agent is building.<br>
 The agent orders the art it needs; Glob forges 2D art, 3D models, rigs, animations, icons and sounds<br>
 and drops the finished files straight into your game.
 
-[**⬇ Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [Generation modes](#generation-modes)
+**New here?** Paste this into your coding agent, from your game's folder:
+
+```text
+Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md
+```
+
+[**Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [Generation modes](#generation-modes)
 
 **Free and open source (MIT).** Bring keys for the generators you use. No markup, no subscription.
 
@@ -20,10 +26,9 @@ and drops the finished files straight into your game.
 
 ## Just say "open Glob"
 
-Connect your game once. After that you never start Glob yourself: say **"open Glob"** to your agent (Claude Code, Codex, Cursor, Copilot, OpenCode, Gemini CLI), or just let it order its first asset. Glob starts on this computer and opens on the project your agent is working on, with every order, prompt, image, model and sound in one place.
+Connect your game once (your agent does it with `glob connect`). After that you never start Glob yourself: say **"open Glob"** to your agent (Claude Code, Codex, Cursor, Copilot, OpenCode, Gemini CLI), or just let it order its first asset. Glob starts on this computer and opens on the project your agent is working on, with every order, prompt, image, model and sound in one place.
 
 - **No app to keep open.** Glob runs on `localhost` while you need it. *Settings → Storage & access → Stop Glob* ends it.
-- **The desktop app is optional:** one window for all your projects, with every game's key art.
 - **Rather start it yourself?** Run `glob`, and set `FORGE_NO_AUTOSTART=1` for your agent.
 
 ![Glob with the Pocket Kaiju sample open: chat on the left, the project overview with its key art on the right](docs/screenshots/workspace.webp)
@@ -72,17 +77,26 @@ The auto modes have a **spend cap** per project ($5 to start). They pause once t
 
 ## Get started
 
-### 1. Get the app
+### 1. Tell your agent
 
-| | |
-|---|---|
-| **Windows 10/11** | [**Glob-Setup-Windows.exe**](https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe) |
-| **macOS** (Apple silicon) | [**Glob-macOS.dmg**](https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg) |
+Paste this into your coding agent (Claude Code, Codex, Cursor, Copilot, OpenCode, Gemini CLI), from your game's folder:
 
-The apps aren't code-signed yet: Windows may show SmartScreen (*More info → Run anyway*), macOS wants *right-click → Open*. Glob checks for updates when it starts and installs them with one click.
+```text
+Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md
+```
+
+Your agent follows [`docs/agent.md`](docs/agent.md): it installs Glob with [uv](https://docs.astral.sh/uv/) and runs `glob connect` in your game folder, which
+
+- makes the game's Glob project (in `<game>/glob/`), or finds the one made before;
+- connects your coding agents to it (the MCP server `glob`, a note in `AGENTS.md`, a `glob` skill);
+- starts Glob in the background and opens it in your browser on your game.
+
+### 2. Finish setup in the browser
+
+A short setup asks for generator keys (one is enough; without any, Glob makes placeholder files so you can try the whole flow). Keys go into Glob's own page and stay on your computer; they never pass through the agent's chat. Then restart your agent and approve the `glob` MCP server so it loads Glob's tools.
 
 <details>
-<summary><b>Prefer the terminal?</b> Same app, run from a shell</summary>
+<summary><b>Rather do it yourself?</b> Install, then <code>glob connect</code></summary>
 
 ```powershell
 # Windows (PowerShell)
@@ -94,7 +108,15 @@ irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/in
 curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh
 ```
 
-Then start the app: `glob-desktop` opens a window, `glob` opens it in your browser at <http://127.0.0.1:8420>. You still connect your agent from inside the app (step 2); there is no separate MCP setup to do by hand.
+Then, in a new terminal, in your game folder:
+
+| Command | What it does |
+|---|---|
+| `glob connect` | Makes or finds this game's Glob project, connects its coding agents and opens Glob on it. `--agents claude,codex` picks the agents. |
+| `glob open` | Opens Glob on this game's project, starting it in the background if needed. |
+| `glob` | Runs Glob in this terminal and opens <http://127.0.0.1:8420>. |
+
+You can also connect from inside Glob: **Settings → Coding agent**. Projects are listed in `~/Glob/projects` (a source checkout uses its own `projects/`); a project made for a game keeps its files in that game's `glob/` folder.
 
 From source, with Python 3.11+ and [uv](https://docs.astral.sh/uv/):
 
@@ -104,13 +126,9 @@ cd Glob-Game-Forge
 uv run forge
 ```
 
+The desktop app (`glob-desktop`, or the installers on the [releases page](https://github.com/SoulNassim/Glob-Game-Forge/releases)) still works, but you don't need it: Glob is made for the browser.
+
 </details>
-
-On first launch a short setup asks for generator keys (one is enough; without any, Glob makes placeholder files so you can try the whole flow) and your game folder.
-
-### 2. Connect your game, once
-
-Open Glob this one time (the desktop app, or `glob` in a terminal) and go to **Settings → Coding agent**. Pick your game folder and the agents you use, then restart the agent so it loads Glob. From then on it knows about Glob, and it starts Glob for you.
 
 <details>
 <summary>What connecting writes into your game folder (and removes again on Disconnect)</summary>
@@ -120,7 +138,7 @@ Open Glob this one time (the desktop app, or `glob` in a terminal) and go to **S
 - A `glob` skill in `.claude/skills/glob/` and `.agents/skills/glob/`.
 - `glob_delivery/README.md`.
 
-The agent starts the MCP server itself (`python -m forge.cli --mcp --project <name>`). It forwards to the running studio, so jobs and live updates show up there, and starts the studio when it isn't running (`open_glob`, or the first order or generation). The installed app opens its window; a terminal or source install opens your browser. `FORGE_NO_AUTOSTART=1` turns the automatic start off.
+The agent starts the MCP server itself (`python -m forge.cli --mcp --project <name>`). It forwards to the running studio, so jobs and live updates show up there, and starts the studio when it isn't running (`open_glob`, or the first order or generation). `FORGE_NO_AUTOSTART=1` turns the automatic start off.
 
 </details>
 

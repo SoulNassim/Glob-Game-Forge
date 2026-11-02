@@ -99,7 +99,7 @@ async def check(force: bool = False) -> dict[str, Any]:
     asset = ASSETS.get(kind)
     info["can_install"] = newer and (kind == "uv-tool" and shutil.which("uv") is not None or bool(asset and asset in release["assets"]))
     if kind == "source":
-        info["command"] = "git pull && uv sync" if (Path.cwd() / ".git").exists() else f"uv tool install --force \"forge-assets[desktop] @ https://github.com/{REPO}/archive/refs/tags/{release['tag']}.zip\""
+        info["command"] = "git pull && uv sync" if (Path.cwd() / ".git").exists() else f"uv tool install --force \"forge-assets @ https://github.com/{REPO}/archive/refs/tags/{release['tag']}.zip\""
     return info
 
 
@@ -135,7 +135,7 @@ async def install() -> dict[str, Any]:
     try:
         if kind == "uv-tool":
             state.update(status="installing", message=f"Installing Glob {release['version']}…")
-            source = f"forge-assets[desktop] @ https://github.com/{REPO}/archive/refs/tags/{release['tag']}.zip"
+            source = f"forge-assets @ https://github.com/{REPO}/archive/refs/tags/{release['tag']}.zip"
             proc = await asyncio.create_subprocess_exec(
                 shutil.which("uv") or "uv", "tool", "install", "--force", "--python", "3.12", source,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,

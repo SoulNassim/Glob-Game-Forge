@@ -1,6 +1,6 @@
 # Install Glob on Windows (PowerShell):
 #   irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.ps1 | iex
-# Installs uv if needed, then Glob as a uv tool. Start it with `glob-desktop` (app window) or `glob` (browser).
+# Installs uv if needed, then Glob as a uv tool. Then run `glob connect` in your game folder.
 $ErrorActionPreference = "Stop"
 
 $Source = "https://github.com/SoulNassim/Glob-Game-Forge/archive/refs/heads/main.zip"
@@ -12,11 +12,11 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "Installing Glob..."
-uv tool install --force --python 3.12 "forge-assets[desktop] @ $Source"
+uv tool install --force --python 3.12 "forge-assets @ $Source"
 uv tool update-shell | Out-Null
 
 Write-Host ""
-Write-Host "Glob is installed. Open a new terminal, then run:"
-Write-Host "  glob-desktop     # Glob in its own window"
-Write-Host "  glob             # Glob in your browser at http://127.0.0.1:8420"
-Write-Host "Projects are saved in ~\Glob\projects (desktop) or .\projects (browser)."
+Write-Host "Glob is installed. In your game folder, run:"
+Write-Host "  glob connect     # connect your coding agents and open Glob in the browser"
+Write-Host "(Open a new terminal so 'glob' is found; until then use $env:USERPROFILE\.local\bin\glob.exe)"
+Write-Host "Or just tell your agent: Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md"

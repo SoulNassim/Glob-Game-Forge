@@ -44,12 +44,23 @@ def configured_projects_dir() -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _default_projects_root() -> Path:
+    """A source checkout, or a folder that already holds Glob projects, keeps its own projects/. Everywhere else
+    (an installed `glob`, or `glob connect` and the MCP server run inside a game folder) projects live in ~/Glob/projects."""
+    local = Path.cwd() / "projects"
+    if (Path.cwd() / "forge" / "cli.py").is_file():
+        return local
+    if local.is_dir() and any((d / marker).exists() for d in local.iterdir() if d.is_dir() for marker in ("project.json", "manifest.db", "home.json")):
+        return local
+    return Path.home() / "Glob" / "projects"
+
+
 def get_projects_root() -> Path:
     custom = os.environ.get("FORGE_PROJECTS_DIR") or configured_projects_dir()
     if custom:
         p = Path(custom).expanduser()
     else:
-        p = Path.cwd() / "projects"
+        p = _default_projects_root()
     p.mkdir(parents=True, exist_ok=True)
     return p
 

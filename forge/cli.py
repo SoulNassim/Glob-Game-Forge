@@ -1,10 +1,17 @@
-"""CLI entrypoint for Forge (`uv run forge` or `./run`)."""
+"""CLI entrypoint for Glob (`glob`, `uv run forge` or `./run`).
+
+  glob            run the studio at http://127.0.0.1:8420 and open it in the browser
+  glob connect    make or find this game folder's Glob project, connect its coding agents, open Glob on it
+  glob open       open Glob on this game folder's project (starting it in the background if needed)
+  glob --mcp      the stdio MCP server coding agents start
+"""
 
 from __future__ import annotations
 
 import argparse
 import os
 import sys
+from pathlib import Path
 import webbrowser
 import threading
 import time
@@ -17,9 +24,15 @@ from forge.server.security import is_loopback
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="forge",
-        description="Forge: Playful, lightweight, agent-drivable game asset maker",
+        prog="glob",
+        description="Glob: your game's asset studio, driven by your coding agent",
+        epilog="glob connect   connect this game folder's coding agents to Glob and open it\n"
+               "glob open      open Glob on this game folder (starting it if needed)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("command", nargs="?", choices=["connect", "open"], help="connect or open (default: run the studio)")
+    parser.add_argument("--game", default=None, help="connect/open: the game folder (default: the current folder)")
+    parser.add_argument("--agents", default="", help="connect: comma-separated agents (claude,codex,cursor,vscode,opencode,gemini)")
     parser.add_argument("--host", default=None, help="Bind host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=None, help="Bind port (default: 8420)")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open browser on start")
@@ -32,6 +45,9 @@ def main() -> None:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
 
+    if args.command:
+        _launch(args)
+        return
     if args.mcp:
         if args.project:
             os.environ["FORGE_PROJECT"] = args.project
@@ -50,7 +66,7 @@ def main() -> None:
 
     print(f"\n  Glob {__version__}: your game's asset studio")
     print(f"  -> Studio       : {url}")
-    print(f"  -> Coding agent : connect your game in Settings → Coding agent (MCP server `glob`)")
+    print(f"  -> Coding agent : run `glob connect` in your game folder (MCP server `glob`)")
     print(f"  -> Mode         : {'Demo Mode (No API keys needed)' if cfg.demo_mode else 'Live Provider Mode'}\n")
 
     if not args.no_browser:
@@ -67,6 +83,33 @@ def main() -> None:
               "     use your API keys and write project files.\n")
     os.environ["FORGE_BIND_HOST"] = host
     uvicorn.run("forge.server.app:app", host=host, port=port, log_level="info")
+
+
+def _launch(args: argparse.Namespace) -> None:
+    from forge import launcher
+    from forge.agent import connect as connect_agent
+    from forge.storage.project_store import home_owner
+
+    game = os.path.abspath(args.game or os.getcwd())
+    try:
+        if args.command == "connect":
+            agents = [a.strip() for a in args.agents.split(",") if a.strip()] or None
+            result = connect_agent.connect_game(game, agents)
+            project = result["project"]
+            labels = ", ".join(connect_agent.TARGETS[t]["label"] for t in result["selected"])
+            print(f"\n  Glob project : {project} ({'new, in ' + os.path.join(game, 'glob') if result['created'] else 'already made'})")
+            print(f"  -> Connected : {labels} (MCP server `glob`, notes in AGENTS.md)")
+            print(f"  -> Deliveries: {result['delivery_folder']}")
+        else:
+            project = home_owner(Path(game)) or ""
+            if not project:
+                print("  This folder isn't connected to Glob yet; opening Glob. Run `glob connect` to connect it.")
+        opened = launcher.open_glob(project)
+    except (RuntimeError, ValueError, OSError) as exc:
+        raise SystemExit(f"  !! {exc}") from exc
+    print(f"\n  Glob is open: {opened['url']}")
+    if args.command == "connect":
+        print("  Finish setup in the browser. Then restart your coding agent so it loads Glob's tools.\n")
 
 
 if __name__ == "__main__":

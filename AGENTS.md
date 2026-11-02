@@ -16,7 +16,7 @@ Set `FORGE_PROJECTS_DIR` to point the MCP server and tests at another projects f
 
 ## The flow in one paragraph
 
-A coding agent works on a game with placeholders. The user connects the game once (Settings → Coding agent). The agent orders assets with MCP `place_order`. Orders show in the **Agent Orders** board. They are filed into the workspace (`file_order`) with real prompts, generated, and when ready they are copied to `<game>/glob_delivery/<order_id>/` with a SHA-256 `manifest.json`. The agent swaps the placeholder and sets `update_order status=integrated`.
+A coding agent works on a game with placeholders. The user connects the game once: `glob connect` in the game folder (what [docs/agent.md](docs/agent.md) tells a new agent to run) or Settings → Coding agent. The agent orders assets with MCP `place_order`. Orders show in the **Agent Orders** board. They are filed into the workspace (`file_order`) with real prompts, generated, and when ready they are copied to `<game>/glob_delivery/<order_id>/` with a SHA-256 `manifest.json`. The agent swaps the placeholder and sets `update_order status=integrated`.
 
 ## Codebase map
 
@@ -25,6 +25,8 @@ A coding agent works on a game with placeholders. The user connects the game onc
 | `forge/orders.py` | Orders. Stored: delivered, integrated, cancelled. Computed live from the workspace: draft, filed, in_progress, ready. Per-kind `DEFAULT_NEEDS`, delivery copy, manifest. |
 | `forge/agent/connect.py` | Connect/disconnect a game folder. Writes only Glob's own part (MCP entry per agent, `glob:start`/`glob:end` notes, `glob` skill, `glob_delivery/README.md`). |
 | `forge/game_link.py` | Link between a project and its game folder. |
+| `forge/cli.py`, `forge/launcher.py` | `glob connect` (`connect.connect_game`: make or find the game's project, connect, open) and `glob open`; the launcher starts the studio in the background for `open_glob`. |
+| `docs/agent.md` | Setup instructions a new coding agent reads from the website (the sentence on the landing page). Keep it in step with `glob connect`. |
 | `forge/mcp/server.py` | MCP server (stdio + HTTP `/api/mcp`). `advertised_tools()` is the list agents see. Forwards to the running app, else works on files. |
 | `forge/agent/glob_prompt.md` | The Glob role prompt. One source for the chat, the skill and the MCP prompt. Edit it here only. |
 | `forge/agent/workspace_agent.py` | Glob chat agent and workspace tools. |
