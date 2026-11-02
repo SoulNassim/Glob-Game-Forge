@@ -60,7 +60,7 @@ from forge.stylepacks.builtins import VARIANT_CHIP_PRESETS, save_custom_style_pa
 from forge.models import StylePack
 from forge.watcher.folder_watcher import WatchFolderService
 from forge.watcher.workspace_watcher import WorkspaceWatcher
-from forge import game_link, orders, service_gen, services
+from forge import game_link, order_mode, orders, service_gen, services
 from forge.agent import connect as connect_agent
 
 
@@ -124,11 +124,62 @@ async def sync_orders(project: str) -> list[str]:
     return delivered
 
 
+_order_mode_locks: dict[str, asyncio.Lock] = {}
+
+
+def _spent(project: str) -> float:
+    try:
+        return float(actions.get_budget(project=project).get("spent_usd") or 0.0)
+    except Exception:  # noqa: BLE001 — no spend record yet counts as nothing spent
+        return 0.0
+
+
+async def run_order_mode(project: str) -> None:
+    """File new drafts and, in the 2D and full modes, take every order one step further (see forge/order_mode.py)."""
+    lock = _order_mode_locks.setdefault(project, asyncio.Lock())
+    if lock.locked():
+        return
+    ws = _ws_dir(project)
+    async with lock:
+        settings = order_mode.load(ws)
+        if settings["auto_file"]:
+            filed = await asyncio.to_thread(order_mode.file_drafts, ws)
+            if filed:
+                await ws_manager.broadcast({"type": "orders_filed", "project": project, "orders": filed, "mode": settings["mode"]})
+        if settings["mode"] == "manual":
+            return
+        for order in await asyncio.to_thread(orders.list_orders, ws):
+            for _ in range(3):  # picking a winner unlocks the next step at once
+                if order_mode.status(ws, _spent(project))["paused"]:
+                    await ws_manager.broadcast({"type": "order_mode_paused", "project": project})
+                    return
+                step = order_mode.next_step(ws, order, settings["mode"])
+                if step is None:
+                    break
+                kind, data = step
+                if kind == "winner":
+                    await asyncio.to_thread(order_mode.pick_winner, ws, order, data["path"])
+                    order = await asyncio.to_thread(orders.get, ws, order["id"])
+                    continue
+                try:
+                    request = asset_studio.build_request(ws, order["asset"], data["step"])
+                except (FileNotFoundError, ValueError):
+                    break
+                order_mode.mark_step(ws, order["id"], data["step"])
+                queue_studio_job(project, request)
+                break
+        _save_jobs(project)
+
+
 async def workspace_changed(project: str) -> None:
     await ws_manager.broadcast({"type": "workspace_changed", "project": project})
     try:
         await sync_orders(project)
     except Exception:  # noqa: BLE001 — delivery problems must never break the edit that triggered them
+        pass
+    try:
+        await run_order_mode(project)
+    except Exception:  # noqa: BLE001 — same for automatic generation
         pass
 
 
@@ -1756,7 +1807,20 @@ def _order_call(fn: Any, *args: Any, **kwargs: Any) -> Any:
 @app.get("/api/orders")
 async def api_orders(project: str = "default") -> dict[str, Any]:
     listed = await asyncio.to_thread(orders.list_orders, _ws_dir(project))
-    return {"orders": listed, "counts": orders.summary(listed), "kinds": list(orders.KINDS), "needs": list(orders.NEEDS)}
+    return {"orders": listed, "counts": orders.summary(listed), "kinds": list(orders.KINDS), "needs": list(orders.NEEDS),
+            "mode": order_mode.status(_ws_dir(project), _spent(project))}
+
+
+@app.get("/api/orders/mode")
+async def api_order_mode(project: str = "default") -> dict[str, Any]:
+    return order_mode.status(_ws_dir(project), _spent(project))
+
+
+@app.put("/api/orders/mode")
+async def api_set_order_mode(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    _order_call(order_mode.save, _ws_dir(project), payload, _spent(project))
+    asyncio.create_task(run_order_mode(project))
+    return order_mode.status(_ws_dir(project), _spent(project))
 
 
 @app.post("/api/orders")

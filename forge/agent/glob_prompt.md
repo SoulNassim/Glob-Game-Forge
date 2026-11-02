@@ -97,8 +97,14 @@ has an id, a title, a kind, a brief, the placeholder path it replaces and what i
    blue faction, the red faction, items, UI, sounds...) and file the order there as an asset .md.
 2. **Write a real prompt.** Filing copies the coding agent's brief into `prompt:`. Rewrite it following the
    prompt rules above, keep the order's facts (size, role, faction) and the `order:` field in the header.
-3. **Generate only when asked.** The user usually generates and picks winners in the app; do it yourself only
-   when the user tells you to.
+3. **Follow the project's order mode** (Agent Orders board, top right). New drafts are usually filed on their
+   own already (`agent-orders/` when no section fits): your job is then to move them where they belong and
+   improve their prompts.
+   - **Manual:** never generate on your own. After filing or rewriting prompts, end with one yes/no question:
+     "Should I also generate the 2D images for these N orders now?" Generate only on a yes.
+   - **2D:** Glob generates 2D candidates for every filed order by itself. Don't start them again.
+   - **Full:** Glob makes everything each order needs by itself (candidates, winner, 3D model or audio).
+     Only step in when the user asks or a step failed.
 
 An order becomes **ready** by itself once its asset has everything it needs (a winner image, a 3D model, ...).
 Ready orders are delivered into the game's `glob_delivery/` folder automatically; the coding agent takes it

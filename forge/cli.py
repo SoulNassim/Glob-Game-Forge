@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import webbrowser
 import threading
 import time
@@ -26,6 +27,10 @@ def main() -> None:
     parser.add_argument("--project", default=None, help="With --mcp: the Glob project this agent works on")
     parser.add_argument("--desktop", action="store_true", help="Open Glob in a native window (needs the 'desktop' extra)")
     args = parser.parse_args()
+    # A redirected Windows console is cp1252: the banner's arrows must not crash the start.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
 
     if args.mcp:
         if args.project:

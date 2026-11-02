@@ -619,11 +619,23 @@ class ForgeMCPDispatcher:
         ws = self.actions.get_workspace(proj).ws_dir
         game = game_link.game_folder(proj, self.actions.root_dir)
         if name == "place_order":
-            return orders.place(
+            from forge import order_mode
+
+            placed = orders.place(
                 ws, str(args.get("title") or ""), str(args.get("kind") or ""), str(args.get("brief") or ""),
                 str(args.get("placeholder") or ""), needs=args.get("needs"), context=str(args.get("context") or ""),
                 requested_by=str(args.get("requested_by") or "coding agent"),
             )
+            settings = order_mode.load(ws)
+            if settings["auto_file"]:
+                order_mode.file_drafts(ws)
+                placed = orders.get(ws, placed["id"])
+            placed["glob_mode"] = {
+                "manual": "Filed with its prompt. The user generates it in Glob.",
+                "2d": "Filed; Glob generates 2D candidates on its own while the app is open.",
+                "full": "Filed; Glob makes everything this order needs on its own while the app is open.",
+            }[settings["mode"]]
+            return placed
         if name == "list_orders":
             listed = orders.list_orders(ws, args.get("status") or None)
             return {"orders": listed, "counts": orders.summary(orders.list_orders(ws))}

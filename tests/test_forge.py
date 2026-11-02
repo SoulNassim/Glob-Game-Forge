@@ -1852,8 +1852,22 @@ async def test_mcp_workspace_tools_prompt_and_project_default(tmp_path: Path, mo
 
 
 @pytest.mark.asyncio
+async def test_placed_orders_are_filed_and_say_the_mode(tmp_path: Path) -> None:
+    from forge import order_mode
+
+    actions = ForgeActionLayer(root_dir=tmp_path / "projects")
+    mcp = ForgeMCPDispatcher(action_layer=actions)
+    ws = actions.get_workspace("demo").ws_dir
+    placed = await mcp.call_tool("place_order", {"project": "demo", "title": "Health potion", "kind": "item"})
+    assert placed["status"] == "filed" and placed["asset"].endswith("health-potion.md")
+    assert "user generates it" in placed["glob_mode"]
+    order_mode.save(ws, {"mode": "full"}, 0)
+    placed = await mcp.call_tool("place_order", {"project": "demo", "title": "Mana potion", "kind": "item"})
+    assert "everything this order needs" in placed["glob_mode"]
+
+
 async def test_agent_orders_flow_from_order_to_delivery(tmp_path: Path) -> None:
-    from forge import asset_studio, game_link, orders
+    from forge import asset_studio, game_link, order_mode, orders
 
     actions = ForgeActionLayer(root_dir=tmp_path / "projects")
     mcp = ForgeMCPDispatcher(action_layer=actions)
@@ -1861,6 +1875,7 @@ async def test_agent_orders_flow_from_order_to_delivery(tmp_path: Path) -> None:
     game = tmp_path / "game"
     game.mkdir()
     game_link.set_link("demo", game, ["claude"], tmp_path / "projects")
+    order_mode.save(ws, {"auto_file": False}, 0)  # this flow files by hand
 
     async def call(name: str, **arguments: Any) -> dict[str, Any]:
         return await mcp.call_tool(name, {"project": "demo", **arguments})

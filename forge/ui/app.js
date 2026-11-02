@@ -297,7 +297,7 @@ function renderProjectGrid() {
       return `<div class="pcard${c.project === state.project ? " current" : ""}" data-open-project="${esc(c.project)}" tabindex="0" role="button">
         <div class="pcard-head"><div><strong>${esc(c.title)}</strong><small>${esc(timeAgo(c.updated))}</small>
           <small>${c.sections} section${c.sections === 1 ? "" : "s"} · ${c.assets} asset${c.assets === 1 ? "" : "s"}</small></div>
-          <button class="pcard-del" data-st-export="${esc(c.project)}" title="Export as .zip" aria-label="Export ${esc(c.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
+          <button class="pcard-del" data-st-export="${esc(c.project)}" title="Export workspace as .zip" aria-label="Export ${esc(c.title)} workspace as .zip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
           ${c.project === "default" ? "" : `<button class="pcard-del" data-delete-project="${esc(c.project)}" title="Delete project" aria-label="Delete ${esc(c.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>`}</div>
         ${c.cover ? `<div class="pcard-art cover"><img src="${esc(projectFileUrl(c.project, c.cover))}" alt="" loading="lazy"></div>`
           : `<div class="pcard-art n${Math.min(imgs.length, 3)}">${imgs.length ? imgs.join("") : `<span class="pcard-initials">${esc(initials || "F")}</span>`}
@@ -1664,6 +1664,64 @@ const ORDER_STATUS = { draft: "Draft", filed: "Filed", in_progress: "In progress
 const NEED_LABEL = { image: "Image", model: "3D", rig: "Rig", animations: "Anim", audio: "Audio" };
 const ORDER_KIND_NEEDS = { character: ["image", "model"], creature: ["image", "model"], item: ["image", "model"], weapon: ["image", "model"], prop: ["image", "model"], vehicle: ["image", "model"], environment: ["image"], ui: ["image"], vfx: ["image"], sfx: ["audio"], voice: ["audio"], music: ["audio"] };
 const SORT_PROMPT = "/glob Sort the new agent orders into the workspace and write a good prompt for each.";
+const ORDER_MODES = [
+  ["manual", "Manual", "New orders get an asset page with their prompt. You press Generate; Glob asks first."],
+  ["2d", "2D auto", "Every new order also gets 2D candidates right away. You pick the winner."],
+  ["full", "Full auto", "Glob makes everything an order needs: candidates, a winner, then the 3D model or sound."],
+];
+
+function orderModeBar(mode) {
+  if (!mode) return "";
+  const info = ORDER_MODES.find(([key]) => key === mode.mode) || ORDER_MODES[0];
+  const auto = mode.mode !== "manual";
+  return `<div class="ord-mode${mode.paused ? " paused" : ""}">
+    <div class="ord-mode-pick"><span class="ord-mode-label">Generation</span>
+      <div class="seg">${ORDER_MODES.map(([key, label, hint]) => `<button class="${key === mode.mode ? "on" : ""}" data-order-mode="${key}" title="${esc(hint)}">${label}</button>`).join("")}</div></div>
+    <p class="ord-mode-hint">${esc(info[2])}${auto ? ` Runs while Glob is open.` : ""}</p>
+    ${auto ? `<div class="ord-mode-cap">${mode.paused ? `<b>Paused:</b> spent $${mode.spent_usd.toFixed(2)} of the $${mode.spend_cap_usd.toFixed(2)} cap.` : `Spent $${mode.spent_usd.toFixed(2)} of $${mode.spend_cap_usd.toFixed(2)}`}
+      <button class="link-btn" data-order-cap>${mode.paused ? "Raise the cap" : "Change cap"}</button></div>` : ""}
+    <label class="inline ord-mode-file" title="Off: new orders wait in Drafts until you or Glob file them"><input type="checkbox" data-order-autofile ${mode.auto_file ? "checked" : ""}> File new orders on their own</label>
+  </div>`;
+}
+
+// Manual mode: Glob filed orders with their prompts; ask once whether to generate their 2D images now.
+function orderAskBanner(data) {
+  if (data.mode?.mode !== "manual") return "";
+  let dismissed = [];
+  try { dismissed = JSON.parse(storeGet(`forge.orderAsk.${state.project}`) || "[]"); } catch { /* reset below */ }
+  const waiting = data.orders.filter((o) => o.status === "filed" && o.asset && !dismissed.includes(o.id));
+  if (!waiting.length) return "";
+  const ids = waiting.map((o) => o.id).join(",");
+  const sounds = waiting.some((o) => (o.needs || []).includes("audio"));
+  return `<div class="ord-ask">${icon("sparkle")}<span class="grow"><b>${plural(waiting.length, "order")} ${waiting.length === 1 ? "has its" : "have their"} prompt ready.</b> Should Glob also generate ${sounds ? "them" : "the 2D images"} now?</span>
+    <button class="primary" data-order-ask-yes="${esc(ids)}">Yes, generate</button><button class="ghost" data-order-ask-no="${esc(ids)}">No</button></div>`;
+}
+
+function dismissOrderAsk(ids) {
+  let dismissed = [];
+  try { dismissed = JSON.parse(storeGet(`forge.orderAsk.${state.project}`) || "[]"); } catch { /* start over */ }
+  storeSet(`forge.orderAsk.${state.project}`, JSON.stringify([...new Set([...dismissed, ...ids])].slice(-500)));
+}
+
+async function setOrderMode(fields) {
+  try { await api("/api/orders/mode", { method: "PUT", body: fields }); } catch (err) { toast(err.message, true); }
+  if (state.view.type === "orders") renderOrders();
+}
+
+function orderCapDialog() {
+  const mode = state.orders?.mode;
+  openDialog(`<form class="dlg" id="orderCapForm">
+    <h2>Spend cap for auto modes</h2>
+    <p>2D and Full auto pause once they have spent this much since you set the cap or switched the mode. Changing it starts the count again.</p>
+    <label>Cap in US dollars<input name="cap" type="number" min="0" step="0.5" value="${esc(String(mode?.spend_cap_usd ?? 5))}"></label>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">Save cap</button></div>
+  </form>`);
+  $("#orderCapForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    closeDialog();
+    await setOrderMode({ spend_cap_usd: Number(event.target.cap.value || 0) });
+  });
+}
 
 function orderBadge(counts) {
   const n = (counts?.draft || 0) + (counts?.ready || 0);
@@ -1728,6 +1786,8 @@ async function renderOrders() {
     <p class="lede">Your coding agent orders the assets the game needs while it builds with placeholders. Sort them into the workspace, make them, and finished orders are delivered to the game on their own.</p>
     ${connected ? `<div class="ord-conn"><span class="dot live"></span>Delivering to <code>${esc(state.connect.game_name)}/glob_delivery/</code>${state.connect.auto_deliver ? " automatically" : " when you press Deliver"} · <button class="link-btn" data-settings-connect>Settings</button></div>`
       : `<div class="ord-conn off"><span class="dot"></span>No coding agent connected yet: connect your game folder so your agent can order assets and receive them. <button class="primary" data-settings-connect>Connect</button></div>`}
+    ${orderModeBar(data.mode)}
+    ${orderAskBanner(data)}
     <div class="vault-bar">
       <button class="primary" data-order-new>＋ New order</button>
       ${c.draft ? `<button class="ghost" data-order-sort${state.sending ? " disabled" : ""}>${state.sending ? `<span class="spinner"></span> Glob is sorting…` : `${icon("sparkle")} Sort ${plural(c.draft, "draft")} with Glob`}</button>` : ""}
@@ -1823,9 +1883,24 @@ async function sortDraftsWithGlob() {
 }
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-order-new],[data-order-edit],[data-order-file],[data-order-deliver],[data-order-reopen],[data-order-cancel],[data-order-sort],[data-settings-connect]");
+  const t = event.target.closest("[data-order-new],[data-order-edit],[data-order-file],[data-order-deliver],[data-order-reopen],[data-order-cancel],[data-order-sort],[data-settings-connect],[data-order-mode],[data-order-cap],[data-order-autofile],[data-order-ask-yes],[data-order-ask-no]");
   if (!t) return;
   const d = t.dataset;
+  if (d.orderMode) return setOrderMode({ mode: d.orderMode });
+  if (d.orderCap !== undefined) return orderCapDialog();
+  if (d.orderAutofile !== undefined) return setOrderMode({ auto_file: t.checked });
+  if (d.orderAskNo) { dismissOrderAsk(d.orderAskNo.split(",")); return renderOrders(); }
+  if (d.orderAskYes) {
+    const ids = d.orderAskYes.split(",");
+    const assets = (state.orders?.orders || []).filter((o) => ids.includes(o.id) && o.asset).map((o) => o.asset);
+    t.disabled = true;
+    try {
+      const res = await api("/api/studio/batch", { method: "POST", body: { assets } });
+      dismissOrderAsk(ids);
+      toast(`Generating 2D images for ${plural(res.jobs.length, "order")}${res.skipped.length ? ` (${res.skipped.length} skipped)` : ""}`);
+    } catch (err) { toast(err.message, true); }
+    return renderOrders();
+  }
   if (d.orderNew !== undefined) return orderDialog(null);
   if (d.orderEdit) return orderDialog(d.orderEdit);
   if (d.orderFile) return fileOrderDialog(d.orderFile);
@@ -1988,7 +2063,14 @@ const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]
 // Image outputs that can become the winner and be worked on further.
 const WORK_KINDS = new Set(["candidates", "variants", "edits"]);
 
-const removeBtn = (path) => `<button type="button" class="out-del" data-remove-output="${esc(path)}" title="Move to trash (Undo right after)" aria-label="Delete">×</button>`;
+// A card's ⋯ menu closes when you pick something in it or click anywhere else.
+document.addEventListener("click", (event) => {
+  document.querySelectorAll(".out-more[open]").forEach((menu) => {
+    if (!menu.contains(event.target) || event.target.closest(".out-menu button")) menu.open = false;
+  });
+});
+
+const removeBtn = (path) =>`<button type="button" class="out-del" data-remove-output="${esc(path)}" title="Move to trash (Undo right after)" aria-label="Delete">×</button>`;
 
 function modelCard(o, kind) {
   const glb = /\.glb$/i.test(o.path);
@@ -2020,13 +2102,17 @@ function outputGrid(all, winner, kind = "candidates") {
         ${kind === "parts" || kind === "views" ? `<button class="act" data-icons="${esc(o.path)}">${icon("grid")}Icons</button><button class="act" data-winner="${esc(o.path)}">${icon("star")}Winner</button>` : ""}
         <a class="act wide" href="${esc(fileUrl(o.path))}" download>${icon("download")}Download</a></div></div>`;
     }
+    // One clear next step per card; everything else waits in the ⋯ menu.
     return `<div class="out${isWinner ? " winner" : ""}">${removeBtn(o.path)}${img}
-      <div class="out-bar">${isWinner ? "" : `<button class="act wide hero-act" data-winner="${esc(o.path)}">${icon("star")}Pick winner</button>`}
-      <button class="act" data-action="variant" data-source="${esc(o.path)}">${icon("variant")}Variant</button>
-      <button class="act" data-action="edit" data-source="${esc(o.path)}">${icon("edit")}Edit</button>
-      <button class="act" data-split="${esc(o.path)}">${icon("scissors")}Split</button>
-      <button class="act" data-icons="${esc(o.path)}">${icon("grid")}Icons</button>
-      <button class="act wide pillar-act" data-make-pillar="${esc(o.path)}" title="Use this image as a style reference for a whole folder">${icon("layers")}Make pillar</button></div></div>`;
+      <div class="out-bar compact">${isWinner ? `<span class="act win-tag">${icon("star")}Winner</span>` : `<button class="act hero-act" data-winner="${esc(o.path)}">${icon("star")}Pick winner</button>`}
+      <details class="out-more"><summary class="act" title="More actions" aria-label="More actions">⋯</summary>
+        <div class="out-menu">
+          <button type="button" data-action="variant" data-source="${esc(o.path)}">${icon("variant")}Variant</button>
+          <button type="button" data-action="edit" data-source="${esc(o.path)}">${icon("edit")}Edit</button>
+          <button type="button" data-split="${esc(o.path)}">${icon("scissors")}Split into parts</button>
+          <button type="button" data-icons="${esc(o.path)}">${icon("grid")}Make icons</button>
+          <hr><button type="button" class="pillar-item-btn" data-make-pillar="${esc(o.path)}" title="Use this image as a style reference for a whole folder">${icon("layers")}Make pillar</button>
+        </div></details></div></div>`;
   }).join("")}</div>${chips}` : "");
 }
 
@@ -3150,6 +3236,14 @@ function connectSocket() {
     if (msg.type === "orders_delivered" && msg.project === state.project) {
       toast(`Delivered ${plural(msg.orders.length, "order")} to ${state.connect?.game_name || "the game"}`);
     }
+    if (msg.type === "orders_filed" && msg.project === state.project) {
+      toast(`Filed ${plural(msg.orders.length, "new order")}${msg.mode === "manual" ? "" : ", generating"}`, false, { label: "Orders", run: () => go({ type: "orders" }) });
+      if (state.view.type === "orders") renderOrders();
+    }
+    if (msg.type === "order_mode_paused" && msg.project === state.project && !state.orderPauseShown) {
+      state.orderPauseShown = true;
+      toast("Auto generation paused: the spend cap is reached", true, { label: "Raise cap", run: () => { go({ type: "orders" }); setTimeout(orderCapDialog, 300); } });
+    }
     if (msg.type === "workspace_changed" && (!msg.project || msg.project === state.project)) { state.palette = null; state.board = null; }
     if (msg.type === "workspace_changed" && (!msg.project || msg.project === state.project) && !state.view.editing) {
       clearTimeout(pending);
@@ -3716,7 +3810,7 @@ async function storageSettings() {
     <p class="st-note">Each project is a folder in here. Its <code>workspace/</code> folder holds the pages, assets, images, models and chats you see in Glob${info.env_override ? ". (Set by FORGE_PROJECTS_DIR for this session.)" : "."}</p>
     ${state.project ? `<div class="st-label">This project · ${esc(humanize(state.project))}</div>
     <div class="path-row"><code>${esc(info.workspace_dir)}</code><button class="mini" data-st-open="workspace">Open</button></div>` : ""}
-    <div class="row wrap">${state.project ? `<button class="ghost" data-st-export="${esc(state.project)}">Export project as .zip…</button>` : ""}<button class="ghost" data-st-import-zip>Import a project .zip…</button><button class="ghost" data-imp-open>Import a game…</button></div>
+    <div class="row wrap">${state.project ? `<button class="ghost" data-st-export="${esc(state.project)}">Export workspace as .zip…</button>` : ""}<button class="ghost" data-st-import-zip>Import a workspace .zip…</button><button class="ghost" data-imp-open>Import a game…</button></div>
     <div class="st-label">Folders Glob may use</div>
     <div class="grant-list">${grantRows(grants)}</div>
     <div class="row"><button class="ghost" data-grant-add>+ Add a folder</button></div>
