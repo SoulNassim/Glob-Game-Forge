@@ -130,8 +130,9 @@ def connect(project: str, folder: str, targets: list[str] | None = None, root: P
     _write_game_ignore(project, game, root)
     index = _index_ref(project, game, root)
     for name in NOTE_FILES:
-        # AGENTS.md always; CLAUDE.md and GEMINI.md when the game has them (they'd otherwise be made just for this).
-        if name == "AGENTS.md" or (game / name).is_file():
+        # AGENTS.md (Codex, Cursor, Copilot, OpenCode…) and CLAUDE.md (Claude Code reads only that) always, so the
+        # agent knows about Glob without being told; GEMINI.md when the game has one.
+        if name in ("AGENTS.md", "CLAUDE.md") or (game / name).is_file():
             _write_block(game / name, MD_START, MD_END, agent_note(project, index))
     access.grant(str(game), write=True)
     game_link.set_link(project, game, [], root)

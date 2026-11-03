@@ -37,7 +37,7 @@ Run this in the game folder. Your shell may not see the new `glob` command yet, 
 `glob connect`:
 
 1. makes the game's Glob project (its files go in `glob/` inside the game folder), or finds the one made before;
-2. writes `glob/ASSETS.md` and a short note into `AGENTS.md` (and `CLAUDE.md` / `GEMINI.md` when the game has them) telling coding agents where the finished art is;
+2. writes `glob/ASSETS.md` and a short note into `AGENTS.md` and `CLAUDE.md` (and `GEMINI.md` when the game has one) telling coding agents where the finished art is;
 3. creates the **Glob** shortcut on the desktop and in the Start menu;
 4. opens Glob's window on this game.
 

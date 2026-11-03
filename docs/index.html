@@ -229,6 +229,14 @@ footer .wrap > :last-child{margin-left:auto}
   .hero{padding-top:44px}
   .lede{font-size:18px}
 }
+/* Download first */
+.dl{margin-top:30px;display:grid;gap:12px;max-width:560px}
+.dl .main{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.dl .btn.big{padding:17px 30px;font-size:17px}
+.dl small{color:var(--mute);font-size:13px;line-height:1.5}
+.dl small a{color:var(--ink)}
+.found{margin-top:22px;max-width:560px;padding:14px 18px;border:1px solid var(--line2);border-radius:16px;background:rgba(255,255,255,.02);color:var(--mute);font-size:14px;line-height:1.55}
+.found b{color:var(--ink)}
 </style>
 </head>
 <body>
@@ -238,7 +246,7 @@ footer .wrap > :last-child{margin-left:auto}
   <div class="wrap">
     <a class="brand" href="#top"><img class="pixel" src="landing/glob-face.svg" alt=""><b>GLOB</b></a>
     <div class="links">
-      <a href="#problem">Why</a><a href="#how">How it works</a><a href="#levels">Level kits</a><a href="#demo">Live demo</a><a href="#features">Features</a><a href="#install">Get started</a>
+      <a href="#install">Download</a><a href="#problem">Why</a><a href="#how">How it works</a><a href="#levels">Level kits</a><a href="#demo">Live demo</a><a href="#features">Features</a>
     </div>
     <a class="btn ghost sm" href="https://github.com/SoulNassim/Glob-Game-Forge">★ GitHub</a>
   </div>
@@ -250,12 +258,11 @@ footer .wrap > :last-child{margin-left:auto}
       <span class="eyebrow"><i></i>Glob 3.0 · open source · free forever · runs on your machine</span>
       <h1>Your game's<br><em>art studio</em><span class="y">.</span></h1>
       <p class="lede">Glob is a tiny slime blacksmith with a very big hammer. Open it like any app and forge <b>consistent</b> 2D art, real 3D models, sounds and whole level kits. Your coding agent copies the finished files straight into your game.</p>
-      <div class="ask">
-        <div class="lab">New here? Paste this into your coding agent</div>
-        <p id="ask">Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md</p>
-        <div class="row"><button class="btn pri" type="button" data-copy="ask">Copy</button><a class="btn ghost" href="demo/">▶ Try the live demo</a></div>
+      <div class="dl">
+        <div class="main"><a class="btn pri big" id="dlMain" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe">⬇ Download for Windows</a><a class="btn ghost" href="demo/">▶ Try the live demo</a></div>
+        <small id="dlOther">Free, about a minute to install. Also for <a href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg">macOS</a> · <a href="#install">Linux and other ways</a></small>
       </div>
-      <div class="works">Your agent installs Glob, links your game and opens it. Works with <b>Claude Code</b> · <b>Codex</b> · <b>Gemini CLI</b> · <b>OpenCode</b> · <b>Cursor</b> · <b>Copilot</b> · any agent that reads <span class="mono">AGENTS.md</span>.</div>
+      <div class="found">🤝 <b>Your coding agent finds Glob on its own.</b> Pick your game's folder in Glob and it leaves a short note in <span class="mono">AGENTS.md</span> and <span class="mono">CLAUDE.md</span>. Claude Code, Codex, Cursor, Copilot, Gemini CLI or OpenCode then copy the finished art into your game when you ask.</div>
     </div>
     <div class="phone rv">
       <video id="promo" src="landing/glob-promo.mp4" poster="landing/promo-poster.jpg" autoplay muted loop playsinline preload="metadata"></video>
@@ -274,9 +281,9 @@ footer .wrap > :last-child{margin-left:auto}
     </div>
     <div class="then rv">The first time · about two minutes</div>
     <div class="first">
-      <div class="rv"><h3>Paste the sentence, OK the install</h3><p>Your agent reads Glob's setup page and asks you to approve one install command. Then it runs <span class="mono">glob connect</span> in your game folder. Or grab the installer below.</p></div>
-      <div class="rv"><h3>Sign in once</h3><p>Glob opens in its own window. Sign in to ElevenLabs or Meshy (no API key needed), and the chat runs on your Claude Code or Codex login.</p></div>
-      <div class="rv"><h3>Make art, then ask your agent</h3><p>Pick what you like in Glob. Tell your agent “use the Glob art”: it reads <span class="mono">glob/ASSETS.md</span> and copies the files in.</p></div>
+      <div class="rv"><h3>Download and open Glob</h3><p>Run the installer. Glob lands in your Start menu or Applications, and opens in its own window.</p></div>
+      <div class="rv"><h3>Point it at your game</h3><p>Pick your game's folder (or start without one) and sign in to ElevenLabs or Meshy. No API key needed.</p></div>
+      <div class="rv"><h3>Ask your agent for the art</h3><p>Make art in Glob, then tell your coding agent “use the Glob art”. It already knows where to look: <span class="mono">glob/ASSETS.md</span>.</p></div>
     </div>
     <div class="then rv">Every time after that</div>
     <div class="bigshot rv"><img src="screenshots/workspace.webp" alt="Glob open in the browser: chat with Glob on the left, the game's art laid out on the right" loading="lazy"></div>
@@ -425,14 +432,19 @@ footer .wrap > :last-child{margin-left:auto}
     <div class="agent">
       <div class="rv">
         <div class="kicker">For your coding agent</div>
-        <h2>Your agent reads one file.<br>No more <em>placeholder</em> cubes.</h2>
-        <p class="sub">One <span class="mono">glob connect</span> in your game folder writes a short note in <span class="mono">AGENTS.md</span>. From then on Glob keeps <span class="mono">glob/ASSETS.md</span> up to date: every asset, its picked image or sound, and its 3D model, rig and animations.</p>
+        <h2>Your agent finds it.<br>No more <em>placeholder</em> cubes.</h2>
+        <p class="sub">When you pick your game's folder, Glob writes a short note into <span class="mono">AGENTS.md</span> and <span class="mono">CLAUDE.md</span>, the files coding agents read first. From then on it keeps <span class="mono">glob/ASSETS.md</span> up to date: every asset, its picked image or sound, and its 3D model, rig and animations.</p>
         <ul class="ticks">
           <li><span><b>Nothing to install in the agent</b>: no MCP server, no skills, no restart. Any agent that reads files works.</span></li>
           <li><span><b>Your agent copies, never edits</b>: art goes into the game's own folders; <span class="mono">glob/</span> stays yours.</span></li>
           <li><span><b>Missing art stays a placeholder</b>, and the agent tells you what to make in Glob.</span></li>
           <li><span><b>Your coding session stays yours</b>: Glob's chat runs the studio in its own window.</span></li>
         </ul>
+        <div class="ask" style="margin-top:22px">
+          <div class="lab">Agent didn't notice? Tell it once</div>
+          <p id="tell">Read glob/ASSETS.md and copy the Glob art you need into the game.</p>
+          <div class="row"><button class="btn pri" type="button" data-copy="tell">Copy</button></div>
+        </div>
         <div class="engines"><span>GODOT</span><span>UNITY</span><span>UNREAL</span><span>ANY ENGINE</span></div>
       </div>
       <div class="term rv">
@@ -458,25 +470,25 @@ footer .wrap > :last-child{margin-left:auto}
         <div class="kicker">Get started</div>
         <h2>Free. Open source.<br>Forging in <em>a minute</em>.</h2>
         <p class="sub">Glob costs nothing and the code is MIT-licensed. You sign in to the image, 3D and sound services you use (ElevenLabs, Meshy, fal…) or paste a key, and pay them directly. No markup, no subscription.</p>
-        <div class="row" style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap"><a class="btn pri" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe">⬇ Windows installer</a><a class="btn ghost" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg">⬇ macOS app</a></div>
-        <div class="ask" style="margin-top:28px">
-          <div class="lab">The easy way: paste this into your coding agent</div>
-          <p id="ask2">Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md</p>
-          <div class="row"><button class="btn pri" type="button" data-copy="ask2">Copy</button><small>Run it from your game's folder. Your agent will ask you to approve the install.</small></div>
+        <div class="dl">
+          <div class="main"><a class="btn pri big" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe">⬇ Windows installer</a><a class="btn ghost big" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg">⬇ macOS app</a></div>
+          <small>Windows may say “Windows protected your PC” the first time: click <b>More info → Run anyway</b>. On macOS, right-click Glob → <b>Open</b> the first time. Glob isn't code-signed yet; it's open source, so you can read every line.</small>
         </div>
         <div class="alt">
-          <div class="kicker" style="margin-bottom:10px">Or do it yourself</div>
+          <div class="kicker" style="margin-bottom:10px">Other ways</div>
           <div class="ostabs" role="tablist">
+            <button type="button" role="tab" data-tab="t-agent" aria-selected="false">Let my agent do it</button>
             <button type="button" role="tab" data-tab="t-uv" aria-selected="false">Have uv</button>
-            <button type="button" role="tab" data-tab="t-win" aria-selected="false">Windows</button>
-            <button type="button" role="tab" data-tab="t-mac" aria-selected="true">macOS / Linux</button>
+            <button type="button" role="tab" data-tab="t-win" aria-selected="false">Windows terminal</button>
+            <button type="button" role="tab" data-tab="t-mac" aria-selected="true">macOS / Linux terminal</button>
             <button type="button" role="tab" data-tab="t-src" aria-selected="false">From source</button>
           </div>
+          <div class="cmd" id="t-agent" hidden><span>›</span><code id="c-agent">Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md</code><button type="button" data-copy="c-agent">Copy</button></div>
           <div class="cmd" id="t-uv" hidden><span>$</span><code id="c-uv">uv tool install --python 3.12 &quot;forge-assets @ https://github.com/SoulNassim/Glob-Game-Forge/archive/refs/heads/main.zip&quot;</code><button type="button" data-copy="c-uv">Copy</button></div>
           <div class="cmd" id="t-win" hidden><span>&gt;</span><code id="c-win">irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.ps1 | iex</code><button type="button" data-copy="c-win">Copy</button></div>
           <div class="cmd" id="t-mac"><span>$</span><code id="c-mac">curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh</code><button type="button" data-copy="c-mac">Copy</button></div>
           <div class="cmd" id="t-src" hidden><span>$</span><code id="c-src">git clone https://github.com/SoulNassim/Glob-Game-Forge &amp;&amp; cd Glob-Game-Forge &amp;&amp; uv run forge</code><button type="button" data-copy="c-src">Copy</button></div>
-          <p class="note">Already have <a href="https://docs.astral.sh/uv/">uv</a>? One plain package install does it. Otherwise the installer scripts add uv first, then Glob. Then, in a new terminal in your game folder, run <code>glob connect</code>: it links your game and opens Glob in its own window. After that, the <b>Glob</b> shortcut on your desktop opens it any time, no agent needed.</p>
+          <p class="note"><b>Let my agent do it</b>: paste the sentence into your coding agent from your game's folder; it installs Glob and links the game. The terminal ways install with <a href="https://docs.astral.sh/uv/">uv</a>; then run <code>glob connect</code> in your game folder. Either way, the <b>Glob</b> shortcut opens it any time after.</p>
         </div>
       </div>
       <img class="forge pixel" src="landing/glob-forge.svg" alt="Glob hammering on an anvil">
@@ -505,6 +517,15 @@ const tabs = document.querySelectorAll(".ostabs button");
 const pick = id => tabs.forEach(t => { const on = t.dataset.tab === id; t.setAttribute("aria-selected", on); document.getElementById(t.dataset.tab).hidden = !on; });
 tabs.forEach(t => t.addEventListener("click", () => pick(t.dataset.tab)));
 if (/Win/i.test(ua)) pick("t-win");
+// The big download button offers the visitor's own system.
+if (/Mac/i.test(ua)) {
+  const m = document.getElementById("dlMain");
+  m.href = "https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg"; m.textContent = "⬇ Download for macOS";
+  document.getElementById("dlOther").innerHTML = 'Free, about a minute to install. Also for <a href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe">Windows</a> · <a href="#install">Linux and other ways</a>';
+} else if (/Linux/i.test(ua) && !/Android/i.test(ua)) {
+  const m = document.getElementById("dlMain");
+  m.href = "#install"; m.textContent = "⬇ Install on Linux"; pick("t-mac");
+}
 // sound toggle
 const v = document.getElementById("promo"), s = document.getElementById("sound");
 s.addEventListener("click", () => { v.muted = !v.muted; if (!v.muted) { v.currentTime = 0; v.play(); } s.textContent = v.muted ? "🔊 Sound on" : "🔇 Mute"; });

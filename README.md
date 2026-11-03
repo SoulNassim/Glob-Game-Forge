@@ -9,11 +9,9 @@
 Glob is an asset studio for your game. It runs as its own app and makes 2D art, 3D models, rigs, animations, icons, sounds and whole level kits.<br>
 Your coding agent copies the finished files from Glob into your game.
 
-**New here?** Paste this into your coding agent, from your game's folder:
+### [⬇ Download for Windows](https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe) · [⬇ Download for macOS](https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg)
 
-```text
-Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md
-```
+Free. Install it, pick your game's folder, and your coding agent finds the art on its own.
 
 [**Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [What you can make](#what-you-can-make)
 
@@ -25,7 +23,7 @@ Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/age
 
 ## How it works
 
-Glob is an app you open: double-click the **Glob** shortcut on your desktop or in the Start menu, or run `glob-app`. It opens in its own window and keeps running in the background, with a tray icon (**Open Glob**, **Quit Glob**). *Settings → About* shows where it is installed.
+Glob is an app you open: double-click the **Glob** shortcut on your desktop or in the Start menu, or run `glob-app`. It opens in its own window and keeps running in the background, with a tray icon (**Open Glob**, **Quit Glob**). *Settings → Files & app* shows where it is installed.
 
 Glob has its own chat, a separate session from your coding agent. It runs on your Claude Code or Codex login, no API key needed. The chat organizes the workspace, writes style and prompts, and generates art. Your coding agent never manages the workspace.
 
@@ -81,27 +79,36 @@ Make an asset of kind **Level kit** and describe one section of your level. Its 
 
 ## Get started
 
-### 1. Tell your agent
+### 1. Download Glob
 
-Paste this into your coding agent (Claude Code, Codex, Cursor, Copilot, OpenCode, Gemini CLI), from your game's folder:
+[**Windows installer**](https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe) · [**macOS app**](https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg) · or any build on the [releases page](https://github.com/SoulNassim/Glob-Game-Forge/releases).
+
+Glob isn't code-signed yet. Windows may say "Windows protected your PC": click **More info → Run anyway**. On macOS, right-click Glob → **Open** the first time.
+
+### 2. Open it and point it at your game
+
+Glob opens in its own window. Make a project, pick your game's folder (or paste its path, or start without one), and sign in to a generator in **Settings → Accounts**. One ElevenLabs sign-in already gives you images and sounds. Keys stay on your computer.
+
+Picking the game folder makes the project in `<game>/glob/` and writes a short note into the game's `AGENTS.md` and `CLAUDE.md`.
+
+### 3. Your coding agent finds it
+
+Coding agents read `AGENTS.md` (Codex, Cursor, Copilot, OpenCode, Gemini CLI) or `CLAUDE.md` (Claude Code) on their own. The note tells them Glob's art is listed in `glob/ASSETS.md`. Make art in Glob, then ask your agent:
+
+> *"Use the Glob art for the knight."*
+
+It copies the files into your game and keeps placeholders for anything you haven't made yet. Nothing to install in the agent, no MCP server, no restart. If an agent ever misses the note, tell it once: *"Read glob/ASSETS.md and copy the Glob art you need."*
+
+<details>
+<summary><b>Other ways to install</b>: let your agent do it, or the command line</summary>
+
+**Let your coding agent do it.** Paste this into your agent, from your game's folder. It follows [`docs/agent.md`](docs/agent.md): installs Glob (you approve one command) and runs `glob connect`.
 
 ```text
 Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md
 ```
 
-Your agent follows [`docs/agent.md`](docs/agent.md). It asks you to approve one install command (a plain [uv](https://docs.astral.sh/uv/) package install, or the installer script when uv is missing; if your agent's safety settings block it, it shows you the command to run yourself). Then it runs `glob connect` in your game folder, which
-
-- makes the game's Glob project (in `<game>/glob/`), or finds the one made before;
-- writes a short note into `AGENTS.md` (and `CLAUDE.md` / `GEMINI.md` when the game has them) telling your coding agent where the finished art is;
-- creates the **Glob** shortcut on your desktop and in the Start menu;
-- opens Glob's window on your game.
-
-### 2. Set up Glob
-
-A short setup connects your AI and a generator. **Settings → Accounts** shows four lights (Images, 3D models, Sounds, Glob chat) and one card per service: **Sign in** (ElevenLabs, Meshy, fal, Higgsfield) or paste a key (Gemini, Tripo, Stability). One ElevenLabs sign-in already gives you images and sounds. Keys stay on your computer; they never pass through the agent's chat. Your coding agent needs no server, no restart and no approval.
-
-<details>
-<summary><b>Rather do it yourself?</b> Install, then <code>glob connect</code></summary>
+**Command line:**
 
 ```bash
 # Already have uv (any OS)
@@ -144,15 +151,15 @@ Glob opens in its own app window (`glob-app`, the Glob shortcut, or the installe
 </details>
 
 <details>
-<summary>What connecting writes into your game folder</summary>
+<summary>What linking writes into your game folder</summary>
 
-- A short note between `<!-- glob:start -->` and `<!-- glob:end -->` in `AGENTS.md` (and `CLAUDE.md` / `GEMINI.md` when they exist), saying where the finished art is and that the agent copies it from `glob/ASSETS.md`.
+- A short note between `<!-- glob:start -->` and `<!-- glob:end -->` in `AGENTS.md` and `CLAUDE.md` (and `GEMINI.md` when the game has one), saying where the finished art is and that the agent copies it from `glob/ASSETS.md`.
 - `glob/`, Glob's project for the game. Its `workspace/` folder holds the art, and `glob/ASSETS.md` indexes it. Your coding agent only reads `ASSETS.md` and copies files out; it never edits `glob/`.
 - `glob/.gitignore`, so your game's git skips Glob's internal files (database, logs, job list) but keeps the art.
 
 </details>
 
-### 3. Build your game
+### 4. Build your game
 
 Ask your agent for something that needs art:
 

@@ -1873,6 +1873,14 @@ def test_connect_writes_agent_files_and_disconnect_removes_only_globs_part(tmp_p
     assert "<!-- glob:start -->" in agents and "ASSETS.md" in agents  # this project lives outside the game: the full path
     assert not (game / "GEMINI.md").exists()  # only written where the game already has the file
 
+    # A game without CLAUDE.md gets one too: Claude Code reads only that file, not AGENTS.md.
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    connect.connect("bare", str(bare), root=root)
+    assert "<!-- glob:start -->" in (bare / "CLAUDE.md").read_text(encoding="utf-8")
+    connect.disconnect("bare", root=root)
+    assert not (bare / "CLAUDE.md").exists()
+
     connect.disconnect("demo", root=root)
     assert (game / "CLAUDE.md").read_text(encoding="utf-8") == "# My notes\n"
     assert not (game / "AGENTS.md").exists()

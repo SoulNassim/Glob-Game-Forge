@@ -1274,7 +1274,7 @@ async function connectSettings() {
     </div>`;
   if (!cn?.connected) {
     return `<h1>Your game</h1>
-      <p class="st-lede">Link ${esc(humanize(state.project))} to your game folder. Glob writes a short note into <code>AGENTS.md</code> so any coding agent (Claude Code, Codex, Cursor, Copilot…) knows where the finished art is.</p>
+      <p class="st-lede">Link ${esc(humanize(state.project))} to your game folder. Glob writes a short note into <code>AGENTS.md</code> and <code>CLAUDE.md</code> so any coding agent (Claude Code, Codex, Cursor, Copilot…) knows where the finished art is.</p>
       ${how}
       <div class="st-label">Game folder</div>
       <div class="cn-pick"><input id="cnFolder" placeholder="/path/to/your/game" value="${esc(draft.folder)}" spellcheck="false"><button class="ghost" data-cn-browse>Browse…</button></div>
