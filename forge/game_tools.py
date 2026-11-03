@@ -328,13 +328,13 @@ def split_image(ws_dir: Path, asset_rel: str, image_rel: str, boxes: list[dict[s
         crop = image.crop((left, top, right, bottom))
         if level_sheet:
             crop = _knock_out_background(crop)
-        name = str(box.get("name") or "").strip() or f"{asset_path.stem} part {index}"
+        name = " ".join(word[:1].upper() + word[1:] for word in (str(box.get("name") or "").strip() or f"{asset_path.stem} part {index}").split())
         slug = slugify(name) or f"part-{index}"
         if as_assets:
             new_md = _unique((props_dir if level_sheet else asset_path.parent) / f"{slug}.md")
             folder = output_dir(new_md) / "candidates"
             folder.mkdir(parents=True, exist_ok=True)
-            picture = folder / f"{new_md.stem}-split.png"
+            picture = folder / f"{new_md.stem}.png"
             crop.save(picture)
             kind = meta.get("kind") if meta.get("kind") in ASSET_KINDS and not level_sheet else "prop"
             fields = {"kind": kind, "prompt": name, "winner": _ws_rel(ws_dir, picture), "split_from": asset_rel}

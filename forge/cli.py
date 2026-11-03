@@ -67,7 +67,7 @@ def main() -> None:
 
     print(f"\n  Glob {__version__}: your game's asset studio")
     print(f"  -> Studio       : {url}")
-    print(f"  -> Coding agent : run `glob connect` in your game folder (MCP server `glob`)")
+    print(f"  -> Your game    : run `glob connect` in your game folder; your coding agent copies art from glob/ASSETS.md")
     print(f"  -> Mode         : {'Demo Mode (No API keys needed)' if cfg.demo_mode else 'Live Provider Mode'}\n")
 
     if not args.no_browser:

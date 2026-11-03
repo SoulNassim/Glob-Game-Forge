@@ -157,9 +157,10 @@ h2.block-title { font-size: 12px; letter-spacing: .14em; text-transform: upperca
 .empty { max-width: 560px; margin: 8vh auto; text-align: center; color: var(--muted); }
 .empty h1 { color: var(--text); font-size: 30px; margin: 0 0 10px; font-weight: 600; }
 
-.doc-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 22px; }
-.doc-bar .path { font: 12px var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 4ch; flex: 1 1 0; direction: rtl; text-align: left; }
-.doc-bar > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: 0 1 auto; }
+.doc-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 22px; }
+/* The path takes what's left; when the buttons need the room, they move under it instead of stacking up. */
+.doc-bar .path { font: 12px var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 160px; direction: rtl; text-align: left; }
+.doc-bar > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: 0 0 auto; max-width: 100%; }
 .editor { width: 100%; min-height: 60vh; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 16px; font: 13px/1.6 var(--mono); resize: vertical; outline: none; }
 
 /* Markdown */
@@ -1775,3 +1776,38 @@ body.gallery-mode .asset-tile.add, body.gallery-mode .actions-row { display: non
 .level-kit li strong { display: block; font-size: 13px; font-weight: 600; }
 .level-kit li small { display: block; color: var(--faint); font-size: 12px; }
 .level-kit li.done strong { color: var(--muted); }
+
+/* New project: paste a path, or start with no game folder */
+.ob-path { display: flex; gap: 8px; width: min(520px, 100%); margin-top: 10px; }
+.ob-path input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: rgba(0, 0, 0, .25); color: var(--text); font: 13px var(--mono); }
+.ob-alt { width: min(520px, 100%); margin: 10px 0 0; font-size: 12.5px; }
+.ob-alt .link-btn { color: var(--muted); text-decoration: underline; }
+.ob-picking { display: flex; align-items: center; gap: 8px; width: min(520px, 100%); margin: 8px 0 0; color: var(--sakura-soft); font-size: 12.5px; }
+.ob-why { margin: 8px 0 0; color: var(--faint); font-size: 12.5px; }
+.ob-folder.static { cursor: default; border-style: solid; }
+
+/* Phone: the Generate window's buttons stack instead of running off the screen */
+@media (max-width: 600px) {
+  .sheet-foot { flex-wrap: wrap; padding: 12px 16px; gap: 8px; }
+  .sheet-foot .grow { display: none; }
+  .sheet-foot > * { flex: 1 1 auto; }
+  .sheet-foot .run-btn { order: -1; flex: 1 1 100%; justify-content: center; }
+  .sheet-head h2 { font-size: 17px; }
+  .sheet-head p { display: none; }
+  .st-nav { overflow-x: auto; flex-wrap: nowrap; }
+  .st-nav button { white-space: nowrap; }
+}
+
+.form-why { margin: -4px 0 0; color: #fca5a5; font-size: 12.5px; }
+/* A 2D / 3D switch: two pills */
+.seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--control); border: 1px solid var(--line); }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: block; padding: 6px 14px; border-radius: 8px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.seg input:checked + span { background: var(--elevated); color: var(--text); box-shadow: 0 0 0 1px var(--line-strong); }
+.seg input:focus-visible + span { outline: 2px solid var(--sakura); }
+/* Disabled buttons look disabled */
+button:disabled, button[disabled] { opacity: .38; cursor: not-allowed; filter: grayscale(.4); }
+.level-kit li.wait small { color: var(--sakura-soft); }
+.sheet-foot .cost .short { display: block; margin-top: 3px; color: #fca5a5; font-weight: 500; }
+.sheet-foot .cost .short a { color: inherit; }
+.palette-btn kbd { white-space: nowrap; }

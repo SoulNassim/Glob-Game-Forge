@@ -23,8 +23,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from forge.asset_studio import describe_asset, output_dir
-from forge.overview import _visible, humanize, resolve_rel
+from forge.asset_studio import AUDIO_KINDS, describe_asset, output_dir
+from forge.overview import _visible, humanize, project_dimension, resolve_rel
 
 EXPORT_DIR = "exports"
 
@@ -57,7 +57,7 @@ def _sidecar(ws_dir: Path, file_rel: str) -> dict[str, Any]:
         return {}
 
 
-def vault_entry(ws_dir: Path, rel: str) -> dict[str, Any] | None:
+def vault_entry(ws_dir: Path, rel: str, dimension: str = "3d") -> dict[str, Any] | None:
     asset = describe_asset(ws_dir, rel)
     if not asset["is_asset"]:
         return None
@@ -66,6 +66,11 @@ def vault_entry(ws_dir: Path, rel: str) -> dict[str, Any] | None:
     model = models[0] if models else None
     if not asset["winner"] and not model:
         return None
+    # A sound's winner is its take; a 2D image is final once picked; a 3D image also needs its model.
+    if asset["kind"] in AUDIO_KINDS or dimension == "2d":
+        ready = bool(asset["winner"])
+    else:
+        ready = bool(asset["winner"] and model)
     folder = Path(asset["path"]).parent.as_posix()
     return {
         "path": asset["path"],
@@ -77,17 +82,18 @@ def vault_entry(ws_dir: Path, rel: str) -> dict[str, Any] | None:
         "model": model,
         "model_settings": _sidecar(ws_dir, model["path"]).get("settings", {}) if model else {},
         "counts": {kind: len(items) for kind, items in outputs.items()},
-        "ready": bool(asset["winner"] and model),
+        "ready": ready,
         "prompt": asset["prompt"],
     }
 
 
 def list_vault(ws_dir: Path) -> dict[str, Any]:
     """Every asset with a winner or a model, grouped by top-level section."""
+    dimension = project_dimension(ws_dir)
     entries = []
     for doc in _asset_docs(ws_dir):
         try:
-            entry = vault_entry(ws_dir, doc.relative_to(ws_dir.resolve()).as_posix())
+            entry = vault_entry(ws_dir, doc.relative_to(ws_dir.resolve()).as_posix(), dimension)
         except (FileNotFoundError, ValueError):
             continue
         if entry:
@@ -100,7 +106,8 @@ def list_vault(ws_dir: Path) -> dict[str, Any]:
         "totals": {
             "assets": len(entries),
             "ready": sum(1 for e in entries if e["ready"]),
-            "images": sum(1 for e in entries if e["winner"]),
+            # Final images only: a sound's winner is a take, counted apart.
+            "images": sum(1 for e in entries if e["winner"] and e["kind"] not in AUDIO_KINDS),
             "models": sum(1 for e in entries if e["model"]),
         },
     }

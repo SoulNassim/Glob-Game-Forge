@@ -168,3 +168,33 @@ def test_rig_refuses_models_over_meshy_triangle_limit(tmp_path):
     assert game_tools.glb_triangles(ws / model) == 400_000
     with pytest.raises(ValueError, match="400,000 triangles"):
         asyncio.run(game_tools.rig_model(ws, "chars/duo.md", model))
+
+
+def test_prop_sheet_uses_the_style_bible_and_the_project_dimension(tmp_path):
+    ws = tmp_path / "ws"
+    (ws / "levels" / "crypt" / "candidates").mkdir(parents=True)
+    (ws / "pillars").mkdir()
+    (ws / "pillars" / "palette.md").write_text("# Palette\n\nWarm ochre and moss only.\n", encoding="utf-8")
+    Image.new("RGB", (64, 36), (10, 10, 10)).save(ws / "levels" / "crypt" / "candidates" / "a.png")
+    (ws / "levels" / "crypt.md").write_text("---\nkind: level\nprompt: A crypt\nwinner: levels/crypt/candidates/a.png\n---\n# Crypt\n", encoding="utf-8")
+
+    request = asset_studio.build_request(ws, "levels/crypt.md", "prop_sheet")
+    assert request["use_bible"] is True and request["bible"] and "Warm ochre" in request["bible"][0]["text"]
+    assert "as for a 3D model" in request["prompt"]  # no project.json: 3D is the default
+
+    (tmp_path / "project.json").write_text('{"bible": {"project_dimension": "2d"}}', encoding="utf-8")
+    flat = asset_studio.build_request(ws, "levels/crypt.md", "prop_sheet")
+    assert "drawn as flat 2D game sprites in the same camera view as the level picture" in flat["prompt"]
+    assert "as for a 3D model" not in flat["prompt"]
+
+
+def test_cut_props_are_named_in_title_case_with_a_slug_picture(tmp_path):
+    ws = _workspace(tmp_path)
+    boxes = [{"x": 0.05, "y": 0.1, "w": 0.3, "h": 0.7, "name": "wooden barrel"}]
+    made = game_tools.split_image(ws, "chars/duo.md", "chars/duo/candidates/sheet.png", boxes, as_assets=True)
+    assert made == ["chars/wooden-barrel.md"]
+    asset = asset_studio.describe_asset(ws, "chars/wooden-barrel.md")
+    assert asset["winner"] == "chars/wooden-barrel/candidates/wooden-barrel.png"
+    assert (ws / asset["winner"]).is_file()
+    assert "# Wooden Barrel" in (ws / "chars" / "wooden-barrel.md").read_text(encoding="utf-8")
+    assert asset["prompt"] == "Wooden Barrel"

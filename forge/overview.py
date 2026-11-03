@@ -10,6 +10,7 @@ Nothing here assumes particular folder names. The conventions are:
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from pathlib import Path
@@ -342,6 +343,16 @@ def project_card(ws_dir: Path, project: str) -> dict[str, Any]:
     return card
 
 
+def project_dimension(ws_dir: Path) -> str:
+    """The bible's project dimension: "3d", "2d" or "hybrid" (3d when unset or unreadable)."""
+    try:
+        raw = json.loads((ws_dir.parent / "project.json").read_text(encoding="utf-8"))
+        value = str((raw.get("bible", raw) or {}).get("project_dimension") or "3d")
+    except (OSError, ValueError, AttributeError):
+        return "3d"
+    return value if value in ("3d", "2d", "hybrid") else "3d"
+
+
 def build_overview(ws_dir: Path, project: str) -> dict[str, Any]:
     root = describe_folder(ws_dir)
     if not root["page"]:
@@ -353,7 +364,7 @@ def build_overview(ws_dir: Path, project: str) -> dict[str, Any]:
         last = int(match.group(1)) if match else last + 1
         sections.append({"number": f"{last:02d}", **folder, "children": folder_tree(ws_dir, ws_dir / folder["path"])})
     return {"project": project, **root, "sections": sections, "showcase": showcase(ws_dir, sections),
-            "empty": not root["page"] and not sections and not root["files"]}
+            "dimension": project_dimension(ws_dir), "empty": not root["page"] and not sections and not root["files"]}
 
 
 def showcase(ws_dir: Path, sections: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
@@ -391,9 +402,18 @@ def slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")[:60]
 
 
+_UNSAFE_TITLE = re.compile(r'[\x00-\x1f<>:"|?*\\/]')
+
+
+def folder_title(value: str) -> str:
+    """A folder title that is safe as a name: no separators, '..', or characters Windows rejects."""
+    cleaned = re.sub(r"\.{2,}", "", _UNSAFE_TITLE.sub(" ", str(value or "")))
+    return re.sub(r"\s+", " ", cleaned).strip(" .")
+
+
 def create_folder(ws_dir: Path, parent: str, title: str) -> str:
     """Create a sub-folder with a README.md page; returns its workspace-relative path."""
-    title = str(title or "").strip()
+    title = folder_title(title)
     slug = slugify(title)
     if not slug:
         raise ValueError("Give the folder a name.")

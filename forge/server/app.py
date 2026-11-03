@@ -8,6 +8,7 @@ and routes all UI and Agent actions through `ForgeActionLayer`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from html import escape as html_escape
 import os
@@ -406,6 +407,11 @@ async def api_create_project(payload: dict[str, Any]) -> dict[str, Any]:
     if not name or name in {".", ".."}:
         raise HTTPException(status_code=400, detail="Project name is invalid.")
     game = Path(str(payload.get("game_folder") or "")).expanduser() if payload.get("game_folder") else None
+    if game is not None and game.is_absolute() and not game.exists() and payload.get("create_game_folder"):
+        try:
+            game.mkdir(parents=True)  # a typed path to a game that has no folder yet
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"Could not make the folder {game}: {exc.strerror or exc}") from exc
     if game is not None and not (game.is_absolute() and game.is_dir()):
         raise HTTPException(status_code=400, detail="Choose your game's folder.")
     # Optional: keep Glob's files somewhere other than the game's glob/ folder (say, in Documents).
@@ -1971,6 +1977,7 @@ async def _run_studio_job(project: str, job: dict[str, Any], request: dict[str, 
         job["status"], job["error"] = "failed", reason[:400]
         _note_credits(request, "", reason, 0)
     job["finished_at"] = time.time()
+    _credit_balance_cache.clear()  # the job may have spent credits: the next balance read is fresh
     _save_jobs(project)
     await ws_manager.broadcast({"type": "studio_job", "project": project, "job": dict(job)})
     await workspace_changed(project)
@@ -2125,14 +2132,36 @@ async def api_studio_credits() -> dict[str, Any]:
     balance = None
     key = load_config().get_key("meshy")
     if key:
-        try:
-            async with httpx.AsyncClient(timeout=6) as client:
-                res = await client.get("https://api.meshy.ai/openapi/v1/balance", headers={"Authorization": f"Bearer {key}"})
-            if res.status_code == 200:
-                balance = res.json().get("balance")
-        except (httpx.HTTPError, ValueError):
-            pass
+        balance = _cached_meshy_balance(key)
+        if balance is None:
+            try:
+                async with httpx.AsyncClient(timeout=6) as client:
+                    res = await client.get("https://api.meshy.ai/openapi/v1/balance", headers={"Authorization": f"Bearer {key}"})
+                if res.status_code == 200:
+                    balance = res.json().get("balance")
+                    _credit_balance_cache["meshy"] = (time.time(), _key_fingerprint(key), balance)
+            except (httpx.HTTPError, ValueError):
+                pass
     return {"alerts": fresh, "meshy_balance": balance}
+
+
+# Meshy's balance, kept per provider for a minute: the generate sheet asks for it every time it opens.
+# Cleared when a generation job finishes, since that is when the balance changes.
+CREDIT_CACHE_SECONDS = 60
+_credit_balance_cache: dict[str, tuple[float, str, Any]] = {}
+
+
+def _key_fingerprint(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _cached_meshy_balance(key: str) -> Any | None:
+    """The cached balance for this key, while it is less than a minute old (a new key never gets another's)."""
+    entry = _credit_balance_cache.get("meshy")
+    if not entry:
+        return None
+    at, fingerprint, balance = entry
+    return balance if fingerprint == _key_fingerprint(key) and time.time() - at < CREDIT_CACHE_SECONDS else None
 
 
 @app.get("/api/studio/batch")

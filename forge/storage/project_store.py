@@ -74,6 +74,19 @@ def home_for(project_name: str, game_folder: Path, home_folder: Path | None = No
     return home_folder if (home_folder / "manifest.db").exists() else home_folder / project_name
 
 
+GAME_IGNORE = (
+    "# Glob's own records; workspace/, vault/ and ASSETS.md are your project.\n"
+    "manifest.db*\nstudio_jobs.json\nlogs/\ninbox_watch/\nassets/\n"
+)
+
+
+def write_home_ignore(home: Path) -> None:
+    """Keep Glob's internal files out of the game's git. An existing .gitignore is never overwritten."""
+    ignore = home / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text(GAME_IGNORE, encoding="utf-8")
+
+
 def make_home(project_name: str, game_folder: Path, root_dir: Path | None = None, home_folder: Path | None = None) -> Path:
     """Put a project's files in its home (see `home_for`) and point its entry there."""
     home = home_for(project_name, game_folder, home_folder)
@@ -81,9 +94,7 @@ def make_home(project_name: str, game_folder: Path, root_dir: Path | None = None
     if home.resolve().is_relative_to(game_folder.resolve()):
         # Godot imports every file under res:// unless the folder has a .gdignore.
         (home / ".gdignore").touch()
-    ignore = home / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("# Glob's own records; workspace/ and assets/ are your project.\nmanifest.db*\nlogs/\ninbox_watch/\n", encoding="utf-8")
+        write_home_ignore(home)
     entry = (root_dir or get_projects_root()) / project_name
     entry.mkdir(parents=True, exist_ok=True)
     (entry / HOME_FILE).write_text(json.dumps({"folder": str(home.resolve())}, indent=2), encoding="utf-8")

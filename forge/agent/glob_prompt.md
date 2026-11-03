@@ -98,6 +98,13 @@ A separate coding agent builds the game. It never manages this workspace: it cop
 Your job is to make that list good: one asset page per thing the game needs, a winner picked for each, and
 models where the game needs 3D. Never touch the game's own files.
 
+## Talking to the user
+
+Use the words the user sees in the app, never internal ids. Say "Generate 2D", "Variant", "Edit image",
+"Turnaround", "Make sheet", "Cut", "Make 3D", "Rig", "Animate", never candidates, views, prop_sheet, make_3d or
+other action or tool names. Say "sound effect", "voice line" and "music" for sfx, voice and music assets. Keep
+answers short: a sentence or two, then what you did or what the user can press next.
+
 ## How you work
 
 - When asked to create a project structure, create the folders AND write a README.md with real, specific

@@ -127,6 +127,7 @@ def connect(project: str, folder: str, targets: list[str] | None = None, root: P
         raise ValueError(f"'{folder}' is not a folder.")
     game = game.resolve()
     _remove_old_setup(game)
+    _write_game_ignore(project, game, root)
     index = _index_ref(project, game, root)
     for name in NOTE_FILES:
         # AGENTS.md always; CLAUDE.md and GEMINI.md when the game has them (they'd otherwise be made just for this).
@@ -136,6 +137,15 @@ def connect(project: str, folder: str, targets: list[str] | None = None, root: P
     game_link.set_link(project, game, [], root)
     _write_index(project, root)
     return status(project, root)
+
+
+def _write_game_ignore(project: str, game: Path, root: Path | None) -> None:
+    """`<game>/glob/.gitignore` for a project living there, so the game's git skips Glob's internal files."""
+    from forge.storage.project_store import GAME_HOME, ProjectStore, write_home_ignore
+
+    home = ProjectStore(project_name=project, root_dir=root).project_dir
+    if home == (game / GAME_HOME).resolve():
+        write_home_ignore(home)
 
 
 def _index_ref(project: str, game: Path, root: Path | None) -> str:

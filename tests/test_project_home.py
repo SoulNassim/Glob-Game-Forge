@@ -70,3 +70,24 @@ def test_voice_asset_remembers_the_picked_voice(client: TestClient, tmp_path: Pa
     asset = client.get("/api/studio/asset", params={"project": project, "path": "sound/hype.md"}).json()
     assert asset["meta"]["voice"] == "V1" and asset["meta"]["voice_name"] == "Tyler" and "secret" not in asset["meta"]
     assert client.post("/api/studio/preview", params={"project": project}, json={"path": "sound/hype.md"}).json()["settings"]["voice_id"] == "V1"
+
+
+def test_game_folder_gitignore_skips_glob_internals(client: TestClient, tmp_path: Path) -> None:
+    from forge.agent import connect as connect_agent
+
+    game = tmp_path / "Gitty"
+    game.mkdir()
+    project = client.post("/api/projects", json={"name": "Gitty", "unique": True, "game_folder": str(game)}).json()["project"]
+    ignore_file = game / "glob" / ".gitignore"
+    ignore = ignore_file.read_text(encoding="utf-8").splitlines()
+    for line in ("manifest.db*", "studio_jobs.json", "logs/", "inbox_watch/", "assets/"):
+        assert line in ignore
+    assert not any(line.startswith(("workspace", "vault", "ASSETS")) for line in ignore)  # the game keeps these
+
+    # Connecting restores a missing .gitignore, but never overwrites one the user or Glob already wrote.
+    ignore_file.unlink()
+    connect_agent.connect(project, str(game))
+    assert "studio_jobs.json" in ignore_file.read_text(encoding="utf-8")
+    ignore_file.write_text("mine/\n", encoding="utf-8")
+    connect_agent.connect(project, str(game))
+    assert ignore_file.read_text(encoding="utf-8") == "mine/\n"

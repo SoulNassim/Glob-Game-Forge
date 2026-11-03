@@ -26,7 +26,7 @@ from typing import Any
 from forge.blueprint_contract import serialize_frontmatter, split_frontmatter
 from forge.config import load_config
 from forge.models import AssetType
-from forge.overview import IMAGE_SUFFIXES, MODEL_SUFFIXES, FOLDER_PAGES, TRASH_DIR, move_to_trash, resolve_rel
+from forge.overview import FOLDER_PAGES, IMAGE_SUFFIXES, MODEL_SUFFIXES, TRASH_DIR, move_to_trash, project_dimension, resolve_rel
 from forge.prompt_sanitize import finalize_generation_prompt
 from forge.providers.base import ProviderCapability
 from forge.providers.elevenlabs_image import resolve_image_provider
@@ -113,13 +113,19 @@ VIEWS_RULE = (
 EDIT_RULE = "Edit the first attached image. Change only what is described above and keep everything else identical."
 # Level kit: one picture of a level section, then every prop in it on one sheet that Glob cuts up on this computer,
 # instead of one paid image per prop.
-PROP_SHEET_RULE = (
-    "The attached image is a game level section. Make a prop sheet from it: draw every separate prop, piece of "
-    "furniture and decoration you can see in it (not the floor, walls or characters) once each, in the same art style, "
-    "materials and colours, each one whole and seen from the front at a slight top-down angle, as for a 3D model. "
-    "Lay them out in a tidy grid with wide empty space between them so none touch or overlap. Plain flat light grey "
-    "background (#E5E5E5), no shadows on the ground, no text, labels, numbers or borders."
-)
+def prop_sheet_rule(dimension: str) -> str:
+    """The prop sheet instruction; 3D projects get props for a 3D model, 2D and hybrid ones flat sprites."""
+    view = (
+        "seen from the front at a slight top-down angle, as for a 3D model" if dimension == "3d"
+        else "drawn as flat 2D game sprites in the same camera view as the level picture"
+    )
+    return (
+        "The attached image is a game level section. Make a prop sheet from it: draw every separate prop, piece of "
+        "furniture and decoration you can see in it (not the floor, walls or characters) once each, in the same art style, "
+        f"materials and colours, each one whole and {view}. "
+        "Lay them out in a tidy grid with wide empty space between them so none touch or overlap. Plain flat light grey "
+        "background (#E5E5E5), no shadows on the ground, no text, labels, numbers or borders."
+    )
 
 
 # ---------- reading assets ----------
@@ -559,7 +565,7 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
 
     if action == "prop_sheet":
         wanted = instruction.strip()
-        parts = [{"source": "Prop sheet", "text": PROP_SHEET_RULE, "role": "rule"}]
+        parts = [{"source": "Prop sheet", "text": prop_sheet_rule(project_dimension(ws_dir)), "role": "rule"}]
         if wanted:
             parts.insert(0, {"source": "Props to draw", "text": f"Props to include: {wanted}.", "role": "subject"})
         return {
@@ -567,8 +573,8 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
             "asset": asset["path"],
             "prompt": compose_prompt([part["text"] for part in parts], cfg, "1:1"),
             "parts": parts,
-            "bible": [],
-            "use_bible": False,
+            "bible": asset["text_pillars"],
+            "use_bible": True,
             "references": [{"path": source, "source": "Level image", "role": "source"}],
             "model": model or default_image_model(cfg),
             "settings": {"aspect_ratio": "1:1", "transparent_background": False},
@@ -620,7 +626,7 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
         "model": model or default_image_model(cfg),
         "settings": {"aspect_ratio": aspect, "transparent_background": cutout_background(asset, cfg)},
         "pillar_strength": strength,
-        "count": 2 if action == "candidates" else 1,
+        "count": 1,  # one image per run: pick the count up in the window when you want a choice
     }
 
 
@@ -971,6 +977,11 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
         remember["aspect"] = params["aspect_ratio"]  # the next run opens with the framing picked this time
     if created and meta.get("cover") and not meta.get("winner"):
         remember["winner"] = created[0]  # key art goes straight onto the project card
+    elif action == "candidates" and created and not meta.get("winner"):
+        # A lone image is the pick: as with the first sound take, there is nothing else to choose from.
+        images = [o["path"] for items in list_outputs(ws_dir, asset_path).values() for o in items if o["type"] == "image"]
+        if len(images) == 1:
+            remember["winner"] = images[0]
     if remember:
         update_asset(ws_dir, asset_rel, remember)
     return created

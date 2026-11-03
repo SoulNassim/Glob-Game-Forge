@@ -298,8 +298,10 @@ function renderProjectGrid() {
     ${cards.map((c) => {
       const imgs = c.images.map((img) => `<img src="${esc(projectFileUrl(c.project, img))}" alt="" loading="lazy">`);
       const initials = c.title.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+      // Two projects with one name: say which folder each is.
+      const twin = cards.filter((x) => x.title.toLowerCase() === c.title.toLowerCase()).length > 1;
       return `<div class="pcard${c.project === state.project ? " current" : ""}" data-open-project="${esc(c.project)}" tabindex="0" role="button">
-        <div class="pcard-head"><div><strong>${esc(c.title)}</strong><small>${esc(timeAgo(c.updated))}</small>
+        <div class="pcard-head"><div><strong>${esc(c.title)}</strong>${twin ? `<small class="pcard-folder">${esc(humanize(c.project))}</small>` : ""}<small>${esc(timeAgo(c.updated))}</small>
           <small>${c.sections} section${c.sections === 1 ? "" : "s"} · ${c.assets} asset${c.assets === 1 ? "" : "s"}</small></div>
           <button class="pcard-del" data-st-export="${esc(c.project)}" title="Export workspace as .zip" aria-label="Export ${esc(c.title)} workspace as .zip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
           ${c.project === "default" ? "" : `<button class="pcard-del" data-delete-project="${esc(c.project)}" title="Delete project" aria-label="Delete ${esc(c.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>`}</div>
@@ -310,7 +312,7 @@ function renderProjectGrid() {
       </div>`;
     }).join("")}
     ${(state.cards || []).some((c) => c.project.startsWith("pocket_kaiju")) || query ? "" : `<button class="pcard pcard-sample" data-install-sample><span class="pcard-sample-art"><img src="/ui/sample-cover.jpg" alt=""></span>
-      <span class="pcard-sample-text"><strong>Explore a finished project</strong><small>Pocket Kaiju: characters, 3D models, sounds and an agent order, ready to click through. No credits used.</small></span></button>`}`;
+      <span class="pcard-sample-text"><strong>Explore a finished project</strong><small>Pocket Kaiju: characters, 3D models and sounds, ready to click through. No credits used.</small></span></button>`}`;
 }
 
 function deleteProjectDialog(project) {
@@ -368,12 +370,20 @@ function chipGroup(name, options, selected) {
 }
 
 // The game folder, and where Glob keeps the project: in the game's glob/ folder unless the user picks another place.
+// Where the game is: pick it (a Windows/macOS folder window), paste its path, or have none yet.
 function obFolders(ob) {
+  if (ob.noGame) {
+    return `<div class="ob-folder on static"><strong>No game folder yet</strong><small>Glob keeps the project in its own folder. Link your game any time in Settings → Your game.</small></div>
+      <p class="ob-alt"><button type="button" class="link-btn" data-ob-hasgame>I have a game folder</button></p>`;
+  }
   const where = ob.home ? `${ob.home.replace(/[\\/]+$/, "")}/${ob.name || "<project name>"}` : ob.game ? `${ob.game.replace(/[\\/]+$/, "")}/glob` : "your game folder, in glob/";
   return `<button type="button" class="ob-folder${ob.game ? " on" : ""}" data-ob-game>${ob.game ? `<strong>${esc(ob.game.split(/[\\/]/).filter(Boolean).pop())}</strong><small>${esc(ob.game)}</small>` : `<strong>Choose game folder…</strong><small>Godot, Unity, Unreal or anything else</small>`}</button>
-    <div class="ob-home"><span>Glob's workspace</span><code title="${esc(where)}"><bdi>${esc(where)}</bdi></code>
+    ${ob.picking ? `<p class="ob-picking"><span class="spinner"></span>A folder window opened. If you can't see it, it's behind this window.</p>` : ""}
+    <div class="ob-path"><input id="obGamePath" spellcheck="false" placeholder="or paste the folder's path, e.g. D:\\Games\\MyGame" value="${esc(ob.typed || "")}"><button type="button" class="ob-back" data-ob-path>Use</button></div>
+    ${ob.game ? `<div class="ob-home"><span>Glob's workspace</span><code title="${esc(where)}"><bdi>${esc(where)}</bdi></code>
       <button type="button" class="link-btn" data-ob-home>${ob.home ? "Change…" : "Keep it somewhere else…"}</button>
-      ${ob.home ? `<button type="button" class="link-btn" data-ob-home-reset>Back to the game folder</button>` : ""}</div>`;
+      ${ob.home ? `<button type="button" class="link-btn" data-ob-home-reset>Back to the game folder</button>` : ""}</div>` : ""}
+    <p class="ob-alt"><button type="button" class="link-btn" data-ob-nogame>No game folder yet? Start without one</button></p>`;
 }
 
 function renderOnboarding() {
@@ -386,7 +396,8 @@ function renderOnboarding() {
     () => `<div class="ob-step"><p class="ob-kicker">1 / 4 · Your game</p><h1>Where's your <em>game</em>?</h1>
       <p class="ob-sub">Pick the game's folder, even an empty one. Glob keeps this project inside it in <code>glob/</code> (or wherever you choose), and your coding agent finds finished assets in <code>glob/ASSETS.md</code>.</p>
       ${obFolders(ob)}
-      <div class="ob-nav">${ob.step > 0 && !ob.seamless ? `<button class="ob-back" data-ob-back>Back</button>` : ""}<button class="ob-next" data-ob-next ${ob.game ? "" : "disabled"}>Continue</button></div></div>`,
+      <div class="ob-nav">${ob.step > 0 && !ob.seamless ? `<button class="ob-back" data-ob-back>Back</button>` : ""}<button class="ob-next" data-ob-next ${ob.game || ob.noGame ? "" : "disabled"}>Continue</button></div>
+      ${ob.game || ob.noGame ? "" : `<p class="ob-why">Pick, paste or skip the game folder to continue.</p>`}</div>`,
     () => `<div class="ob-step"><p class="ob-kicker">2 / 4 · Name</p><h1>What's it called?</h1>
       <input id="obName" class="ob-input" maxlength="60" placeholder="The Hollow Below" value="${esc(ob.name)}" autofocus>
       <div class="ob-nav"><button class="ob-back" data-ob-back>Back</button><button class="ob-next" data-ob-next>Continue</button></div></div>`,
@@ -400,11 +411,11 @@ function renderOnboarding() {
       <textarea id="obRules" class="ob-input small" rows="3" placeholder="Asset rules for every image, e.g. T-pose, front view, under 10k triangles, muted palette…">${esc(ob.rules)}</textarea>
       <div class="ob-nav"><button class="ob-back" data-ob-back>Back</button><button class="ob-next forge" data-ob-forge>✦ Forge my world</button></div></div>`,
     // "Skip · start blank": no questions, but the project still needs its game and a home.
-    () => `<div class="ob-step"><p class="ob-kicker">Blank workspace</p><h1>Where does it <em>live</em>?</h1>
-      <p class="ob-sub">An empty project, linked to your game. Fill it yourself or ask Glob in the chat.</p>
+    () => `<div class="ob-step"><p class="ob-kicker">Blank project</p><h1>Start <em>blank</em>.</h1>
+      <p class="ob-sub">An empty project. Fill it yourself or ask Glob in the chat.</p>
       <input id="obName" class="ob-input" maxlength="60" placeholder="Project name" value="${esc(ob.name)}">
       ${obFolders(ob)}
-      <div class="ob-nav">${ob.seamless ? "" : `<button class="ob-back" data-ob-restart>Answer the questions instead</button>`}<button class="ob-next" data-ob-blank ${ob.game ? "" : "disabled"}>Create blank workspace</button></div></div>`,
+      <div class="ob-nav">${ob.seamless ? "" : `<button class="ob-back" data-ob-restart>Answer the questions instead</button>`}<button class="ob-next" data-ob-blank ${ob.game || ob.noGame ? "" : "disabled"}>Create the project</button></div></div>`,
   ];
   $("#onboarding").classList.toggle("blank", ob.step === OB_BLANK);
   $("#obStage").innerHTML = steps[ob.step]();
@@ -418,13 +429,14 @@ function renderOnboarding() {
 
 function syncOnboarding() {
   const ob = state.ob;
+  if ($("#obGamePath")) ob.typed = $("#obGamePath").value.trim();
   if ($("#obName")) ob.name = $("#obName").value.trim();
   if ($("#obPitch")) ob.pitch = $("#obPitch").value.trim();
   if ($("#obRules")) ob.rules = $("#obRules").value.trim();
 }
 
 async function createProject(name, gameFolder, homeFolder = "") {
-  const created = await api("/api/projects", { method: "POST", body: { name: name || "Untitled project", unique: true, game_folder: gameFolder, home_folder: homeFolder || undefined } });
+  const created = await api("/api/projects", { method: "POST", body: { name: name || "Untitled project", unique: true, game_folder: gameFolder || undefined, home_folder: homeFolder || undefined, create_game_folder: Boolean(gameFolder) } });
   state.project = created.project;
   storeSet("forge.project", created.project);
   if (created.existing) toast(`This game already has a Glob project: opened ${humanize(created.project)}`);
@@ -432,9 +444,14 @@ async function createProject(name, gameFolder, homeFolder = "") {
 }
 
 async function chooseGameFolder() {
+  syncOnboarding();
+  state.ob.picking = true;
+  renderOnboarding();
   const folder = await chooseFolder("Choose your game's folder");
-  if (!folder) return;
+  state.ob.picking = false;
+  if (!folder) return renderOnboarding();
   state.ob.game = folder;
+  state.ob.noGame = false;
   if (!state.ob.name) state.ob.name = folder.split(/[\\/]/).filter(Boolean).pop().replace(/[-_]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
   renderOnboarding();
 }
@@ -462,7 +479,7 @@ async function chooseHomeFolder() {
 
 async function createBlank() {
   syncOnboarding();
-  if (!state.ob.game) return toast("Choose your game's folder first.", true);
+  if (!state.ob.game && !state.ob.noGame) return toast("Pick, paste or skip your game's folder first.", true);
   try {
     const project = await createProject(state.ob.name, state.ob.game, state.ob.home);
     await switchProject(project); // load behind the scene, so the app is ready when it fades out
@@ -474,7 +491,7 @@ async function createBlank() {
 async function forgeWorld() {
   syncOnboarding();
   const ob = state.ob;
-  if (!ob.game) { ob.step = 1; renderOnboarding(); toast("Choose your game's folder first.", true); return; }
+  if (!ob.game && !ob.noGame) { ob.step = 1; renderOnboarding(); toast("Pick, paste or skip your game's folder first.", true); return; }
   if (!ob.name) { ob.step = 2; renderOnboarding(); toast("Give your world a name first.", true); return; }
   $("#onboarding").classList.add("forging");
   $("#obStage").innerHTML = `<div class="ob-step forging-step enter"><div class="ob-orb"><span></span><span></span><span></span></div>
@@ -483,6 +500,7 @@ async function forgeWorld() {
   let poll;
   try {
     const project = await createProject(ob.name, ob.game, ob.home);
+    await api("/api/bible", { method: "PUT", body: { project_dimension: ob.dimension === "2D" ? "2d" : "3d" } }).catch(() => {});
     const look = [ob.dimension, ...ob.looks].join(", ");
     // Spell the dimension out: image models read a bare "3D, Toon" as a flat cartoon drawing.
     const lookLine = ob.dimension === "3D"
@@ -985,11 +1003,20 @@ function capabilities(cfg) {
   const keyImages = (state.studio?.models || []).some((m) => m.available);
   const chat = state.models.find((m) => m.id === state.model && m.ready) || state.models.find((m) => m.ready);
   return [
-    { id: "images", label: "Images", icon: "character", ok: keyImages || sm.image.length > 0, via: keyImages ? "your API keys" : sm.image[0]?.label.split(" · ")[0] },
+    { id: "images", label: "Images", icon: "character", ok: keyImages || sm.image.length > 0, via: imageVia() },
     { id: "3d", label: "3D models", icon: "cube", ok: !!(cfg.meshy_configured || cfg.tripo_configured || cfg.meshy_signed_in || sm["3d"].length), via: cfg.meshy_configured || cfg.meshy_signed_in ? "Meshy" : cfg.tripo_configured ? "Tripo" : sm["3d"][0]?.label.split(" · ")[0] },
     { id: "sounds", label: "Sounds", icon: "sound", ok: !!(cfg.elevenlabs_configured || sv.elevenlabs || cfg.stability_configured), via: cfg.elevenlabs_configured || sv.elevenlabs ? "ElevenLabs" : "Stability AI" },
     { id: "chat", label: "Glob chat", icon: "send", ok: !!chat, via: chat?.label, tab: "models" },
   ];
+}
+
+// The service the default image model is paid through, as the Images light says it.
+function imageVia() {
+  const id = String(state.studio?.selected || "");
+  const svc = (state.serviceModels?.image || []).find((m) => m.id === id);
+  if (svc || id.startsWith("svc:")) return `${svc?.label.split(" · ")[0] || humanize(id.slice(4).split("/")[0])} credits`;
+  const own = (state.studio?.models || []).find((m) => m.id === id);
+  return own ? `your ${own.label.split(" · ")[0]} key` : "ready";
 }
 
 function accountCard(p, cfg) {
@@ -1023,6 +1050,9 @@ function accountsBody(cfg, budget) {
     ${budgetCard(budget)}`;
 }
 
+// Who bills an image model: a signed-in service's credits, or one of your API keys.
+const m0Via = (m, who) => (String(m.id).startsWith("svc:") ? `${who} credits` : `your ${who} key`);
+
 // New art: which service makes images and 3D models, and the shape and background of each kind.
 function defaultsHTML(cfg, studio) {
   const sm = state.serviceModels || { image: [], "3d": [] };
@@ -1030,14 +1060,17 @@ function defaultsHTML(cfg, studio) {
   const opt = (id, label, selected) => `<option value="${esc(id)}" ${id === selected ? "selected" : ""}>${esc(label)}</option>`;
   const images = [...(studio.models || []).filter((m) => m.available), ...sm.image];
   const imageSel = images.length ? `<select name="default_image_model" aria-label="Images are made with">${images.some((m) => m.id === studio.selected) ? "" : opt(studio.selected, `${humanize(String(studio.selected).split("/").pop())}${sm.loading ? " · checking…" : ""}`, studio.selected)}
-      ${group(images).map(([who, items]) => `<optgroup label="${esc(who)}">${items.map((m) => opt(m.id, `${m.label.split(" · ").slice(1).join(" · ") || m.label}${m.price ? ` · $${m.price.toFixed(3)}` : ""}`, studio.selected)).join("")}</optgroup>`).join("")}</select>`
+      ${group(images).map(([who, items]) => `<optgroup label="Paid with ${esc(m0Via(items[0], who))}">${items.map((m) => opt(m.id, `${m.label.split(" · ").slice(1).join(" · ") || m.label} · ${m.price ? `$${m.price.toFixed(3)}, ` : ""}${m0Via(m, who)}`, studio.selected)).join("")}</optgroup>`).join("")}</select>`
     : `<button type="button" class="ghost" data-settings-tab="accounts">Connect an account first →</button>`;
   const current3d = cfg.default_3d_service_model || `keys:${cfg.default_3d_provider || "meshy"}`;
   const own3d = [["meshy", "Meshy (rigs and animations too)"], ["tripo", "Tripo"]].filter(([id]) => cfg[`${id}_configured`] || cfg[`${id}_signed_in`]).map(([id, label]) => ({ id: `keys:${id}`, label: `Your account · ${label}` }));
   const meshes = [...own3d, ...sm["3d"]];
   const meshSel = meshes.length ? `<select name="default_3d" aria-label="3D models are made with">${group(meshes).map(([who, items]) => `<optgroup label="${esc(who)}">${items.map((m) => opt(m.id, m.label.split(" · ").slice(1).join(" · "), current3d)).join("")}</optgroup>`).join("")}</select>`
     : `<button type="button" class="ghost" data-settings-tab="accounts">Connect Meshy first →</button>`;
+  const dim = state.overview?.dimension || "3d";
   return `
+    ${state.project ? `<div class="set-row"><div><strong>${esc(humanize(state.project))} is a</strong><small>2D hides 3D models, rigs and animations from this project. You can switch any time.</small></div>
+      <div class="seg" role="radiogroup">${[["2d", "2D game"], ["3d", "3D game"]].map(([v, l]) => `<label><input type="radio" name="project_dimension" value="${v}" ${(dim === "hybrid" ? "3d" : dim) === v ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></div>` : ""}
     <div class="set-row"><div><strong>Images are made with</strong><small>Every Generate window starts here and can switch for one run.</small></div>${imageSel}</div>
     <div class="set-row"><div><strong>3D models are made with</strong><small>Turns an asset's picked image into a 3D model.</small></div>${meshSel}</div>
     <div class="st-label">Each kind of asset</div>
@@ -1057,7 +1090,14 @@ function readDefaults(form) {
   return out;
 }
 
-async function saveDefaults(form) {
+async function saveDefaults(form, changed) {
+  if (changed?.name === "project_dimension") {
+    try {
+      await api("/api/bible", { method: "PUT", body: { project_dimension: changed.value } });
+      if (state.overview) state.overview.dimension = changed.value;
+      return toast(changed.value === "2d" ? "2D game: 3D tools are hidden" : "3D game: 3D tools are back");
+    } catch (err) { return toast(err.message, true); }
+  }
   try {
     await api("/api/config", { method: "PUT", body: readDefaults(form) });
     state.studio = null;
@@ -1143,7 +1183,7 @@ async function renderSettings() {
 // Settings save as they change: no Save button to forget.
 $("#settingsView").addEventListener("change", async (event) => {
   const form = event.target.form;
-  if (form?.id === "defaultsForm") return saveDefaults(form);
+  if (form?.id === "defaultsForm") return saveDefaults(form, event.target);
   if (form?.id !== "agentForm") return;
   const updates = {
     agent_reasoning_effort: form.agent_reasoning_effort.value,
@@ -1588,11 +1628,30 @@ async function addCandidateImages(files) {
   });
 }
 
-const KIND_ICON = new Proxy({}, { get: (_, k) => (ICON[k] ? icon(k) : "") });
+const KIND_ICON = new Proxy({}, { get: (_, k) => (ICON[k] ? icon(k) : AUDIO_KINDS.includes(k) ? icon("sound") : "") });
+
+const KIND_LABEL = { environment: "Place", level: "Level kit", ui: "UI", vfx: "Effect", sfx: "Sound effect", voice: "Voice line", music: "Music" };
 
 function kindTags(kinds, selected) {
-  return `<div class="kind-tags" role="radiogroup" aria-label="Kind">${kinds.map((k) => `<label class="kind-chip"><input type="radio" name="kind" value="${esc(k)}" ${k === selected ? "checked" : ""} required><span>${KIND_ICON[k] || "•"} ${esc(k === "ui" ? "UI" : k === "vfx" ? "VFX" : k[0].toUpperCase() + k.slice(1))}</span></label>`).join("")}</div>`;
+  return `<div class="kind-tags" role="radiogroup" aria-label="Kind">${kinds.map((k) => `<label class="kind-chip"><input type="radio" name="kind" value="${esc(k)}" ${k === selected ? "checked" : ""}><span>${KIND_ICON[k] || "•"} ${esc(KIND_LABEL[k] || humanize(k))}</span></label>`).join("")}</div>`;
 }
+
+// Example name and description per kind, shown as placeholders in New asset.
+const KIND_EXAMPLE = {
+  character: ["Bronze Knight", "A stout knight in dented bronze armour with a red tabard"],
+  creature: ["Cave Slime", "A wobbly green slime with a glowing core and two tiny eyes"],
+  item: ["Health Potion", "A round glass bottle of bubbling red liquid with a cork"],
+  weapon: ["Rusty Sword", "A short iron sword with a chipped blade and a leather grip"],
+  prop: ["Wooden Barrel", "An old oak barrel with iron bands"],
+  environment: ["Moonlit Forest", "A misty forest clearing at night with tall pines"],
+  level: ["Crypt Room", "Top-down view of a small crypt room with coffins, torches and a broken pillar"],
+  vehicle: ["Mine Cart", "A rusty mine cart on rails, filled with coal"],
+  ui: ["Health Bar", "A red health bar in a carved stone frame"],
+  vfx: ["Fire Burst", "A round burst of orange flames and sparks"],
+  sfx: ["Coin Pickup", "A short bright metallic coin chime, under half a second"],
+  voice: ["Shopkeeper Greeting", "Welcome, traveller! Take a look, everything's on sale."],
+  music: ["Forest Theme", "Calm looping flute and harp melody, gentle and mysterious"],
+};
 
 async function newAssetDialog(folder) {
   const { kinds } = await studioOptions();
@@ -1602,14 +1661,26 @@ async function newAssetDialog(folder) {
     <form class="dlg" id="newAssetForm">
       <h2>New asset</h2>
       <p>Creates a document in <code>${esc(folder || "the project root")}</code> that you can generate images and 3D for.</p>
-      <label>Name<input name="title" required maxlength="80" placeholder="Bronze Knight" autofocus></label>
+      <label>Name<input name="title" maxlength="80" placeholder="${esc(KIND_EXAMPLE[guess]?.[0] || KIND_EXAMPLE.character[0])}" autofocus></label>
       <div class="dlg-field"><span>Kind</span>${kindTags(kinds, guess)}</div>
-      <label>What does it look like?<textarea name="prompt" rows="3" placeholder="A stout knight in dented bronze armour with a red tabard"></textarea></label>
+      <label><span id="naWhat">${AUDIO_KINDS.includes(guess) ? "What does it sound like?" : "What does it look like?"}</span><textarea name="prompt" rows="3" placeholder="${esc(KIND_EXAMPLE[guess]?.[1] || KIND_EXAMPLE.character[1])}"></textarea></label>
+      <p class="form-why" id="naWhy" hidden>Give it a name first.</p>
       <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">Create</button></div>
     </form>`);
+  // The examples follow the kind: a sound gets a sound, a level a level.
+  $("#newAssetForm").addEventListener("change", (event) => {
+    if (event.target.name !== "kind") return;
+    const [name, prompt] = KIND_EXAMPLE[event.target.value] || KIND_EXAMPLE.character;
+    const form = event.target.form;
+    form.title.placeholder = name;
+    form.prompt.placeholder = prompt;
+    $("#naWhat").textContent = event.target.value === "voice" ? "What does the character say?" : AUDIO_KINDS.includes(event.target.value) ? "What does it sound like?" : "What does it look like?";
+  });
   $("#newAssetForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.target));
+    if (!String(data.title || "").trim()) { $("#naWhy").hidden = false; return event.target.title.focus(); }
+    if (!data.kind) { $("#naWhy").textContent = "Pick what kind of asset it is."; $("#naWhy").hidden = false; return; }
     const slug = data.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "asset";
     const path = folder ? `${folder}/${slug}.md` : `${slug}.md`;
     const yaml = (v) => JSON.stringify(String(v).trim());
@@ -1680,9 +1751,7 @@ async function renderViewBody() {
         a front page, a section per part of the game, a style bible, and a page for every character, creature, item, place and sound to make.
         Nothing is generated until you say so.</p>
         <button class="keyart-cta" data-game-build>${icon("sparkle")}<span><strong>Build it in Glob's chat</strong><small>Paste your pitch or design notes, or let Glob read the docs in your game folder</small></span></button>
-        <div class="game-start-agent"><strong>Or ask your coding agent</strong><small>It has Glob's tools after you restart it:</small>
-          <div class="cmd-line"><code>${esc(gameBuildPrompt(g, true))}</code><button class="mini" data-cn-copy="${esc(gameBuildPrompt(g, true))}">Copy</button></div></div>
-        <button class="keyart-cta sample-cta" data-install-sample>${icon("eye")}<span><strong>Or explore a finished project first</strong><small>Pocket Kaiju: characters, 3D models, sounds and an agent order. Opens as its own project; no credits used.</small></span></button></div>`;
+        <button class="keyart-cta sample-cta" data-install-sample>${icon("eye")}<span><strong>Or explore a finished project first</strong><small>Pocket Kaiju: characters, 3D models and sounds. Opens as its own project; no credits used.</small></span></button></div>`;
       return;
     }
     if (ov.empty) {
@@ -1690,7 +1759,7 @@ async function renderViewBody() {
         <p>Tell the agent on the left about your game, for example:</p>
         <p><em>“Create a project structure for a cozy farming game set on a floating island.”</em></p>
         <p>Sections, documents and pages will appear here as the agent creates them.</p>
-        <button class="keyart-cta sample-cta" data-install-sample>${icon("eye")}<span><strong>Or explore a finished project first</strong><small>Pocket Kaiju: characters, 3D models, sounds and an agent order. Opens as its own project; no credits used.</small></span></button></div>`;
+        <button class="keyart-cta sample-cta" data-install-sample>${icon("eye")}<span><strong>Or explore a finished project first</strong><small>Pocket Kaiju: characters, 3D models and sounds. Opens as its own project; no credits used.</small></span></button></div>`;
       return;
     }
     const body = await readPage(ov.page);
@@ -1789,11 +1858,11 @@ function vaultRow(e) {
   const formats = Object.keys(e.model?.formats || {});
   const files = [e.winner ? e.winner.split(".").pop().toUpperCase() : "", ...formats.map((f) => f.toUpperCase())].filter(Boolean);
   const exportPath = [e.folder, e.name].filter(Boolean).join("/");
-  const meshBtn = e.model
+  const meshBtn = AUDIO_KINDS.includes(e.kind) || (is2d() && !e.model) ? "" : e.model
     ? `<button class="vault-thumb mesh" data-view-model="${esc(e.model.path)}" title="Open in the 3D viewer">${e.model.thumb ? `<img src="${esc(fileUrl(e.model.thumb))}" alt="" loading="lazy">` : icon("cube")}</button>`
     : `<button class="vault-thumb mesh missing" data-open="${esc(e.path)}" title="Make 3D"><span>No 3D</span></button>`;
   return `<div class="vault-row${e.ready ? " ready" : ""}">
-    <button class="vault-thumb" data-open="${esc(e.path)}" title="Final image">${e.winner ? `<img src="${esc(fileUrl(e.winner))}" alt="" loading="lazy">` : kindArt(e.kind, "")}</button>
+    <button class="vault-thumb" data-open="${esc(e.path)}" title="${AUDIO_KINDS.includes(e.kind) ? "Final take" : "Final image"}">${e.winner && !AUDIO_KINDS.includes(e.kind) ? `<img src="${esc(fileUrl(e.winner))}" alt="" loading="lazy">` : kindArt(AUDIO_KINDS.includes(e.kind) ? "sound" : e.kind, "")}</button>
     ${meshBtn}
     <div class="vault-info">
       <div class="vault-name"><strong>${esc(e.title)}</strong><span class="kind-tag">${esc(e.kind)}</span>${e.ready ? `<span class="kind-tag win">Ready</span>` : ""}</div>
@@ -2080,7 +2149,7 @@ function renderAssetPage(a) {
         ${heroModel.thumb ? `<img class="hero-poster" src="${esc(fileUrl(heroModel.thumb))}" alt="">` : ""}<div class="hero-stage"></div>
         <span class="out-badge mesh hero-badge">${icon("cube")}3D · drag to turn</span>
         <button type="button" class="mini hero-open" data-view-model="${esc(heroModel.path)}">${icon("eye")}Open viewer</button>
-        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy">${kindArt(a.kind, "")}No picture yet.<br>${(o.candidates || []).length ? `<button type="button" class="link-btn" data-scroll-candidates>Pick one of the ${(o.candidates || []).length} candidates below</button>, <b>drop or paste an image here</b>` : "Generate 2D candidates, <b>drop or paste an image here</b>"}<br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
+        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy">${kindArt(a.kind, "")}No picture yet.<br>${(o.candidates || []).length ? `<button type="button" class="link-btn" data-scroll-candidates>Pick ${(o.candidates || []).length === 1 ? "the candidate" : `one of the ${(o.candidates || []).length} candidates`} below</button>, <b>drop or paste an image here</b>` : "Generate 2D candidates, <b>drop or paste an image here</b>"}<br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
       <div class="asset-side">
         <label class="field-label" for="assetPrompt">Prompt: what this ${esc(a.kind)} looks like</label>
         <textarea id="assetPrompt" class="prompt-box" rows="6" data-asset="${esc(a.path)}">${esc(a.prompt)}</textarea>
@@ -2088,7 +2157,7 @@ function renderAssetPage(a) {
           <button class="primary" data-action="candidates">Generate 2D</button>
           <button class="ghost" data-action="variant"${a.winner ? "" : " disabled"}>Variant</button>
           <button class="ghost" data-action="edit"${a.winner ? "" : " disabled"}>Edit image</button>
-          <button class="ghost sem-mesh" data-action="make_3d"${a.winner ? "" : " disabled"}>Make 3D</button>
+          ${is2d() ? "" : `<button class="ghost sem-mesh" data-action="make_3d"${a.winner ? "" : " disabled"}>Make 3D</button>`}
         </div>
         ${a.kind === "level" ? levelKit(a) : ""}
         ${gameTools(a)}
@@ -2307,6 +2376,9 @@ function renderPreview() {
     : is3d ? ` · ≈ $${(p.settings.should_texture ? 0.3 : 0.2).toFixed(2)} (${p.settings.should_texture ? 30 : 20} Meshy credits)` : model ? ` · ≈ $${(model.price * (p.count || 1)).toFixed(2)}` : "";
   const alert = creditAlert(source !== "keys" ? source : is3d ? "meshy" : (p.model || "").split(":")[0]);
   const balance = is3d && source === "keys" && state.credits?.meshy_balance != null ? ` · ${state.credits.meshy_balance} Meshy credits left` : "";
+  // Not enough Meshy credits for this model: say so and don't let it start a run that will fail.
+  const need = p.settings?.should_texture ? 30 : 20;
+  const short = is3d && source === "keys" && state.credits?.meshy_balance != null && state.credits.meshy_balance < need;
   const refs = p.references.map((r, i) => `
     <label class="ref role-${esc(r.role)}${r.on ? "" : " off"}"><input type="checkbox" data-ref="${i}" ${r.on ? "checked" : ""}>
       <img src="${esc(fileUrl(r.path))}" alt=""><span title="${esc(refLabel(r))}">${esc(refLabel(r).split(" · ")[0])}</span></label>`).join("");
@@ -2346,10 +2418,10 @@ function renderPreview() {
       </div>
       <footer class="sheet-foot">
         ${is3d ? "" : `<label class="inline">Images <select id="pvCount">${[1, 2, 3, 4].map((n) => `<option ${n === p.count ? "selected" : ""}>${n}</option>`).join("")}</select></label>`}
-        <span class="cost">${on} image${on === 1 ? "" : "s"} attached${cost}${balance}</span>
+        <span class="cost">${on} image${on === 1 ? "" : "s"} attached${cost}${balance}${short ? `<b class="short">You need ${need - state.credits.meshy_balance} more Meshy credits. <a href="https://www.meshy.ai/settings/subscription" target="_blank" rel="noopener">Top up ↗</a></b>` : ""}</span>
         <span class="grow"></span>
         ${is3d ? "" : `<button type="button" class="ghost copy-req" data-copy-request title="Copy this prompt and the ticked images, to paste into ChatGPT, Gemini or another tool yourself (no API cost)">${icon("copy")}Copy prompt + images</button>`}
-        <button type="button" class="ghost" data-close>Cancel</button><button type="button" class="run-btn" data-run>${icon(theme.icon)}${esc(ACTION_LABEL[p.action])}</button>
+        <button type="button" class="ghost" data-close>Cancel</button><button type="button" class="run-btn" data-run ${short ? "disabled" : ""}>${icon(theme.icon)}${esc(ACTION_LABEL[p.action])}</button>
       </footer>
     </div>`);
   const instruction = $("#pvInstruction");
@@ -2643,15 +2715,18 @@ async function saveDoc() {
 const MODEL_RE = /\.(glb|gltf|obj|fbx)$/i;
 
 // Level kit: a picture of a level section, then one sheet with all its props, cut up on this computer into props.
+// A 2D project (Settings → New art, or chosen when the project was made) hides the 3D tools; models already made still show.
+const is2d = () => state.overview?.dimension === "2d";
+
 function levelKit(a) {
   const sheet = (a.outputs.sheets || []).find((o) => o.type === "image");
   const props = `${dirOf(a.path) ? `${dirOf(a.path)}/` : ""}${a.path.split("/").pop().replace(/\.md$/, "")}-props`;
-  const step = (n, done, title, text, button) => `<li class="${done ? "done" : ""}"><b>${done ? "✓" : n}</b><div><strong>${title}</strong><small>${text}</small></div>${button}</li>`;
+  const step = (n, done, title, text, button, wait = "") => `<li class="${done ? "done" : wait ? "wait" : ""}"><b>${done ? "✓" : n}</b><div><strong>${title}</strong><small>${wait || text}</small></div>${button}</li>`;
   return `<div class="level-kit"><div class="field-label">${icon("map")} Level kit</div><ol>
     ${step(1, a.winner, "Picture the level", "Describe the section above, generate, pick the one you like.", `<button class="mini" data-action="candidates">Generate</button>`)}
-    ${step(2, sheet, "All its props on one sheet", "One image, not one per prop.", `<button class="mini" data-action="prop_sheet" ${a.winner ? "" : "disabled title=\"Pick a level picture first\""}>Make sheet</button>`)}
-    ${step(3, a.meta.props_cut, "Cut into props", "Free, on this computer. Each prop gets its own asset.", `<button class="mini" ${sheet ? `data-sheet-cut="${esc(sheet.path)}"` : "disabled"}>Cut</button>`)}
-    ${step(4, false, "Make them 3D", "Open the props and make 3D for the ones you want.", `<button class="mini" ${a.meta.props_cut ? `data-folder="${esc(props)}"` : "disabled"}>Open props</button>`)}
+    ${step(2, sheet, "All its props on one sheet", "One image, not one per prop.", `<button class="mini" data-action="prop_sheet" ${a.winner ? "" : "disabled"}>Make sheet</button>`, a.winner ? "" : "Waiting for step 1: pick a level picture.")}
+    ${step(3, a.meta.props_cut, "Cut into props", "Free, on this computer. Each prop gets its own asset.", `<button class="mini" ${sheet ? `data-sheet-cut="${esc(sheet.path)}"` : "disabled"}>Cut</button>`, sheet ? "" : "Waiting for step 2: make the sheet.")}
+    ${step(4, false, is2d() ? "Use the props" : "Make them 3D", is2d() ? "Open the props: each is a cut-out sprite, ready for your game." : "Open the props and make 3D for the ones you want.", `<button class="mini" ${a.meta.props_cut ? `data-folder="${esc(props)}"` : "disabled"}>Open props</button>`, a.meta.props_cut ? "" : "Waiting for step 3: cut the sheet.")}
   </ol></div>`;
 }
 
@@ -2660,14 +2735,15 @@ function gameTools(a) {
   const rigged = Boolean(a.meta?.rig_task);
   const winner = esc(a.winner || "");
   const tool = (attrs, name, label, enabled, tip) => `<button type="button" class="tool" ${attrs}${enabled ? "" : " disabled"} title="${esc(tip)}">${icon(name)}${label}</button>`;
+  const three = !is2d() || glb;
   return `<div class="tool-row"><div class="field-label">Game tools</div><div class="tool-btns">
-    ${tool(`data-action="views"`, "turn", "Turnaround", a.winner, a.winner ? "Side and back views of the winner, for a better 3D model" : "Pick a winner first")}
+    ${three ? `${tool(`data-action="views"`, "turn", "Turnaround", a.winner, a.winner ? "Side and back views of the winner, for a better 3D model" : "Pick a winner first")}
     ${tool(`data-action="rig"`, "bones", "Rig", glb, glb ? "Add a skeleton to the GLB model" : "Make or drop a GLB model first")}
-    ${tool(`data-action="animate"`, "play", "Animate", rigged, rigged ? "Preset animations for the rigged model" : "Rig the model first")}
+    ${tool(`data-action="animate"`, "play", "Animate", rigged, rigged ? "Preset animations for the rigged model" : "Rig the model first")}` : ""}
     ${tool(`data-split="${winner}"`, "scissors", "Split", a.winner, "Cut the winner into separate parts or assets")}
     ${tool(`data-body-parts="${winner}"`, "bones", "Body parts", a.winner, "Glob boxes the head, torso, arms and legs so you can cut them apart")}
     ${tool(`data-icons="${winner}"`, "grid", "Icons", a.winner, "Square inventory icons from the winner")}
-    ${tool(`data-add-model`, "upload", "Add 3D model", true, "GLB, glTF, OBJ or FBX — or drop the file anywhere on this page")}
+    ${three ? tool(`data-add-model`, "upload", "Add 3D model", true, "GLB, glTF, OBJ or FBX — or drop the file anywhere on this page") : ""}
     ${tool(`data-export="${esc(a.path)}"`, "box", "Export", true, "ZIP for Godot, Unity or Unreal")}
   </div></div>`;
 }
@@ -2847,6 +2923,11 @@ async function runSplit() {
   try {
     const { created } = await api("/api/studio/split", { method: "POST", body: { asset: state.view.path, image: sp.image, boxes: sp.boxes, as_assets: sp.asAssets } });
     closeDialog();
+    if (sp.sheet && sp.asAssets && created.length) {
+      toast(`✓ ${created.length} props made from ${humanize(state.view.path.split("/").pop().replace(/\.md$/, ""))}`);
+      await loadOverview();
+      return go({ type: "folder", path: dirOf(created[0]) });
+    }
     toast(sp.asAssets ? `Made ${created.length} new asset${created.length === 1 ? "" : "s"}` : `Cut ${created.length} part${created.length === 1 ? "" : "s"}`);
     await loadOverview();
   } catch (err) { toast(err.message, true); }
@@ -3204,7 +3285,7 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
@@ -3278,6 +3359,17 @@ document.addEventListener("click", async (event) => {
   if (t.dataset.obBack !== undefined) { syncOnboarding(); state.ob.step -= 1; return renderOnboarding(); }
   if (t.dataset.obForge !== undefined) return forgeWorld();
   if (t.dataset.obEnter !== undefined) return finishOnboarding();
+  if (t.dataset.obPath !== undefined) {
+    syncOnboarding();
+    const ob = state.ob;
+    if (!/^([a-z]:[\\/]|[\\/]|~)/i.test(ob.typed || "")) { toast("Paste the whole path, starting with the drive, like D:\\Games\\MyGame.", true); return $("#obGamePath")?.focus(); }
+    ob.game = ob.typed;
+    ob.noGame = false;
+    if (!ob.name) ob.name = ob.game.split(/[\\/]/).filter(Boolean).pop().replace(/[-_]+/g, " ");
+    return renderOnboarding();
+  }
+  if (t.dataset.obNogame !== undefined) { syncOnboarding(); Object.assign(state.ob, { noGame: true, game: "", home: "" }); return renderOnboarding(); }
+  if (t.dataset.obHasgame !== undefined) { state.ob.noGame = false; return renderOnboarding(); }
   if (t.dataset.obDim) { syncOnboarding(); state.ob.dimension = t.dataset.obDim; return renderOnboarding(); }
   if (t.dataset.obChip) {
     syncOnboarding();
@@ -3427,6 +3519,12 @@ document.addEventListener("drop", (event) => {
 $("#settingsView").addEventListener("input", (event) => {
   if (event.target.id === "addFilter") { syncAddCard(); renderSettings().then(() => { const f = $("#addFilter"); f.focus(); f.setSelectionRange(f.value.length, f.value.length); }); }
 });
+
+// Windows and Linux press Ctrl, not ⌘.
+if (!/Mac|iPhone|iPad/.test(navigator.platform)) {
+  const btn = $("#paletteBtn");
+  if (btn) { btn.title = "Jump anywhere (Ctrl+K)"; const kbd = btn.querySelector("kbd"); if (kbd) kbd.textContent = "Ctrl K"; }
+}
 
 (async function init() {
   try {
@@ -4621,11 +4719,11 @@ async function paletteItems() {
   const onAsset = state.view.type === "doc" && $("#content #assetPrompt");
   const here = state.view.type === "folder" ? state.view.path : "";
   const actions = [
-    ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")]] : []),
+    ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ...(is2d() ? [] : [["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")]])] : []),
     ["Overview", "layers", () => go({ type: "home" })], ["Final vault", "box", () => go({ type: "vault" })],
     [here ? `Generate missing in ${humanize(here.split("/").pop())}` : "Generate all missing", "sparkle", () => batchDialog(here)],
     ...(here ? [["New asset here", "sparkle", () => newAssetDialog(here)]] : []),
-    ["3D lineup", "cube", openLineup], ["Download press kit", "download", downloadPressKit],
+    ...(is2d() ? [] : [["3D lineup", "cube", openLineup]]), ["Download press kit", "download", downloadPressKit],
     [document.body.classList.contains("gallery-mode") ? "Leave gallery mode" : "Gallery mode", "eye", () => setGallery(!document.body.classList.contains("gallery-mode"))],
     ["All projects", "grid", openProjects], ["New project", "sparkle", () => startOnboarding()], ["Settings", "edit", () => settingsDialog()],
   ].map(([label, ic, run]) => ({ label, hint: "Action", icon: ic, run }));
@@ -4657,7 +4755,7 @@ async function openPalette() {
     const q = $("#paletteInput").value.trim();
     shown = items.map((it) => ({ it, score: Math.max(fuzzy(q, it.label), fuzzy(q, `${it.label} ${it.hint}`) - 5) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 40).map((x) => x.it);
     index = Math.min(index, Math.max(0, shown.length - 1));
-    $("#paletteList").innerHTML = shown.map((it, i) => `<li role="option" aria-selected="${i === index}" class="${i === index ? "on" : ""}" data-pal="${i}">${icon(it.icon)}<span>${esc(it.label)}</span><small>${esc(it.hint)}</small></li>`).join("") || `<li class="none">Nothing matches.</li>`;
+    $("#paletteList").innerHTML = shown.map((it, i) => `<li role="option" aria-selected="${i === index}" class="${i === index ? "on" : ""}" data-pal="${i}">${icon(it.icon)}<span>${esc(it.label)}</span><small>${esc(it.hint)}</small></li>`).join("") || `<li class="none">Nothing matches. Ask Glob in the chat, or make a new asset from the folder you're in.</li>`;
     $("#paletteList .on")?.scrollIntoView({ block: "nearest" });
   };
   const close = () => box.remove();

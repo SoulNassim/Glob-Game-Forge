@@ -2059,3 +2059,153 @@ def test_frontmatter_reads_prompts_with_colons():
     meta, body, ok = split_frontmatter("---\nkind: sfx\ncount: 2\nprompt: A cute roar: squeaky, not scary # loud\n---\n# Roar\n")
     assert ok and meta == {"kind": "sfx", "count": 2, "prompt": "A cute roar: squeaky, not scary # loud"}
     assert body == "# Roar\n"
+
+
+@pytest.mark.asyncio
+async def test_vault_readiness_and_sound_totals_per_kind(tmp_path: Path) -> None:
+    from forge import vault
+
+    actions = ForgeActionLayer(root_dir=tmp_path)
+    project = "vault_kinds"
+    ws_dir = actions.get_workspace(project).ws_dir
+    actions.update_project_bible({"project_dimension": "2d"}, project=project)
+    (ws_dir / "sprites").mkdir(parents=True)
+    (ws_dir / "sounds" / "bang" / "audio").mkdir(parents=True)
+    Image.new("RGB", (16, 16), (90, 90, 90)).save(ws_dir / "sprites" / "knight.png")
+    (ws_dir / "sprites" / "knight.md").write_text("---\nkind: character\nwinner: sprites/knight.png\n---\n# Knight\n", encoding="utf-8")
+    (ws_dir / "sounds" / "bang" / "audio" / "take.mp3").write_bytes(b"ID3")
+    (ws_dir / "sounds" / "bang.md").write_text("---\nkind: sfx\nwinner: sounds/bang/audio/take.mp3\n---\n# Bang\n", encoding="utf-8")
+
+    listing = vault.list_vault(ws_dir)
+    entries = {e["path"]: e for g in listing["groups"] for e in g["assets"]}
+    assert entries["sprites/knight.md"]["ready"] is True and entries["sprites/knight.md"]["kind"] == "character"  # 2D: no model needed
+    assert entries["sounds/bang.md"]["ready"] is True and entries["sounds/bang.md"]["kind"] == "sfx"
+    assert listing["totals"] == {"assets": 2, "ready": 2, "images": 1, "models": 0}  # the take is not a final image
+
+    actions.update_project_bible({"project_dimension": "3d"}, project=project)
+    listing = vault.list_vault(ws_dir)
+    entries = {e["path"]: e for g in listing["groups"] for e in g["assets"]}
+    assert entries["sprites/knight.md"]["ready"] is False  # 3D image assets wait for their model
+    assert listing["totals"]["ready"] == 1
+
+
+@pytest.mark.asyncio
+async def test_lone_candidate_image_becomes_the_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from forge import asset_studio
+
+    actions = ForgeActionLayer(root_dir=tmp_path)
+    project = "lone_pick"
+    ws_dir = actions.get_workspace(project).ws_dir
+    (ws_dir / "units").mkdir(parents=True)
+    (ws_dir / "units" / "wolf.md").write_text("---\nkind: creature\nprompt: A grey wolf\n---\n# Wolf\n", encoding="utf-8")
+    store = actions.get_store(project)
+
+    made = []
+
+    class FakeExecutor:
+        async def _generate_single_asset(self, **kwargs):
+            name = f"generated-{len(made)}.png"  # a new file per image, as the real provider writes
+            made.append(name)
+            Image.new("RGB", (8, 8), (1, 2, 3)).save(store.project_dir / name)
+            return SimpleNamespace(id=f"g{len(made)}", file_path=name, type=AssetType.IMAGE, thumbnail_path=None,
+                                   extra_files={}, model="fake", provider="fake", cost_usd=0.0)
+
+    monkeypatch.setattr(actions, "get_executor", lambda project: FakeExecutor())
+    monkeypatch.setattr(asset_studio, "resolve_image_provider", lambda *a, **k: "fake")
+
+    request = asset_studio.build_request(ws_dir, "units/wolf.md", "candidates")
+    request["count"] = 1
+    await asset_studio.run_action(actions, project, request)
+    assert asset_studio.describe_asset(ws_dir, "units/wolf.md")["winner"].endswith(".png")  # the only image is picked
+
+    # With a second image already made, nothing is picked for the user.
+    (ws_dir / "units" / "wolf.md").write_text("---\nkind: creature\nprompt: A grey wolf\n---\n# Wolf\n", encoding="utf-8")
+    old = ws_dir / "units" / "wolf" / "candidates" / "old.png"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8), (9, 9, 9)).save(old)
+    await asset_studio.run_action(actions, project, request)
+    assert not asset_studio.describe_asset(ws_dir, "units/wolf.md")["winner"]
+
+
+def test_overview_folder_titles_are_made_safe(tmp_path: Path) -> None:
+    from forge import overview
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    made = overview.create_folder(ws_dir, "", "../Mush?rooms")
+    assert made == "mush-rooms"
+    assert (ws_dir / "mush-rooms" / "README.md").read_text(encoding="utf-8") == "# Mush rooms\n"
+    assert not (tmp_path / "Mush?rooms").exists()
+    with pytest.raises(ValueError):
+        overview.create_folder(ws_dir, "", "../..")
+
+
+@pytest.mark.asyncio
+async def test_project_dimension_persists_and_overview_reports_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+
+    server = importlib.import_module("forge.server.app")
+    monkeypatch.setattr(server, "actions", ForgeActionLayer(root_dir=tmp_path))
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8420") as client:
+        project = (await client.post("/api/projects", json={"name": "Flat Game"})).json()["project"]
+        assert (await client.get("/api/overview", params={"project": project})).json()["dimension"] == "3d"
+        saved = await client.put("/api/bible", params={"project": project}, json={"project_dimension": "2d"})
+        assert saved.status_code == 200 and saved.json()["bible"]["project_dimension"] == "2d"
+        bible = (await client.get("/api/bible", params={"project": project})).json()["bible"]
+        assert bible["project_dimension"] == "2d"
+        assert (await client.get("/api/overview", params={"project": project})).json()["dimension"] == "2d"
+
+
+@pytest.mark.asyncio
+async def test_meshy_credit_balance_is_cached_until_a_job_finishes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+
+    from forge import asset_studio
+
+    server = importlib.import_module("forge.server.app")
+    monkeypatch.setattr(server, "actions", ForgeActionLayer(root_dir=tmp_path))
+    calls: list[str] = []
+
+    class FakeConfig:
+        def get_key(self, name: str) -> str:
+            return "test-meshy-key" if name == "meshy" else ""
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"balance": 42}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc) -> None:
+            return None
+
+        async def get(self, url: str, **kwargs) -> FakeResponse:
+            calls.append(url)
+            return FakeResponse()
+
+    monkeypatch.setattr(server, "load_config", lambda: FakeConfig())
+    monkeypatch.setattr(server.httpx, "AsyncClient", FakeClient)
+    server._credit_balance_cache.clear()
+
+    assert (await server.api_studio_credits())["meshy_balance"] == 42
+    assert (await server.api_studio_credits())["meshy_balance"] == 42
+    assert len(calls) == 1  # the second read came from the cache
+
+    async def finished(*args, **kwargs) -> list[str]:
+        return []
+
+    monkeypatch.setattr(asset_studio, "run_action", finished)
+    job = {"id": "job_x", "project": "default", "asset": "a.md", "action": "candidates", "status": "running"}
+    await server._run_studio_job("default", job, {"action": "candidates", "asset": "a.md"})
+    assert (await server.api_studio_credits())["meshy_balance"] == 42
+    assert len(calls) == 2  # a finished job clears the cache
