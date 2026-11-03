@@ -25,7 +25,13 @@ UninstallDisplayIcon={app}\Glob.exe
 LicenseFile=..\..\LICENSE
 Compression=lzma2
 SolidCompression=yes
-WizardStyle=modern
+; Dark like the app, with Glob's own art (made by tools/make_glob_mascot.py). Needs Inno Setup 6.6+.
+WizardStyle=modern dark
+WizardImageFile=wizard-0.png,wizard-1.png,wizard-2.png
+WizardSmallImageFile=wizard-small-0.png,wizard-small-1.png,wizard-small-2.png
+WizardImageStretch=yes
+; Show the Welcome page so the side art greets people, not just waves goodbye.
+DisableWelcomePage=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
