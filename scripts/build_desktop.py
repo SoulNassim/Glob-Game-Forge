@@ -47,8 +47,6 @@ def main() -> None:
         "--specpath", str(ROOT / "build"),
         "--add-data", f"{ROOT / 'forge' / 'ui'}{SEP}forge/ui",
         "--add-data", f"{ROOT / 'forge' / 'recipes' / 'builtins'}{SEP}forge/recipes/builtins",
-        "--add-data", f"{ROOT / 'forge' / 'agent' / 'glob_prompt.md'}{SEP}forge/agent",
-        "--add-data", f"{ROOT / 'forge' / 'agent' / 'skills'}{SEP}forge/agent/skills",
         "--collect-submodules", "forge",
         "--collect-submodules", "uvicorn",
         "--hidden-import", "forge.server.app",
