@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FORGE = ROOT / "forge"
 # Folders the build already bundles, or that are not read at runtime.
-BUNDLED_ELSEWHERE = ("forge/ui", "forge/recipes/builtins")
+BUNDLED_ELSEWHERE = ("forge/ui", "forge/recipes/builtins", "forge/samples")
 
 
 def _bundled_sources() -> list[str]:
