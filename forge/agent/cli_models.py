@@ -75,8 +75,17 @@ def child_env() -> dict[str, str]:
     return env
 
 
+_found: dict[str, tuple[float, str | None]] = {}
+
+
 def find(cli_id: str) -> str | None:
-    return shutil.which(CLIS[cli_id]["bin"], path=_search_path())
+    """The CLI's executable. Searching a long PATH takes tens of milliseconds per CLI, so the answer is kept a minute."""
+    hit = _found.get(cli_id)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    exe = shutil.which(CLIS[cli_id]["bin"], path=_search_path())
+    _found[cli_id] = (time.time(), exe)
+    return exe
 
 
 def detect() -> list[dict[str, Any]]:
@@ -229,6 +238,7 @@ async def check(cli_id: str) -> dict[str, Any]:
     """Whether the CLI is installed and answers, i.e. is logged in."""
     if cli_id not in CLIS:
         raise ValueError(f"Unknown coding agent '{cli_id}'.")
+    _found.pop(cli_id, None)  # it may have been installed a moment ago
     if not find(cli_id):
         return {"id": cli_id, "installed": False, "ok": False, "needs_login": False, "error": ""}
     try:

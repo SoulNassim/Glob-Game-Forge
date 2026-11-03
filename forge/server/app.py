@@ -256,7 +256,7 @@ class UrlIngestRequest(BaseModel):
 # --- API Endpoints ---
 
 @app.get("/api/health")
-async def api_health() -> dict[str, Any]:
+def api_health() -> dict[str, Any]:
     # The MCP bridge checks projects_dir so it only forwards to a Glob app that serves the same projects.
     return {"ok": True, "projects_dir": str((actions.root_dir or get_projects_root()).resolve()), "background": _background()}
 
@@ -275,7 +275,7 @@ async def api_quit() -> dict[str, Any]:
 
 
 @app.get("/api/bootstrap")
-async def api_bootstrap(project: str = "default") -> dict[str, Any]:
+def api_bootstrap(project: str = "default") -> dict[str, Any]:
     store = actions.get_store(project)
     cfg = load_config()
     asset_bundle = actions.list_assets(project=project)
@@ -307,19 +307,19 @@ async def api_bootstrap(project: str = "default") -> dict[str, Any]:
 
 
 @app.get("/api/projects")
-async def api_list_projects() -> dict[str, Any]:
+def api_list_projects() -> dict[str, Any]:
     return get_project_catalog(actions.root_dir)
 
 
 @app.get("/api/projects/cards")
-async def api_project_cards() -> dict[str, Any]:
+def api_project_cards() -> dict[str, Any]:
     names = list_all_projects(actions.root_dir)
     root = actions.root_dir or get_projects_root()
     return {"projects": [project_overview.project_card(project_home(name, root) / "workspace", name) for name in names]}
 
 
 @app.post("/api/projects/default")
-async def api_set_default_project(payload: dict[str, Any]) -> dict[str, Any]:
+def api_set_default_project(payload: dict[str, Any]) -> dict[str, Any]:
     project = payload.get("project")
     if not isinstance(project, str):
         raise HTTPException(status_code=400, detail="Project name must be a string.")
@@ -330,7 +330,7 @@ async def api_set_default_project(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/projects/folders")
-async def api_create_project_folder(payload: dict[str, Any]) -> dict[str, Any]:
+def api_create_project_folder(payload: dict[str, Any]) -> dict[str, Any]:
     name = payload.get("name")
     if not isinstance(name, str):
         raise HTTPException(status_code=400, detail="Folder name must be a string.")
@@ -341,7 +341,7 @@ async def api_create_project_folder(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.delete("/api/projects/folders/{folder}")
-async def api_delete_project_folder(folder: str) -> dict[str, Any]:
+def api_delete_project_folder(folder: str) -> dict[str, Any]:
     try:
         return delete_project_folder(folder, actions.root_dir)
     except ValueError as exc:
@@ -349,7 +349,7 @@ async def api_delete_project_folder(folder: str) -> dict[str, Any]:
 
 
 @app.post("/api/projects/folders/assign")
-async def api_assign_project_folder(payload: dict[str, Any]) -> dict[str, Any]:
+def api_assign_project_folder(payload: dict[str, Any]) -> dict[str, Any]:
     projects = payload.get("projects")
     folder = payload.get("folder")
     if not isinstance(projects, list) or not all(isinstance(project, str) for project in projects):
@@ -363,7 +363,7 @@ async def api_assign_project_folder(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.delete("/api/projects")
-async def api_bulk_delete_projects(payload: dict[str, Any]) -> dict[str, Any]:
+def api_bulk_delete_projects(payload: dict[str, Any]) -> dict[str, Any]:
     projects = payload.get("projects")
     if not isinstance(projects, list) or not all(isinstance(project, str) for project in projects):
         raise HTTPException(status_code=400, detail="Projects must be a list of project names.")
@@ -379,7 +379,7 @@ async def api_bulk_delete_projects(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.delete("/api/projects/{project}")
-async def api_delete_project(project: str) -> dict[str, Any]:
+def api_delete_project(project: str) -> dict[str, Any]:
     try:
         return actions.delete_project(project)
     except FileNotFoundError as exc:
@@ -478,7 +478,7 @@ async def api_scaffold_project(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/api/assets")
-async def api_list_assets(
+def api_list_assets(
     project: str = "default",
     asset_type: str | None = None,
     status: str | None = None,
@@ -495,7 +495,7 @@ async def api_list_assets(
 
 
 @app.get("/api/assets/{asset_id}")
-async def api_get_asset(asset_id: str, project: str = "default") -> dict[str, Any]:
+def api_get_asset(asset_id: str, project: str = "default") -> dict[str, Any]:
     try:
         return actions.get_asset(asset_id, project=project)
     except KeyError as exc:
@@ -503,7 +503,7 @@ async def api_get_asset(asset_id: str, project: str = "default") -> dict[str, An
 
 
 @app.delete("/api/assets/{asset_id}")
-async def api_delete_asset(asset_id: str, project: str = "default") -> dict[str, Any]:
+def api_delete_asset(asset_id: str, project: str = "default") -> dict[str, Any]:
     try:
         return actions.delete_asset(asset_id, project=project)
     except KeyError as exc:
@@ -559,7 +559,7 @@ async def api_rate_asset(req: RateAssetRequest) -> dict[str, Any]:
 
 
 @app.post("/api/variant/preview")
-async def api_variant_preview(req: VariantPreviewRequest) -> dict[str, Any]:
+def api_variant_preview(req: VariantPreviewRequest) -> dict[str, Any]:
     return actions.preview_variant_prompts(
         parent_asset_id=req.parent_asset_id,
         chips=req.chips,
@@ -594,12 +594,12 @@ async def api_run_recipe(req: RunVerbRequest) -> dict[str, Any]:
 
 
 @app.get("/api/recipes")
-async def api_list_recipes() -> dict[str, Any]:
+def api_list_recipes() -> dict[str, Any]:
     return {"recipes": list_recipes()}
 
 
 @app.post("/api/recipes")
-async def api_create_recipe(req: CreateRecipeRequest) -> dict[str, Any]:
+def api_create_recipe(req: CreateRecipeRequest) -> dict[str, Any]:
     try:
         recipe = actions.create_recipe(req.recipe_id, req.yaml_content, fmt=req.fmt)
         return {"recipe": recipe}
@@ -608,34 +608,34 @@ async def api_create_recipe(req: CreateRecipeRequest) -> dict[str, Any]:
 
 
 @app.get("/api/style-packs")
-async def api_list_style_packs() -> dict[str, Any]:
+def api_list_style_packs() -> dict[str, Any]:
     return actions.list_style_packs()
 
 
 @app.post("/api/style-packs")
-async def api_create_style_pack(payload: dict[str, Any]) -> dict[str, Any]:
+def api_create_style_pack(payload: dict[str, Any]) -> dict[str, Any]:
     pack = StylePack(**payload, builtin=False)
     saved = save_custom_style_pack(pack)
     return {"style_pack": saved.model_dump()}
 
 
 @app.get("/api/bible")
-async def api_get_bible(project: str = "default") -> dict[str, Any]:
+def api_get_bible(project: str = "default") -> dict[str, Any]:
     return actions.get_project_bible(project=project)
 
 
 @app.put("/api/bible")
-async def api_update_bible(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_update_bible(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return actions.update_project_bible(payload, project=project)
 
 
 @app.get("/api/queue")
-async def api_queue_status(project: str = "default") -> dict[str, Any]:
+def api_queue_status(project: str = "default") -> dict[str, Any]:
     return actions.queue_status(project=project)
 
 
 @app.post("/api/jobs/{job_id}/cancel")
-async def api_cancel_job(job_id: str, project: str = "default") -> dict[str, Any]:
+def api_cancel_job(job_id: str, project: str = "default") -> dict[str, Any]:
     executor = actions.get_executor(project)
     executor.cancel_job(job_id)
     store = actions.get_store(project)
@@ -648,24 +648,24 @@ async def api_cancel_job(job_id: str, project: str = "default") -> dict[str, Any
 
 
 @app.get("/api/budget")
-async def api_get_budget(project: str = "default") -> dict[str, Any]:
+def api_get_budget(project: str = "default") -> dict[str, Any]:
     return actions.get_budget(project=project)
 
 
 @app.get("/api/activity")
-async def api_get_activity(project: str = "default") -> dict[str, Any]:
+def api_get_activity(project: str = "default") -> dict[str, Any]:
     store = actions.get_store(project)
     return {"activity": [a.model_dump() for a in store.list_activity(limit=80)]}
 
 
 @app.post("/api/undo")
-async def api_undo(payload: dict[str, Any] | None = None, project: str = "default") -> dict[str, Any]:
+def api_undo(payload: dict[str, Any] | None = None, project: str = "default") -> dict[str, Any]:
     act_id = (payload or {}).get("activity_id")
     return actions.undo_action(activity_id=act_id, project=project)
 
 
 @app.post("/api/export")
-async def api_export(req: ExportRequest) -> dict[str, Any]:
+def api_export(req: ExportRequest) -> dict[str, Any]:
     return actions.export(
         engine=req.engine,
         asset_ids=req.asset_ids,
@@ -684,7 +684,7 @@ async def api_watch_trigger(project: str = "default") -> dict[str, Any]:
 # --- Game Scan Endpoints (Section 14) ---
 
 @app.post("/api/gamescan/consent")
-async def api_gamescan_consent(payload: dict[str, Any]) -> dict[str, Any]:
+def api_gamescan_consent(payload: dict[str, Any]) -> dict[str, Any]:
     game_path = str(payload.get("game_path") or SAMPLE_GODOT_DIR)
     try:
         return actions.preview_game_scan_consent(game_path)
@@ -693,7 +693,7 @@ async def api_gamescan_consent(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/gamescan/scan")
-async def api_gamescan_scan(req: GameScanRequest) -> dict[str, Any]:
+def api_gamescan_scan(req: GameScanRequest) -> dict[str, Any]:
     try:
         return actions.scan_game_project(
             game_path=req.game_path,
@@ -706,28 +706,28 @@ async def api_gamescan_scan(req: GameScanRequest) -> dict[str, Any]:
 
 
 @app.get("/api/gamescan/profile")
-async def api_gamescan_profile(project: str = "default") -> dict[str, Any]:
+def api_gamescan_profile(project: str = "default") -> dict[str, Any]:
     return actions.get_game_profile(project=project)
 
 
 @app.put("/api/gamescan/profile")
-async def api_gamescan_update_profile(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_gamescan_update_profile(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     approve = bool(payload.pop("approve_and_lock", True))
     return actions.update_game_profile(payload, approve_and_lock=approve, project=project)
 
 
 @app.get("/api/gamescan/wishlist")
-async def api_gamescan_wishlist(project: str = "default") -> dict[str, Any]:
+def api_gamescan_wishlist(project: str = "default") -> dict[str, Any]:
     return actions.list_asset_wishlist(project=project)
 
 
 @app.get("/api/gamescan/placeholders")
-async def api_gamescan_placeholders(project: str = "default") -> dict[str, Any]:
+def api_gamescan_placeholders(project: str = "default") -> dict[str, Any]:
     return actions.find_placeholders(project=project)
 
 
 @app.post("/api/gamescan/propose")
-async def api_gamescan_propose(req: ProposeCatalogRequest) -> dict[str, Any]:
+def api_gamescan_propose(req: ProposeCatalogRequest) -> dict[str, Any]:
     try:
         return actions.propose_assets_for(req.item_id, project=req.project)
     except Exception as exc:
@@ -735,7 +735,7 @@ async def api_gamescan_propose(req: ProposeCatalogRequest) -> dict[str, Any]:
 
 
 @app.post("/api/gamescan/writeback/preview")
-async def api_writeback_preview(req: WritebackRequest) -> dict[str, Any]:
+def api_writeback_preview(req: WritebackRequest) -> dict[str, Any]:
     try:
         return actions.writeback_preview(asset_ids=req.asset_ids, project=req.project)
     except Exception as exc:
@@ -743,7 +743,7 @@ async def api_writeback_preview(req: WritebackRequest) -> dict[str, Any]:
 
 
 @app.post("/api/gamescan/writeback/apply")
-async def api_writeback_apply(req: WritebackRequest) -> dict[str, Any]:
+def api_writeback_apply(req: WritebackRequest) -> dict[str, Any]:
     try:
         return actions.writeback_apply(asset_ids=req.asset_ids, project=req.project)
     except Exception as exc:
@@ -751,14 +751,14 @@ async def api_writeback_apply(req: WritebackRequest) -> dict[str, Any]:
 
 
 @app.post("/api/gamescan/writeback/undo")
-async def api_writeback_undo(project: str = "default") -> dict[str, Any]:
+def api_writeback_undo(project: str = "default") -> dict[str, Any]:
     return actions.writeback_undo(project=project)
 
 
 # --- Markdown Workspace & Coding Agent Collaboration Endpoints ---
 
 @app.get("/api/workspace")
-async def api_list_workspace(project: str = "default") -> dict[str, Any]:
+def api_list_workspace(project: str = "default") -> dict[str, Any]:
     workspace = actions.list_workspace_docs(project=project)
     workspace["folders"] = actions.get_workspace(project).list_folders()
     return workspace
@@ -789,7 +789,7 @@ def _skill_summary(path: Path, source: str) -> dict[str, Any]:
 
 
 @app.get("/api/workspace/inspector")
-async def api_workspace_inspector(project: str = "default") -> dict[str, Any]:
+def api_workspace_inspector(project: str = "default") -> dict[str, Any]:
     """Live data for the right-hand Files / Skills / MCP inspector."""
     workspace = actions.get_workspace(project)
     skills: list[dict[str, Any]] = []
@@ -818,7 +818,7 @@ async def api_workspace_inspector(project: str = "default") -> dict[str, Any]:
 
 
 @app.get("/api/workspace/doc")
-async def api_read_workspace_doc(name: str = Query("GAME.md"), project: str = "default") -> dict[str, Any]:
+def api_read_workspace_doc(name: str = Query("GAME.md"), project: str = "default") -> dict[str, Any]:
     try:
         return actions.read_workspace_doc(name, project=project)
     except Exception as exc:
@@ -826,7 +826,7 @@ async def api_read_workspace_doc(name: str = Query("GAME.md"), project: str = "d
 
 
 @app.put("/api/workspace/doc")
-async def api_write_workspace_doc(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_write_workspace_doc(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     doc_name = str(payload.get("name", "GAME.md"))
     content = str(payload.get("content", ""))
     actor = str(payload.get("actor", "user"))
@@ -837,17 +837,17 @@ async def api_write_workspace_doc(payload: dict[str, Any], project: str = "defau
 
 
 @app.get("/api/workspace/requirements")
-async def api_list_requirements(project: str = "default") -> dict[str, Any]:
+def api_list_requirements(project: str = "default") -> dict[str, Any]:
     return actions.list_asset_requirements(project=project)
 
 
 @app.get("/api/workspace/agent-requests")
-async def api_list_agent_requests(project: str = "default") -> dict[str, Any]:
+def api_list_agent_requests(project: str = "default") -> dict[str, Any]:
     return actions.list_agent_requests(project=project)
 
 
 @app.post("/api/workspace/agent-requests/{request_id}/fulfill")
-async def api_fulfill_agent_request(request_id: str, project: str = "default") -> dict[str, Any]:
+def api_fulfill_agent_request(request_id: str, project: str = "default") -> dict[str, Any]:
     try:
         return actions.fulfill_agent_request(request_id=request_id, project=project)
     except KeyError as exc:
@@ -871,7 +871,7 @@ async def api_propose_blueprint(payload: dict[str, Any], project: str = "default
 
 
 @app.put("/api/workspace/blueprint")
-async def api_update_blueprint(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_update_blueprint(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     doc_name = str(payload.get("doc_name", ""))
     patch = payload.get("metadata_patch")
     if not doc_name or not isinstance(patch, dict):
@@ -885,7 +885,7 @@ async def api_update_blueprint(payload: dict[str, Any], project: str = "default"
 
 
 @app.post("/api/workspace/requirements")
-async def api_add_requirement(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_add_requirement(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return actions.add_asset_requirement(
         req_id=str(payload.get("req_id", "new_item")),
         kind=str(payload.get("kind", "3D Mesh")),
@@ -897,7 +897,7 @@ async def api_add_requirement(payload: dict[str, Any], project: str = "default")
 
 
 @app.put("/api/workspace/requirements/{req_id}")
-async def api_update_requirement(req_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_update_requirement(req_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return actions.update_asset_requirement(
         req_id=req_id,
         status=str(payload.get("status", "done")),
@@ -918,7 +918,7 @@ async def api_fulfill_requirements(payload: dict[str, Any] | None = None, projec
 
 
 @app.post("/api/workspace/handoffs")
-async def api_post_handoff(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_post_handoff(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return actions.post_agent_handoff(
         title=str(payload.get("title", "Agent Update")),
         message=str(payload.get("message", "")),
@@ -928,7 +928,7 @@ async def api_post_handoff(payload: dict[str, Any], project: str = "default") ->
 
 
 @app.post("/api/workspace/study-section")
-async def api_append_study_section(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_append_study_section(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return actions.append_study_section(
         doc_name=str(payload.get("doc_name", "VERSION_2_CHARACTER_ARSENAL.md")),
         title=str(payload.get("title", "Node Pipeline Study")),
@@ -944,7 +944,7 @@ async def api_append_study_section(payload: dict[str, Any], project: str = "defa
 # --- Step-by-Step Game World & Asset Pipeline Endpoints ---
 
 @app.get("/api/pipeline")
-async def api_get_pipeline(project: str = "default") -> dict[str, Any]:
+def api_get_pipeline(project: str = "default") -> dict[str, Any]:
     return actions.get_pipeline_state(project=project)
 
 
@@ -980,7 +980,7 @@ def _project_from_payload(payload: dict[str, Any], query_project: str | None) ->
 
 @app.get("/api/pipeline/folders")
 @app.get("/api/pipeline/folder")
-async def api_list_pipeline_folders(project: str = "default") -> dict[str, Any]:
+def api_list_pipeline_folders(project: str = "default") -> dict[str, Any]:
     pm = actions.get_pipeline(project)
     tree = pm.get_file_explorer_tree()
     return {
@@ -993,7 +993,7 @@ async def api_list_pipeline_folders(project: str = "default") -> dict[str, Any]:
 
 @app.post("/api/pipeline/folders")
 @app.post("/api/pipeline/folder")
-async def api_create_pipeline_folder(payload: dict[str, Any], project: str | None = None) -> dict[str, Any]:
+def api_create_pipeline_folder(payload: dict[str, Any], project: str | None = None) -> dict[str, Any]:
     try:
         folder_path = _folder_path_from_payload(payload)
         project = _project_from_payload(payload, project)
@@ -1012,7 +1012,7 @@ async def api_create_pipeline_folder(payload: dict[str, Any], project: str | Non
 
 
 @app.delete("/api/pipeline/folders")
-async def api_delete_pipeline_folder(
+def api_delete_pipeline_folder(
     path: str = Query(...),
     project: str = "default",
     confirm: bool = False,
@@ -1087,14 +1087,14 @@ async def api_delete_pipeline_folder(
 
 @app.get("/api/workspace/folders")
 @app.get("/api/workspace/folder")
-async def api_list_workspace_folders(project: str = "default") -> dict[str, Any]:
+def api_list_workspace_folders(project: str = "default") -> dict[str, Any]:
     ws = actions.get_workspace(project)
     return {"project": ws.store.project_name, "folders": ws.list_folders()}
 
 
 @app.post("/api/workspace/folders")
 @app.post("/api/workspace/folder")
-async def api_create_workspace_folder(payload: dict[str, Any], project: str | None = None) -> dict[str, Any]:
+def api_create_workspace_folder(payload: dict[str, Any], project: str | None = None) -> dict[str, Any]:
     try:
         folder_path = _folder_path_from_payload(payload)
         project = _project_from_payload(payload, project)
@@ -1194,7 +1194,7 @@ async def api_update_install() -> dict[str, Any]:
 
 
 @app.get("/api/update/state")
-async def api_update_state() -> dict[str, Any]:
+def api_update_state() -> dict[str, Any]:
     return dict(updater.state)
 
 
@@ -1210,7 +1210,7 @@ async def api_choose_folder(payload: dict[str, Any]) -> dict[str, str]:
 # --- Connected game: the coding agent in the user's game repo talks to Glob over MCP ---
 
 @app.get("/api/connect")
-async def api_connect_status(project: str = "default", folder: str = "") -> dict[str, Any]:
+def api_connect_status(project: str = "default", folder: str = "") -> dict[str, Any]:
     status = connect_agent.status(project)
     if folder and Path(folder).expanduser().is_dir():
         status["suggested"] = connect_agent.detect_targets(Path(folder).expanduser())
@@ -1234,7 +1234,7 @@ async def api_disconnect(project: str = "default") -> dict[str, Any]:
 
 @app.get("/api/services")
 async def api_services() -> dict[str, Any]:
-    return {"services": services.status()}
+    return {"services": await asyncio.to_thread(services.status)}
 
 
 @app.post("/api/services/{service}/connect")
@@ -1269,7 +1269,7 @@ async def api_service_callback(state: str = "", code: str = "", error: str = "",
 
 
 @app.delete("/api/services/{service}")
-async def api_service_disconnect(service: str) -> dict[str, Any]:
+def api_service_disconnect(service: str) -> dict[str, Any]:
     services.disconnect(service)
     return {"services": services.status()}
 
@@ -1286,12 +1286,12 @@ async def api_service_test(service: str) -> dict[str, Any]:
 # --- Folder access: what Glob's agent may read (and write) outside the projects folder ---
 
 @app.get("/api/access")
-async def api_access_list() -> dict[str, Any]:
+def api_access_list() -> dict[str, Any]:
     return {"grants": access.list_grants()}
 
 
 @app.post("/api/access")
-async def api_access_grant(payload: dict[str, Any]) -> dict[str, Any]:
+def api_access_grant(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         return {"grants": access.grant(str(payload.get("path") or ""), bool(payload.get("write")))}
     except ValueError as exc:
@@ -1299,7 +1299,7 @@ async def api_access_grant(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.delete("/api/access")
-async def api_access_revoke(payload: dict[str, Any]) -> dict[str, Any]:
+def api_access_revoke(payload: dict[str, Any]) -> dict[str, Any]:
     return {"grants": access.revoke(str(payload.get("path") or ""))}
 
 
@@ -1360,7 +1360,7 @@ async def api_import_start(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/api/import/jobs/{job_id}")
-async def api_import_job(job_id: str) -> dict[str, Any]:
+def api_import_job(job_id: str) -> dict[str, Any]:
     job = import_jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="No such import.")
@@ -1368,7 +1368,7 @@ async def api_import_job(job_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/import/models")
-async def api_import_models(project: str = "default") -> dict[str, Any]:
+def api_import_models(project: str = "default") -> dict[str, Any]:
     """Imported 3D models without a preview yet; the browser renders and uploads one for each."""
     ws = _ws_dir(project)
     models = []
@@ -1404,7 +1404,7 @@ def _open_in_file_manager(path: Path) -> None:
 
 
 @app.get("/api/storage")
-async def api_storage(project: str = "default") -> dict[str, Any]:
+def api_storage(project: str = "default") -> dict[str, Any]:
     root = (actions.root_dir or get_projects_root()).resolve()
     return {
         "projects_dir": str(root),
@@ -1453,7 +1453,7 @@ async def api_shortcut() -> dict[str, Any]:
 
 
 @app.post("/api/storage/open")
-async def api_storage_open(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_storage_open(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     target = str(payload.get("target") or "workspace")
     sub = str(payload.get("path") or "")
     if target == "projects":
@@ -1476,7 +1476,7 @@ async def api_storage_open(payload: dict[str, Any], project: str = "default") ->
 
 
 @app.post("/api/storage/location")
-async def api_storage_location(payload: dict[str, Any]) -> dict[str, Any]:
+def api_storage_location(payload: dict[str, Any]) -> dict[str, Any]:
     raw = str(payload.get("path") or "").strip()
     if raw:
         target = Path(raw).expanduser()
@@ -1573,7 +1573,7 @@ async def api_import_archive(file: UploadFile | None = File(None), path: str = F
 
 
 @app.post("/api/pipeline/item/{item_id}/move")
-async def api_move_pipeline_item(item_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_move_pipeline_item(item_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     try:
         return actions.move_pipeline_item(
             item_id=item_id,
@@ -1597,17 +1597,17 @@ async def api_recover_meshy(project: str = "default") -> dict[str, Any]:
 
 
 @app.put("/api/pipeline/style-rules")
-async def api_update_style_rules(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_update_style_rules(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return actions.update_style_rules(payload, project=project)
 
 
 @app.post("/api/pipeline/item")
-async def api_upsert_pipeline_item(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_upsert_pipeline_item(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return actions.upsert_pipeline_item(payload, project=project)
 
 
 @app.post("/api/pipeline/item/{item_id}/assets")
-async def api_attach_asset_to_blueprint(
+def api_attach_asset_to_blueprint(
     item_id: str, payload: dict[str, Any], project: str = "default"
 ) -> dict[str, Any]:
     asset_id = str(payload.get("asset_id", "")).strip()
@@ -1695,14 +1695,14 @@ async def api_run_pipeline_workflow(
 
 
 @app.post("/api/pipeline/slice-sheet")
-async def api_slice_sheet(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_slice_sheet(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     asset_id = str(payload.get("asset_id", ""))
     slice_names = payload.get("slice_names")
     return actions.slice_sheet_asset(asset_id=asset_id, slice_names=slice_names, project=project)
 
 
 @app.delete("/api/pipeline/item/{item_id}")
-async def api_delete_pipeline_item(
+def api_delete_pipeline_item(
     item_id: str,
     project: str = "default",
     confirm: bool = False,
@@ -1772,7 +1772,7 @@ def _ws_dir(project: str) -> Path:
 
 
 @app.get("/api/overview")
-async def api_overview(project: str = "default") -> dict[str, Any]:
+def api_overview(project: str = "default") -> dict[str, Any]:
     workspace_watcher.touch(project)
     overview = project_overview.build_overview(_ws_dir(project), project)
     folder = game_link.game_folder(project, actions.root_dir)
@@ -1786,12 +1786,12 @@ async def api_overview(project: str = "default") -> dict[str, Any]:
 
 
 @app.get("/api/overview/folder")
-async def api_overview_folder(path: str = "", project: str = "default") -> dict[str, Any]:
+def api_overview_folder(path: str = "", project: str = "default") -> dict[str, Any]:
     return _overview_call(project_overview.describe_folder, _ws_dir(project), path)
 
 
 @app.get("/api/overview/file")
-async def api_overview_read_file(path: str, project: str = "default") -> dict[str, Any]:
+def api_overview_read_file(path: str, project: str = "default") -> dict[str, Any]:
     return _overview_call(project_overview.read_text_file, _ws_dir(project), path)
 
 
@@ -1896,7 +1896,7 @@ def _save_jobs(project: str) -> None:
 
 
 @app.get("/api/studio/asset")
-async def api_studio_asset(path: str, project: str = "default") -> dict[str, Any]:
+def api_studio_asset(path: str, project: str = "default") -> dict[str, Any]:
     return _overview_call(asset_studio.describe_asset, _ws_dir(project), path)
 
 
@@ -1925,7 +1925,7 @@ async def api_studio_restore_outputs(payload: dict[str, Any], project: str = "de
 
 
 @app.post("/api/studio/preview")
-async def api_studio_preview(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_studio_preview(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     try:
         return asset_studio.build_request(
             _ws_dir(project),
@@ -2064,7 +2064,7 @@ async def api_studio_run(payload: dict[str, Any], project: str = "default") -> d
 
 
 @app.get("/api/studio/options")
-async def api_studio_options() -> dict[str, Any]:
+def api_studio_options() -> dict[str, Any]:
     return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": asset_studio.default_image_model(load_config()), "selected_3d": load_config().default_3d_service_model, "kinds": list(asset_studio.ASSET_KINDS),
             "kind_defaults": asset_studio.kind_defaults(load_config())}
 
@@ -2101,7 +2101,7 @@ async def api_studio_audio_upload(project: str = "default", path: str = "", file
 
 
 @app.get("/api/studio/pillar-targets")
-async def api_studio_pillar_targets(path: str, project: str = "default") -> dict[str, Any]:
+def api_studio_pillar_targets(path: str, project: str = "default") -> dict[str, Any]:
     return {"targets": _overview_call(asset_studio.pillar_targets, _ws_dir(project), path)}
 
 
@@ -2113,7 +2113,7 @@ async def api_studio_make_pillar(payload: dict[str, Any], project: str = "defaul
 
 
 @app.get("/api/studio/history")
-async def api_studio_history(path: str, project: str = "default") -> dict[str, Any]:
+def api_studio_history(path: str, project: str = "default") -> dict[str, Any]:
     """What each output of an asset was made from, so an older prompt can be brought back."""
     return {"history": _overview_call(asset_studio.output_history, _ws_dir(project), path)}
 
@@ -2136,7 +2136,7 @@ async def api_studio_credits() -> dict[str, Any]:
 
 
 @app.get("/api/studio/batch")
-async def api_studio_batch_plan(folder: str = "", project: str = "default") -> dict[str, Any]:
+def api_studio_batch_plan(folder: str = "", project: str = "default") -> dict[str, Any]:
     """The assets "Generate all missing" would make, with the request each one would send."""
     ws_dir = _ws_dir(project)
     plan = []
@@ -2245,19 +2245,19 @@ async def api_install_sample(payload: dict[str, Any] | None = None) -> dict[str,
 # --- Final Vault: every asset's chosen image and newest model, ready to export ---
 
 @app.get("/api/vault")
-async def api_vault(project: str = "default") -> dict[str, Any]:
+def api_vault(project: str = "default") -> dict[str, Any]:
     return _overview_call(vault.list_vault, _ws_dir(project))
 
 
 @app.get("/api/vault/export")
-async def api_vault_export(project: str = "default", path: list[str] | None = Query(default=None), history: bool = False) -> Response:
+def api_vault_export(project: str = "default", path: list[str] | None = Query(default=None), history: bool = False) -> Response:
     data = _overview_call(vault.export_zip, _ws_dir(project), project, path, history)
     name = f"{project}-vault.zip" if not path or len(path) > 1 else f"{Path(path[0]).stem}.zip"
     return Response(data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.post("/api/vault/export")
-async def api_vault_export_folder(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_vault_export_folder(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     folder = _overview_call(vault.export_folder, _ws_dir(project), project, list(payload.get("paths") or []), bool(payload.get("history")))
     return {"folder": folder}
 
@@ -2282,12 +2282,12 @@ async def api_studio_model_upload(project: str = "default", path: str = "", file
 
 
 @app.post("/api/studio/thumb")
-async def api_studio_thumb(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_studio_thumb(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return {"thumb": _overview_call(game_tools.save_thumb, _ws_dir(project), str(payload.get("model") or ""), _png_bytes(str(payload.get("png") or "")))}
 
 
 @app.get("/api/studio/detect-parts")
-async def api_studio_detect_parts(path: str, project: str = "default") -> dict[str, Any]:
+def api_studio_detect_parts(path: str, project: str = "default") -> dict[str, Any]:
     return {"boxes": _overview_call(game_tools.detect_parts, _ws_dir(project), path)}
 
 
@@ -2337,13 +2337,13 @@ async def api_studio_animations(search: str = "") -> dict[str, Any]:
 
 
 @app.get("/api/studio/export")
-async def api_studio_export(path: str = "", engine: str = "godot", project: str = "default") -> Response:
+def api_studio_export(path: str = "", engine: str = "godot", project: str = "default") -> Response:
     data, name = _overview_call(game_tools.export_zip, _ws_dir(project), path, engine)
     return Response(content=data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.get("/api/studio/jobs")
-async def api_studio_jobs(project: str = "default") -> dict[str, Any]:
+def api_studio_jobs(project: str = "default") -> dict[str, Any]:
     _load_jobs(project)
     return {"jobs": [job for job in studio_jobs.values() if job["project"] == project][-30:]}
 
@@ -2362,12 +2362,13 @@ async def _check_cli_once(cli_id: str) -> None:
 @app.get("/api/agent/models")
 async def api_agent_models() -> dict[str, Any]:
     cfg = load_config()
+    # Finding the CLIs and the editor's models touches the disk: off the event loop, so the rest of Glob stays quick.
+    clis, models = await asyncio.to_thread(lambda: (cli_models.detect(), list_agent_models()))
     # Installed coding agents nobody has checked yet: test their login in the background, so "connected" is true.
-    for cli in cli_models.detect():
+    for cli in clis:
         if cli["status"] == "unknown" and cli["id"] not in _cli_checks and "PYTEST_CURRENT_TEST" not in os.environ:
             _cli_checks.add(cli["id"])
             asyncio.create_task(_check_cli_once(cli["id"]))
-    models = list_agent_models()
     return {
         "models": models,
         "selected": cfg.agent_model,
@@ -2375,7 +2376,7 @@ async def api_agent_models() -> dict[str, Any]:
         "presets": model_endpoints.PRESETS,
         "endpoints": [model_endpoints.public(e) for e in model_endpoints.load_endpoints()],
         "vscode_importable": sum(1 for m in models if m["provider"] == "vscode"),
-        "clis": cli_models.detect(),
+        "clis": clis,
     }
 
 
@@ -2387,7 +2388,7 @@ async def api_cli_check(cli_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/agent/cli/{cli_id}/login")
-async def api_cli_login(cli_id: str) -> dict[str, Any]:
+def api_cli_login(cli_id: str) -> dict[str, Any]:
     """Open a terminal with the coding agent's login (or install command when it isn't installed yet)."""
     if cli_id not in cli_models.CLIS:
         raise HTTPException(status_code=404, detail=f"Unknown coding agent '{cli_id}'.")
@@ -2416,18 +2417,18 @@ async def api_probe_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/agent/endpoints")
-async def api_add_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+def api_add_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
     return _endpoint_call(model_endpoints.add_endpoint, payload)
 
 
 @app.delete("/api/agent/endpoints/{endpoint_id}")
-async def api_remove_endpoint(endpoint_id: str) -> dict[str, Any]:
+def api_remove_endpoint(endpoint_id: str) -> dict[str, Any]:
     model_endpoints.remove_endpoint(endpoint_id)
     return {"removed": endpoint_id}
 
 
 @app.post("/api/agent/endpoints/import-vscode")
-async def api_import_vscode_models() -> dict[str, Any]:
+def api_import_vscode_models() -> dict[str, Any]:
     return {"imported": model_endpoints.import_vscode()}
 
 
@@ -2452,7 +2453,7 @@ def _agent_call(fn, *args: Any, **kwargs: Any) -> Any:
 
 
 @app.get("/api/agent/sessions")
-async def api_agent_sessions(project: str = "default") -> dict[str, Any]:
+def api_agent_sessions(project: str = "default") -> dict[str, Any]:
     cfg = load_config()
     return {
         "sessions": workspace_agent.list_sessions(project),
@@ -2461,7 +2462,7 @@ async def api_agent_sessions(project: str = "default") -> dict[str, Any]:
 
 
 @app.post("/api/agent/sessions")
-async def api_agent_create_session(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_agent_create_session(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     cfg = load_config()
     return workspace_agent.create_session(
         project,
@@ -2474,18 +2475,18 @@ async def api_agent_create_session(payload: dict[str, Any], project: str = "defa
 
 
 @app.get("/api/agent/sessions/{session_id}")
-async def api_agent_get_session(session_id: str, project: str = "default") -> dict[str, Any]:
+def api_agent_get_session(session_id: str, project: str = "default") -> dict[str, Any]:
     session = _agent_call(workspace_agent.get_session, project, session_id)
     return {**session, "context_tokens": workspace_agent.context_tokens(session)}
 
 
 @app.patch("/api/agent/sessions/{session_id}")
-async def api_agent_update_session(session_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+def api_agent_update_session(session_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     return _agent_call(workspace_agent.update_session, project, session_id, payload)
 
 
 @app.delete("/api/agent/sessions/{session_id}")
-async def api_agent_delete_session(session_id: str, project: str = "default") -> dict[str, Any]:
+def api_agent_delete_session(session_id: str, project: str = "default") -> dict[str, Any]:
     return {"trashed": _agent_call(workspace_agent.delete_session, project, session_id)}
 
 
@@ -2540,7 +2541,7 @@ async def api_agent_brief(req: AgentBriefRequest) -> dict[str, Any]:
 
 
 @app.get("/api/mcp/tools")
-async def api_mcp_tools() -> dict[str, Any]:
+def api_mcp_tools() -> dict[str, Any]:
     return {"tools": advertised_tools()}
 
 
@@ -2559,12 +2560,12 @@ async def api_mcp_rpc(request: dict[str, Any]) -> dict[str, Any]:
 # --- Config & Host-Restricted Proxy ---
 
 @app.get("/api/config")
-async def api_get_config() -> dict[str, Any]:
+def api_get_config() -> dict[str, Any]:
     return load_config().masked_dict()
 
 
 @app.put("/api/config")
-async def api_update_config(updates: dict[str, Any]) -> dict[str, Any]:
+def api_update_config(updates: dict[str, Any]) -> dict[str, Any]:
     locked = LOCKED_CONFIG_KEYS & updates.keys()
     if locked:
         raise HTTPException(status_code=403, detail=f"{', '.join(sorted(locked))} can only be changed in ~/.forge/config.json.")
@@ -2575,7 +2576,7 @@ async def api_update_config(updates: dict[str, Any]) -> dict[str, Any]:
 # --- Connected Accounts, VS Code Copilot Bridge & CLI Logins ---
 
 @app.get("/api/auth/status")
-async def api_auth_status() -> dict[str, Any]:
+def api_auth_status() -> dict[str, Any]:
     return get_all_auth_status()
 
 
@@ -2596,7 +2597,7 @@ async def api_github_device_poll() -> dict[str, Any]:
 
 
 @app.post("/api/auth/codex/switch")
-async def api_codex_switch_profile(payload: dict[str, Any]) -> dict[str, Any]:
+def api_codex_switch_profile(payload: dict[str, Any]) -> dict[str, Any]:
     prof = str(payload.get("profile", "config.toml"))
     try:
         return switch_codex_profile(prof)
@@ -2605,7 +2606,7 @@ async def api_codex_switch_profile(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/auth/select-model")
-async def api_select_agent_model(payload: dict[str, Any]) -> dict[str, Any]:
+def api_select_agent_model(payload: dict[str, Any]) -> dict[str, Any]:
     model_id = str(payload.get("model_id", "vscode:gpt-6-studierende"))
     provider = "vscode_copilot" if model_id.startswith("vscode:") else (
         "codex" if model_id.startswith("codex:") else "gemini"
@@ -2662,7 +2663,7 @@ async def api_safe_proxy(url: str = Query(...)) -> Response:
 # --- Project Asset & Export File Serving ---
 
 @app.get("/projects/{project}/{file_path:path}")
-async def serve_project_file(project: str, file_path: str) -> FileResponse:
+def serve_project_file(project: str, file_path: str) -> FileResponse:
     store = actions.get_store(project)
     try:
         abs_path = store.resolve_safe_path(file_path)
@@ -2704,13 +2705,13 @@ if UI_DIR.exists():
 
 
 @app.get("/favicon.ico", include_in_schema=False)
-async def serve_favicon() -> FileResponse:
+def serve_favicon() -> FileResponse:
     # Browsers ask for /favicon.ico whatever the page's <link rel="icon"> says.
     return FileResponse(UI_DIR / "glob-icon.png", media_type="image/png")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_index() -> HTMLResponse:
+def serve_index() -> HTMLResponse:
     idx = UI_DIR / "index.html"
     if idx.exists():
         response = HTMLResponse(idx.read_text(encoding="utf-8"))
