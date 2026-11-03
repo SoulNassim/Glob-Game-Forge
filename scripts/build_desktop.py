@@ -49,6 +49,7 @@ def main() -> None:
         "--add-data", f"{ROOT / 'forge' / 'recipes' / 'builtins'}{SEP}forge/recipes/builtins",
         "--add-data", f"{ROOT / 'forge' / 'agent' / 'glob_prompt.md'}{SEP}forge/agent",
         "--add-data", f"{ROOT / 'forge' / 'agent' / 'skills'}{SEP}forge/agent/skills",
+        "--add-data", f"{ROOT / 'forge' / 'samples'}{SEP}forge/samples",
         "--collect-submodules", "forge",
         "--collect-submodules", "uvicorn",
         "--hidden-import", "forge.server.app",
