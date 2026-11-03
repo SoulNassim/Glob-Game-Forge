@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Glob — the game-asset forge</title>
-<meta name="description" content="Paste one sentence into your coding agent and it sets up Glob for you. Glob is a free, open-source game-asset forge for Windows and macOS. Describe your game; Glob turns prompts into consistent 2D art, 3D models and sounds on your own machine. Plug in Claude Code, Codex or any MCP agent.">
+<meta name="description" content="Glob is a free, open-source game-asset studio for Windows and macOS. Make consistent 2D art, 3D models, sounds and whole level kits on your own machine; your coding agent (Claude Code, Codex, Cursor and more) copies the finished art into your game.">
 <meta property="og:title" content="Glob — the game-asset forge">
-<meta property="og:description" content="Describe your game. Glob builds the project and forges consistent 2D art, 3D models and sounds — locally.">
+<meta property="og:description" content="Your game's art studio: consistent 2D art, 3D models, sounds and level kits, made locally. Your coding agent puts them in the game.">
 <meta property="og:image" content="landing/key-art.webp">
 <meta name="theme-color" content="#0b0710">
 <link rel="icon" href="landing/icon.png">
@@ -238,7 +238,7 @@ footer .wrap > :last-child{margin-left:auto}
   <div class="wrap">
     <a class="brand" href="#top"><img class="pixel" src="landing/glob-face.svg" alt=""><b>GLOB</b></a>
     <div class="links">
-      <a href="#problem">Why</a><a href="#how">How it works</a><a href="#demo">Live demo</a><a href="#features">Features</a><a href="#agents">For agents</a><a href="#install">Get started</a>
+      <a href="#problem">Why</a><a href="#how">How it works</a><a href="#levels">Level kits</a><a href="#demo">Live demo</a><a href="#features">Features</a><a href="#install">Get started</a>
     </div>
     <a class="btn ghost sm" href="https://github.com/SoulNassim/Glob-Game-Forge">★ GitHub</a>
   </div>
@@ -247,15 +247,15 @@ footer .wrap > :last-child{margin-left:auto}
 <header class="hero" id="top">
   <div class="wrap">
     <div>
-      <span class="eyebrow"><i></i>Open source · free forever · runs on your machine</span>
-      <h1>Tell your agent<br><em>“open Glob”</em><span class="y">.</span></h1>
-      <p class="lede">Glob is a tiny slime blacksmith with a very big hammer. It opens right on the game your coding agent is building, takes its orders, and forges <b>consistent</b> 2D art, real 3D models and sounds straight into your game folder.</p>
+      <span class="eyebrow"><i></i>Glob 3.0 · open source · free forever · runs on your machine</span>
+      <h1>Your game's<br><em>art studio</em><span class="y">.</span></h1>
+      <p class="lede">Glob is a tiny slime blacksmith with a very big hammer. Open it like any app and forge <b>consistent</b> 2D art, real 3D models, sounds and whole level kits. Your coding agent copies the finished files straight into your game.</p>
       <div class="ask">
         <div class="lab">New here? Paste this into your coding agent</div>
         <p id="ask">Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md</p>
         <div class="row"><button class="btn pri" type="button" data-copy="ask">Copy</button><a class="btn ghost" href="demo/">▶ Try the live demo</a></div>
       </div>
-      <div class="works">Your agent installs Glob, connects your game and opens it in your browser. Works with <b>Claude Code</b> · <b>Codex</b> · <b>Gemini CLI</b> · <b>OpenCode</b> · <b>Cursor</b> · any MCP agent.</div>
+      <div class="works">Your agent installs Glob, links your game and opens it. Works with <b>Claude Code</b> · <b>Codex</b> · <b>Gemini CLI</b> · <b>OpenCode</b> · <b>Cursor</b> · <b>Copilot</b> · any agent that reads <span class="mono">AGENTS.md</span>.</div>
     </div>
     <div class="phone rv">
       <video id="promo" src="landing/glob-promo.mp4" poster="landing/promo-poster.jpg" autoplay muted loop playsinline preload="metadata"></video>
@@ -269,19 +269,18 @@ footer .wrap > :last-child{margin-left:auto}
   <div class="wrap">
     <div class="rv">
       <div class="kicker">In one picture</div>
-      <h2>One sentence to your agent.<br>Art in your <em>game folder</em>.</h2>
-      <p class="sub">No download, no installer, no config files. Glob runs on your computer at <span class="mono">127.0.0.1:8420</span>, in your browser, and your coding agent drives it.</p>
+      <h2>You make the art.<br>Your agent puts it in the <em>game</em>.</h2>
+      <p class="sub">Glob is its own app on your computer, with its own chat. Your coding agent keeps coding; it reads <span class="mono">glob/ASSETS.md</span> and copies the art it needs. No server to add, nothing to restart.</p>
     </div>
     <div class="then rv">The first time · about two minutes</div>
     <div class="first">
-      <div class="rv"><h3>Paste the sentence, OK the install</h3><p>Your agent reads Glob's setup page and asks you to approve one install command. Then it runs <span class="mono">glob connect</span> in your game folder.</p></div>
-      <div class="rv"><h3>Finish setup in the browser</h3><p>Glob opens on your game. Pick a model and paste your image and 3D keys there: they stay on your computer, never in the agent's chat.</p></div>
-      <div class="rv"><h3>Restart your agent</h3><p>It now has Glob's tools and a note in <span class="mono">AGENTS.md</span>. Ask it for art, or just say “open Glob”.</p></div>
+      <div class="rv"><h3>Paste the sentence, OK the install</h3><p>Your agent reads Glob's setup page and asks you to approve one install command. Then it runs <span class="mono">glob connect</span> in your game folder. Or grab the installer below.</p></div>
+      <div class="rv"><h3>Sign in once</h3><p>Glob opens in its own window. Sign in to ElevenLabs or Meshy (no API key needed), and the chat runs on your Claude Code or Codex login.</p></div>
+      <div class="rv"><h3>Make art, then ask your agent</h3><p>Pick what you like in Glob. Tell your agent “use the Glob art”: it reads <span class="mono">glob/ASSETS.md</span> and copies the files in.</p></div>
     </div>
     <div class="then rv">Every time after that</div>
-    <img class="flowimg rv" src="diagrams/how-it-works.svg" alt="1. Tell your agent: open glob. 2. Glob opens on your project, with every order on one board. 3. Finished assets land in your game's glob_delivery folder and the agent swaps its placeholder. You choose Manual, 2D auto or Full auto." loading="lazy">
     <div class="bigshot rv"><img src="screenshots/workspace.webp" alt="Glob open in the browser: chat with Glob on the left, the game's art laid out on the right" loading="lazy"></div>
-    <div class="cap rv">This is Glob, open in your browser on your game: every order, prompt, image and model in one place.</div>
+    <div class="cap rv">This is Glob: the chat on the left, your game's art on the right, every prompt, image, model and sound in one place.</div>
   </div>
 </section>
 
@@ -365,6 +364,18 @@ footer .wrap > :last-child{margin-left:auto}
   </div>
 </section>
 
+<section id="levels">
+  <div class="wrap">
+    <div class="rv">
+      <div class="kicker">New in 3.0 · Level kits</div>
+      <h2>One level picture.<br>Every prop <em>cut out</em>.</h2>
+      <p class="sub">Describe a section of your level. Glob pictures it, draws every prop from it on <b>one</b> sheet, then finds, names and cuts out each prop on your computer, for free. Two image calls instead of one per prop.</p>
+    </div>
+    <div class="bigshot rv"><img src="screenshots/level-kit.webp" alt="A crypt room picture, its prop sheet, and the ten props Glob cut out of it: barrel, chest, brazier, stool, table, pillar, bones, grate, rubble and debris" loading="lazy"></div>
+    <div class="cap rv">A crypt room → one prop sheet → ten props, each its own asset with a transparent background, ready for Make 3D or as 2D sprites.</div>
+  </div>
+</section>
+
 <section id="demo">
   <div class="wrap">
     <div class="demo rv">
@@ -376,14 +387,14 @@ footer .wrap > :last-child{margin-left:auto}
         <ul class="ticks">
           <li><span><b>16 assets</b> in 7 sections, each with its prompt, candidates and winner.</span></li>
           <li><span><b>3D models</b> you can spin, measure and line up at game scale.</span></li>
-          <li><span><b>Sounds</b> with waveforms, and the board with every asset on one canvas.</span></li>
+          <li><span><b>Sounds</b> with waveforms you can trim and loop-check.</span></li>
         </ul>
         <a class="btn pri" href="demo/">▶ Open the live demo</a>
       </div>
     </div>
     <div class="shots">
       <figure class="rv"><img src="screenshots/send-sheet.webp" alt="Generate sheet: source, model, price, final prompt and pillar images" loading="lazy"><figcaption>See model, price and the exact prompt before anything is sent.</figcaption></figure>
-      <figure class="rv"><img src="screenshots/board.webp" alt="Board: every Pocket Kaiju asset on one canvas, grouped by section" loading="lazy"><figcaption>The board: every asset on one canvas, to spot what doesn't match.</figcaption></figure>
+      <figure class="rv"><img src="screenshots/lightbox.webp" alt="Picking a winner among candidates, shown big" loading="lazy"><figcaption>Pick the winner big, with 1–9 and Enter.</figcaption></figure>
       <figure class="rv"><img src="screenshots/viewer.webp" alt="3D viewer with triangle count, size, game height and OBJ, STL and USDZ export" loading="lazy"><figcaption>3D viewer with poly count, game height and OBJ, STL or USDZ export.</figcaption></figure>
     </div>
   </div>
@@ -399,12 +410,12 @@ footer .wrap > :last-child{margin-left:auto}
       <div class="feat rv"><div class="ic">✦</div><h3>Style bible &amp; pillars</h3><p>Reference images and rules stack per folder, so characters, items and UI each keep their own look.</p></div>
       <div class="feat rv"><div class="ic">▤</div><h3>Your project is just folders</h3><p>Sections, pages and assets are Markdown files. Readable, diffable, yours.</p></div>
       <div class="feat rv"><div class="ic">◎</div><h3>See the prompt before you pay</h3><p>Model, price, final prompt and every attached image — editable before each run.</p></div>
-      <div class="feat rv"><div class="ic">⚙</div><h3>Bring any model</h3><p>Anthropic, OpenAI, Gemini, OpenRouter, Ollama, LM Studio or any OpenAI-compatible URL.</p></div>
-      <div class="feat rv"><div class="ic">›_</div><h3>Manual, 2D or full auto</h3><p>Per project: Glob only writes the prompts and asks, makes 2D right away, or goes all the way to the 3D model. A spend cap keeps it honest.</p></div>
+      <div class="feat rv"><div class="ic">⚙</div><h3>A chat on your login</h3><p>Glob's chat runs on Claude Code, Codex, Gemini CLI or OpenCode. No API key. Or bring Anthropic, OpenAI, OpenRouter, Ollama or LM Studio.</p></div>
+      <div class="feat rv"><div class="ic">◐</div><h3>2D or 3D games</h3><p>A 2D project hides models, rigs and animations. Each kind keeps its own shape and background: tall cut-out characters, very wide scenes.</p></div>
       <div class="feat rv"><div class="ic">♪</div><h3>Sounds, music &amp; voices</h3><p>Sound effects in up to 6 takes, music and voice lines. Trim on the waveform and check a loop by ear.</p></div>
-      <div class="feat rv"><div class="ic">▦</div><h3>Board &amp; press kit</h3><p>Every asset on one canvas, a 3D lineup at game scale, and a press-kit page you can upload to itch.io.</p></div>
-      <div class="feat rv"><div class="ic">⌘</div><h3>Fast to drive</h3><p>Pick winners with 1–9 and Enter, jump anywhere with ⌘K, and generate every missing asset in one go.</p></div>
-      <div class="feat rv"><div class="ic">⌂</div><h3>Local &amp; private</h3><p>Runs on 127.0.0.1. Keys stay in <span class="mono">~/.forge</span>, never in a project or export. Demo Mode costs nothing.</p></div>
+      <div class="feat rv"><div class="ic">▦</div><h3>Level kits &amp; press kit</h3><p>Props cut from one sheet, a 3D lineup at game scale, and a press-kit page you can upload to itch.io.</p></div>
+      <div class="feat rv"><div class="ic">⌘</div><h3>Fast to drive</h3><p>Pick winners with 1–9 and Enter, jump anywhere with Ctrl K / ⌘K, and generate every missing asset in one go.</p></div>
+      <div class="feat rv"><div class="ic">⌂</div><h3>Local &amp; private</h3><p>An app on your computer. Keys stay in <span class="mono">~/.forge</span>, never in a project, an export or your agent's chat.</p></div>
     </div>
   </div>
 </section>
@@ -414,30 +425,27 @@ footer .wrap > :last-child{margin-left:auto}
     <div class="agent">
       <div class="rv">
         <div class="kicker">For your coding agent</div>
-        <h2>Say “open Glob”.<br>No more <em>placeholder</em> cubes.</h2>
-        <p class="sub">Plug in the agent you already use: Claude Code, Codex, Gemini CLI, OpenCode, Cursor or any MCP client. One <span class="mono">glob connect</span> in your game folder sets it up. Then tell it to open Glob and the studio pops up in your browser, right on your game.</p>
+        <h2>Your agent reads one file.<br>No more <em>placeholder</em> cubes.</h2>
+        <p class="sub">One <span class="mono">glob connect</span> in your game folder writes a short note in <span class="mono">AGENTS.md</span>. From then on Glob keeps <span class="mono">glob/ASSETS.md</span> up to date: every asset, its picked image or sound, and its 3D model, rig and animations.</p>
         <ul class="ticks">
-          <li><span><b>Your agent starts Glob</b> on localhost when you ask, or the moment it orders its first asset.</span></li>
-          <li><span><b>Orders, not prompts</b>: the agent writes a brief and keeps its placeholder until the asset is ready.</span></li>
-          <li><span><b>You choose how far Glob goes</b>: just the prompts, 2D right away, or the full 3D model, with a spend cap.</span></li>
-          <li><span><b>SHA-256 receipts</b> in <span class="mono">glob_delivery/manifest.json</span>; Glob never writes anywhere else.</span></li>
+          <li><span><b>Nothing to install in the agent</b>: no MCP server, no skills, no restart. Any agent that reads files works.</span></li>
+          <li><span><b>Your agent copies, never edits</b>: art goes into the game's own folders; <span class="mono">glob/</span> stays yours.</span></li>
+          <li><span><b>Missing art stays a placeholder</b>, and the agent tells you what to make in Glob.</span></li>
+          <li><span><b>Your coding session stays yours</b>: Glob's chat runs the studio in its own window.</span></li>
         </ul>
-        <div class="engines"><span>MANUAL</span><span>2D AUTO</span><span>FULL AUTO</span></div>
+        <div class="engines"><span>GODOT</span><span>UNITY</span><span>UNREAL</span><span>ANY ENGINE</span></div>
       </div>
       <div class="term rv">
-        <div class="bar"><i></i><i></i><i></i><span>coding agent ⇄ glob (MCP)</span></div>
-<pre><span class="c-d">&gt;</span> you: open glob
-<span class="c-p">→ open_glob()</span>
-<span class="c-g">✓ Glob is up: 127.0.0.1:8420/?project=pocket_kaiju</span>
-<span class="c-d">  (your browser opens on the project)</span>
+        <div class="bar"><i></i><i></i><i></i><span>your coding agent</span></div>
+<pre><span class="c-d">&gt;</span> you: use the Glob art for the tin scout
+<span class="c-p">→ read glob/ASSETS.md</span>
+<span class="c-d">  | Tin Scout | creature | candidates/tin-scout-2.png | 3d/tin-scout-3d.glb |</span>
+<span class="c-p">→ copy glob/workspace/…/tin-scout-3d.glb  res://enemies/tin_scout.glb</span>
+<span class="c-g">✓ swapped the grey capsule for the real model</span>
 
-<span class="c-d">&gt;</span> agent: the tin scout is still a grey capsule
-<span class="c-p">→ place_order("Tin scout", kind="creature", needs=["image", "model"],
-    placeholder="res://enemies/tin_scout.tscn")</span>
-<span class="c-d">  … Glob · full auto: candidates, winner, 3D model …</span>
-<span class="c-g">✓ ready: glob_delivery/tin_scout/tin_scout.glb</span>
-<span class="c-y">  sha256 9f3c…a71e  manifest.json ✓</span>
-<span class="c-p">→ update_order("tin_scout", status="integrated")</span></pre>
+<span class="c-d">&gt;</span> agent: the boss has no art yet
+<span class="c-y">  keeping the placeholder. Make "Tin Titan" in Glob,
+  then tell me and I'll copy it in.</span></pre>
       </div>
     </div>
   </div>
@@ -449,7 +457,8 @@ footer .wrap > :last-child{margin-left:auto}
       <div>
         <div class="kicker">Get started</div>
         <h2>Free. Open source.<br>Forging in <em>a minute</em>.</h2>
-        <p class="sub">Glob costs nothing and the code is MIT-licensed. You only bring API keys for the image and 3D providers you use (Gemini, Meshy, ElevenLabs) and pay them directly. No keys yet? Demo Mode is free.</p>
+        <p class="sub">Glob costs nothing and the code is MIT-licensed. You sign in to the image, 3D and sound services you use (ElevenLabs, Meshy, fal…) or paste a key, and pay them directly. No markup, no subscription.</p>
+        <div class="row" style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap"><a class="btn pri" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-Setup-Windows.exe">⬇ Windows installer</a><a class="btn ghost" href="https://github.com/SoulNassim/Glob-Game-Forge/releases/latest/download/Glob-macOS.dmg">⬇ macOS app</a></div>
         <div class="ask" style="margin-top:28px">
           <div class="lab">The easy way: paste this into your coding agent</div>
           <p id="ask2">Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md</p>
@@ -467,7 +476,7 @@ footer .wrap > :last-child{margin-left:auto}
           <div class="cmd" id="t-win" hidden><span>&gt;</span><code id="c-win">irm https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.ps1 | iex</code><button type="button" data-copy="c-win">Copy</button></div>
           <div class="cmd" id="t-mac"><span>$</span><code id="c-mac">curl -LsSf https://raw.githubusercontent.com/SoulNassim/Glob-Game-Forge/main/scripts/install.sh | sh</code><button type="button" data-copy="c-mac">Copy</button></div>
           <div class="cmd" id="t-src" hidden><span>$</span><code id="c-src">git clone https://github.com/SoulNassim/Glob-Game-Forge &amp;&amp; cd Glob-Game-Forge &amp;&amp; uv run forge</code><button type="button" data-copy="c-src">Copy</button></div>
-          <p class="note">Already have <a href="https://docs.astral.sh/uv/">uv</a>? One plain package install does it. Otherwise the installer scripts add uv first, then Glob. Then, in a new terminal in your game folder, run <code>glob connect</code>: it connects your coding agents and opens Glob in your browser. After that, the <b>Glob</b> shortcut on your desktop opens it any time, no agent needed.</p>
+          <p class="note">Already have <a href="https://docs.astral.sh/uv/">uv</a>? One plain package install does it. Otherwise the installer scripts add uv first, then Glob. Then, in a new terminal in your game folder, run <code>glob connect</code>: it links your game and opens Glob in its own window. After that, the <b>Glob</b> shortcut on your desktop opens it any time, no agent needed.</p>
         </div>
       </div>
       <img class="forge pixel" src="landing/glob-forge.svg" alt="Glob hammering on an anvil">

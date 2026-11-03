@@ -6,7 +6,7 @@
 
 ### Make the art. Your coding agent puts it in the game.
 
-Glob is an asset studio for your game. It runs as its own app and makes 2D art, 3D models, rigs, animations, icons and sounds.<br>
+Glob is an asset studio for your game. It runs as its own app and makes 2D art, 3D models, rigs, animations, icons, sounds and whole level kits.<br>
 Your coding agent copies the finished files from Glob into your game.
 
 **New here?** Paste this into your coding agent, from your game's folder:
@@ -17,7 +17,9 @@ Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/age
 
 [**Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [What you can make](#what-you-can-make)
 
-**Free and open source (MIT).** Bring keys for the generators you use. No markup, no subscription.
+**Free and open source (MIT).** Sign in to the generators you use (or paste a key). No markup, no subscription.
+
+**New in 3.0:** Glob is an app with a tray icon, a level kit (one picture → one prop sheet → every prop cut out for free), 2D and 3D projects, simpler settings, and a much faster studio. [What changed](#whats-new-in-30)
 
 </div>
 
@@ -25,7 +27,7 @@ Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/age
 
 Glob is an app you open: double-click the **Glob** shortcut on your desktop or in the Start menu, or run `glob-app`. It opens in its own window and keeps running in the background, with a tray icon (**Open Glob**, **Quit Glob**). *Settings → About* shows where it is installed.
 
-Glob has its own chat, a separate session from your coding agent. It runs on your Claude Code or Codex login. The chat organizes the workspace, writes style and prompts, and generates art. Your coding agent never manages the workspace.
+Glob has its own chat, a separate session from your coding agent. It runs on your Claude Code or Codex login, no API key needed. The chat organizes the workspace, writes style and prompts, and generates art. Your coding agent never manages the workspace.
 
 The flow:
 
@@ -47,6 +49,7 @@ The flow:
 | 🦴 **Rigs and animations** | Rig a model and add animations from a library |
 | 🔊 **Sounds** | Sound effects, voices and music, with a real waveform, trimming and a loop check |
 | 🗂️ **Game icons** | Turn any image into square, transparent inventory icons (32 to 512 px) in one click |
+| 🗺️ **Level kits** | Picture a level section, get every prop in it on **one** sheet, and Glob finds, names and cuts out each prop on your computer. Two image calls instead of one per prop |
 | ✂️ **Sprites and parts** | Cut a sheet into parts or new assets, render sprite sheets from a 3D model |
 | 📦 **Press kit** | One ZIP with a web page of your key art, winners, turning 3D models and sounds |
 
@@ -56,14 +59,25 @@ The flow:
 <td><img src="docs/screenshots/send-sheet.webp" alt="Generate sheet: source, model, price, final prompt and pillar images"><br><sub>Model, price and the exact prompt before anything is sent.</sub></td>
 </tr>
 <tr>
+<td><img src="docs/screenshots/lightbox.webp" alt="Picking a winner among candidates, shown big"><br><sub>Pick the winner big, with 1–9 and Enter.</sub></td>
 <td><img src="docs/screenshots/viewer.webp" alt="3D viewer: Mochi with triangle count, size, game height and OBJ, STL and USDZ export"><br><sub>3D viewer with poly count, game height and export.</sub></td>
-<td><img src="docs/screenshots/board.webp" alt="Board: every Pocket Kaiju asset on one canvas, grouped by section"><br><sub>The board: every asset on one canvas.</sub></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/sound.webp" alt="Sound page: Mochi roar waveform with loop check and save selection"><br><sub>Sounds with a waveform you can trim and loop-check.</sub></td>
 <td><img src="docs/screenshots/projects.webp" alt="Projects page with Pocket Kaiju's key art as its card"><br><sub>Every project with its key art.</sub></td>
 </tr>
 </table>
+
+### Level kits
+
+![A crypt room picture, its prop sheet, and the ten props Glob cut out of it](docs/screenshots/level-kit.webp)
+
+Make an asset of kind **Level kit** and describe one section of your level. Its page walks you through four steps:
+
+1. **Picture the level**: generate it and pick the one you like.
+2. **Make sheet**: one image with every prop from that picture, drawn once each on a plain background.
+3. **Cut**: free, on your computer. Glob finds each prop, its chat names them ("Wooden Barrel", "Iron Brazier"), and each becomes its own asset with the background removed, in `<level>-props/`.
+4. **Use the props**: make 3D for the ones you want, or use them as 2D sprites.
 
 ## Get started
 
@@ -78,13 +92,13 @@ Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/age
 Your agent follows [`docs/agent.md`](docs/agent.md). It asks you to approve one install command (a plain [uv](https://docs.astral.sh/uv/) package install, or the installer script when uv is missing; if your agent's safety settings block it, it shows you the command to run yourself). Then it runs `glob connect` in your game folder, which
 
 - makes the game's Glob project (in `<game>/glob/`), or finds the one made before;
-- writes a short note into `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` telling your coding agent where the finished art is;
+- writes a short note into `AGENTS.md` (and `CLAUDE.md` / `GEMINI.md` when the game has them) telling your coding agent where the finished art is;
 - creates the **Glob** shortcut on your desktop and in the Start menu;
 - opens Glob's window on your game.
 
 ### 2. Set up Glob
 
-A short setup asks for generator keys (one is enough; without any, Glob makes placeholder files so you can try the whole flow). Keys go into Glob's own page and stay on your computer; they never pass through the agent's chat. Your coding agent needs no server, no restart and no approval.
+A short setup connects your AI and a generator. **Settings → Accounts** shows four lights (Images, 3D models, Sounds, Glob chat) and one card per service: **Sign in** (ElevenLabs, Meshy, fal, Higgsfield) or paste a key (Gemini, Tripo, Stability). One ElevenLabs sign-in already gives you images and sounds. Keys stay on your computer; they never pass through the agent's chat. Your coding agent needs no server, no restart and no approval.
 
 <details>
 <summary><b>Rather do it yourself?</b> Install, then <code>glob connect</code></summary>
@@ -113,6 +127,8 @@ Then, in a new terminal, in your game folder:
 | `glob shortcut` | Puts a **Glob** shortcut on the desktop and in the Start menu (macOS: `Glob.command` on the desktop, Linux: the app menu). The installers and the first `glob connect` make it for you. |
 | `glob` | Runs Glob in this terminal and opens <http://127.0.0.1:8420>. |
 
+No game folder yet? Start a project without one and link the game later in **Settings → Your game**. You can also paste a folder path instead of using the folder window.
+
 Projects are listed in `~/Glob/projects` (a source checkout uses its own `projects/`). A project made for a game keeps its files in that game's `glob/` folder.
 
 From source, with Python 3.11+ and [uv](https://docs.astral.sh/uv/):
@@ -130,8 +146,9 @@ Glob opens in its own app window (`glob-app`, the Glob shortcut, or the installe
 <details>
 <summary>What connecting writes into your game folder</summary>
 
-- A short note between `<!-- glob:start -->` and `<!-- glob:end -->` in `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, saying where the finished art is and that the agent copies it from `glob/ASSETS.md`.
+- A short note between `<!-- glob:start -->` and `<!-- glob:end -->` in `AGENTS.md` (and `CLAUDE.md` / `GEMINI.md` when they exist), saying where the finished art is and that the agent copies it from `glob/ASSETS.md`.
 - `glob/`, Glob's project for the game. Its `workspace/` folder holds the art, and `glob/ASSETS.md` indexes it. Your coding agent only reads `ASSETS.md` and copies files out; it never edits `glob/`.
+- `glob/.gitignore`, so your game's git skips Glob's internal files (database, logs, job list) but keeps the art.
 
 </details>
 
@@ -150,15 +167,16 @@ Already have a game? **Projects → Import game** takes a Godot, Unity or Unreal
 <details>
 <summary><b>Generators</b></summary>
 
-**Settings → Generators.** Keys stay on this computer. You pay the providers directly.
+**Settings → Accounts.** Sign in or paste a key; everything stays on this computer and you pay the providers directly. **Settings → New art** picks which service makes images and 3D, whether the project is a 2D or a 3D game (2D hides the 3D tools), and each kind's shape and background (characters tall and cut out, places very wide as a full scene, and so on). Model menus say who bills each model: a service's credits or your own key.
 
 | Generator | Makes |
 |---|---|
-| Google Gemini | Images |
-| Meshy | 3D models, rigging, animation |
-| Tripo | 3D models (alternative; pick it under "3D generator") |
-| ElevenLabs | Sound effects, voices, music, more image models (sign in, or paste a key) |
-| Stability AI | Music and loops (Stable Audio) |
+| ElevenLabs | Sound effects, voices, music and many image models (sign in, or paste a key) |
+| Meshy | 3D models, rigging, animation, images (sign in, or paste a key) |
+| fal, Higgsfield | Many image, video and 3D models (sign in) |
+| Google Gemini | Images (key) |
+| Tripo | 3D models (key) |
+| Stability AI | Music and loops (key) |
 
 Sound takes live in `<asset>/audio/`. For a voice, the prompt is the line to speak. Drop an MP3/WAV on an asset to add a take. A generator that isn't set up is refused with a message; it never saves a silent placeholder.
 
@@ -178,7 +196,7 @@ You get characters with their models, animations and textures, weapons, items an
 
 - **Projects are folders.** Top-level folders are sections, `README.md` files are pages, and any `.md` with `kind:` and `prompt:` in its header is an asset. Readable, diffable and yours.
 - **Export / import a workspace:** the download icon on a project card saves it as a `.zip`; **Projects → Import workspace** (or dropping the file on the projects page) brings it in on another computer.
-- **Storage:** Settings → Storage & access shows the projects folder (change it there) and opens each project's folder.
+- **Storage:** Settings → Files & app shows where your projects are (move them there), opens each project's folder, and tells you where Glob is installed.
 - **Folder access:** Glob only sees its projects folder until you allow more, read or read & write. Keys, `.env` and key files are always off-limits.
 
 </details>
@@ -188,9 +206,11 @@ You get characters with their models, animations and textures, weapons, items an
 
 - **Style that sticks.** Images in `pillars/` and rules in `pillars/*.md` stack from the project root down. Any image becomes a pillar from its ⋯ menu. Pillar strength per asset: off, light, normal or strong.
 - **Pick fast.** Click a candidate (or press `1`–`9`) to see it big; `←` `→` to step, `Enter` to pick the winner.
-- **Generate all missing.** Candidates for every asset that has nothing to pick from yet, two at a time, with a cost estimate first.
-- **Board.** Every asset on one zoomable canvas, grouped by section. **3D lineup** stands every model at its game height.
-- **Credits first.** The generate sheet warns when a provider ran out of credits and shows Meshy's balance.
+- **One image per run** by default; when a run makes a single image, it becomes the winner on its own.
+- **Generate all missing.** Candidates for every asset that has nothing to pick from yet, with a cost estimate first.
+- **3D lineup** stands every model at its game height.
+- **Credits first.** The generate sheet warns when a provider ran out of credits, shows Meshy's balance, and won't start a 3D model you can't afford.
+- **Kind icons.** An asset without art shows its kind's icon, so a new folder never looks empty.
 - **Live workspace.** Edits from your agent show up at once.
 - **⌘K / Ctrl+K** jumps to any asset or action. **G** toggles gallery mode.
 - **Make key art** paints a project cover from its pitch.
@@ -206,7 +226,7 @@ You get characters with their models, animations and textures, weapons, items an
 | `README.md` in a folder | That folder's page; its `# Heading` is the title, the first paragraph the summary |
 | Root `README.md` (or `GAME.md`) | The project's front page |
 | `cover.png` / `.jpg` / `.webp` | Hero image of its folder (at the root: the project's key art) |
-| `.md` with `kind:` and `prompt:` in its header | An asset. Kinds: character, creature, item, weapon, prop, environment, vehicle, ui, vfx, sfx, voice, music |
+| `.md` with `kind:` and `prompt:` in its header | An asset. Kinds: character, creature, item, weapon, prop, environment, level, vehicle, ui, vfx, sfx, voice, music |
 | `pillars/*.png` (root = project bible) | Reference images sent with every generation at or below that folder |
 | `pillars/*.md` | Style-bible text added in front of every prompt at or below that folder |
 | `pillars:` / `aspect:` / `height_m:` in an asset header | Pillar strength, framing (`16:9`…) and height in metres |
@@ -264,6 +284,17 @@ uv run --with pyinstaller python scripts/build_desktop.py   # standalone app
 Pushing a tag like `v1.0.0` runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds the Windows installer and the macOS `.dmg` and attaches them to a GitHub release. The Python package is still called `forge`; `forge` and `glob` are the same command.
 
 </details>
+
+## What's new in 3.0
+
+- **Glob is an app.** The Glob shortcut opens it in its own window in about a second (a "Starting Glob" screen while it starts); it keeps running with a tray icon. Settings → Files & app shows where everything lives.
+- **No more orders or delivery folders.** Glob keeps `glob/ASSETS.md`; your coding agent reads it and copies the art. Nothing to install in the agent, nothing to restart.
+- **Level kits:** a level picture, one prop sheet, and every prop cut out and named on your computer.
+- **2D or 3D projects:** a 2D game hides 3D models, rigs and animations; its assets are ready once their image is picked.
+- **Simpler settings:** Accounts, New art, Glob chat, Your game, Files & app. Changes save at once; shapes have names (Square, Tall, Very wide).
+- **Honest chat login:** a coding agent counts as connected only after a real test, and Log in waits for you and switches over by itself.
+- **Faster:** the server no longer stalls on disk work, imports link files instead of copying them, and the studio starts in about half the time.
+- **Friendlier first start:** paste a folder path or start without a game folder; examples in New asset match the kind; disabled steps say what they wait for; the Generate window works on a phone.
 
 ## License
 
