@@ -371,6 +371,16 @@ h2.group-title span { font: 11px var(--mono); letter-spacing: 0; color: var(--mu
 .asset-tile:hover .asset-img { border-color: var(--line-strong); transform: translateY(-2px); }
 .asset-tile .kind-tag { position: absolute; top: 8px; left: 8px; background: rgba(9, 9, 11, .86); }
 .asset-empty { color: var(--faint); font-size: 12px; }
+/* An asset without art yet: its kind's icon on a soft tinted tile (KIND_HUE in app.js) */
+.kind-art { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: radial-gradient(circle at 50% 42%, hsla(var(--hue), 70%, 62%, .16), transparent 62%), var(--panel);
+  color: hsla(var(--hue), 65%, 72%, .85); }
+.kind-art svg { width: 38%; max-width: 64px; height: auto; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.kind-art small { color: var(--faint); font-size: 11.5px; }
+.vault-thumb .kind-art svg { width: 26px; }
+.drop-copy .kind-art { width: 96px; height: 96px; margin: 0 auto 10px; border-radius: 22px; background: radial-gradient(circle, hsla(var(--hue), 70%, 62%, .18), transparent 70%); }
+.drop-copy .kind-art svg { width: 54px; }
+.kind-chip svg { width: 14px; height: 14px; vertical-align: -2px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .asset-tile strong { font-size: 14px; font-weight: 600; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .asset-tile.add .asset-img { border-style: dashed; background: none; }
 .asset-tile.add .plus { font-size: 28px; color: var(--faint); font-weight: 300; }
@@ -1707,3 +1717,61 @@ body.gallery-mode .asset-tile.add, body.gallery-mode .actions-row { display: non
 .kind-row { display: grid; grid-template-columns: 140px 96px 130px; justify-content: start; gap: 8px; align-items: center; }
 .kind-row strong { font-weight: 500; }
 @media (max-width: 520px) { .kind-row { grid-template-columns: 1fr 1fr; } .kind-row strong { grid-column: 1 / -1; } }
+
+/* Settings → Accounts: what Glob can make, then one card per service */
+.caps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
+.cap { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--text); text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }
+.cap:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.cap strong { display: block; font-size: 13.5px; font-weight: 600; }
+.cap small { display: block; color: var(--faint); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.cap-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--panel-2); color: var(--faint); }
+.cap.ok .cap-icon { background: rgba(255, 122, 156, .12); color: var(--sakura); }
+.cap.ok small { color: var(--sakura-soft); }
+.cap.no { border-style: dashed; }
+.st-hint { margin: 0 0 18px; padding: 10px 14px; border-radius: 10px; background: rgba(255, 122, 156, .07); border: 1px solid rgba(255, 122, 156, .2); color: var(--sakura-soft); font-size: 13px; }
+.acct-list { display: grid; gap: 8px; margin-bottom: 22px; }
+.acct { display: grid; grid-template-columns: 44px 1fr auto; align-items: start; gap: 14px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); transition: border-color .2s, box-shadow .3s; }
+.acct.on { border-color: rgba(255, 122, 156, .28); }
+.acct.flash { box-shadow: 0 0 0 2px var(--sakura); }
+.acct-logo { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--elevated); border: 1px solid var(--line); overflow: hidden; }
+.acct-logo img { width: 30px; height: 30px; object-fit: contain; }
+.acct-logo b { color: var(--text); font-size: 18px; }
+.acct-text { min-width: 0; display: grid; gap: 2px; }
+.acct-text strong { font-size: 14.5px; font-weight: 600; }
+.acct-text > small { color: var(--muted); font-size: 12.5px; }
+.acct-status { margin-top: 4px; font-size: 12px; color: var(--faint); display: inline-flex; align-items: center; gap: 6px; }
+.acct.on .acct-status { color: var(--sakura); }
+.acct-act { align-self: center; }
+.acct-key { margin-top: 6px; }
+.acct-key summary { cursor: pointer; color: var(--faint); font-size: 12px; list-style: none; }
+.acct-key summary::-webkit-details-marker { display: none; }
+.acct-key summary:hover { color: var(--muted); text-decoration: underline; }
+.acct-key-form { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.acct-key-form input { flex: 1 1 220px; min-width: 0; }
+.acct-key-form a { font-size: 12px; color: var(--faint); }
+.chat-now { display: flex; align-items: center; gap: 10px; padding: 12px 16px; margin-bottom: 18px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); }
+.chat-now.no { border-color: rgba(255, 122, 156, .3); background: rgba(255, 122, 156, .06); }
+.st-more { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
+.st-more > summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; }
+.st-more > summary:hover { color: var(--text); }
+.st-more[open] > summary { margin-bottom: 12px; }
+.gen-defaults .set-row { margin-bottom: 8px; }
+.gen-defaults .set-row > div { flex: 1; }
+.gen-defaults .set-row select { max-width: 320px; }
+.kind-row { grid-template-columns: 180px 150px 180px; }
+.kind-name { display: flex; align-items: center; gap: 10px; }
+.kind-name .kind-art { width: 30px; height: 30px; border-radius: 8px; flex: none; }
+.kind-name .kind-art svg { width: 18px; }
+@media (max-width: 760px) { .caps { grid-template-columns: repeat(2, minmax(0, 1fr)); } .acct { grid-template-columns: 44px 1fr; } .acct-act { grid-column: 2; } }
+
+/* Level kit: the four steps on a level's page */
+.level-kit { margin: 14px 0 4px; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(132, 204, 22, .25); background: linear-gradient(180deg, rgba(132, 204, 22, .06), transparent 70%), var(--panel); }
+.level-kit .field-label { display: flex; align-items: center; gap: 6px; }
+.level-kit .field-label svg { width: 15px; height: 15px; }
+.level-kit ol { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.level-kit li { display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center; }
+.level-kit li > b { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line-strong); font-size: 12px; color: var(--muted); }
+.level-kit li.done > b { background: rgba(132, 204, 22, .18); border-color: rgba(132, 204, 22, .5); color: #bef264; }
+.level-kit li strong { display: block; font-size: 13px; font-weight: 600; }
+.level-kit li small { display: block; color: var(--faint); font-size: 12px; }
+.level-kit li.done strong { color: var(--muted); }

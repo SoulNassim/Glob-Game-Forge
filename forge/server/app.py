@@ -2287,8 +2287,16 @@ def api_studio_thumb(payload: dict[str, Any], project: str = "default") -> dict[
 
 
 @app.get("/api/studio/detect-parts")
-def api_studio_detect_parts(path: str, project: str = "default") -> dict[str, Any]:
-    return {"boxes": _overview_call(game_tools.detect_parts, _ws_dir(project), path)}
+def api_studio_detect_parts(path: str, project: str = "default", sheet: bool = False) -> dict[str, Any]:
+    return {"boxes": _overview_call(game_tools.detect_sheet_items if sheet else game_tools.detect_parts, _ws_dir(project), path)}
+
+
+@app.post("/api/studio/name-parts")
+async def api_studio_name_parts(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    """Names for the boxes on a prop sheet, from Glob's chat model when it can see images."""
+    image = str(payload.get("image") or "")
+    _overview_call(game_tools._asset_image, _ws_dir(project), image)
+    return await game_tools.name_sheet_items(_ws_dir(project), image, list(payload.get("boxes") or [])[:24], _agent_model_call)
 
 
 @app.post("/api/studio/guess-body-parts")

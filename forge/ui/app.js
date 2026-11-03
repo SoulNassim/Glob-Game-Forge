@@ -817,6 +817,7 @@ async function pickModel(id) {
   if (m && !m.efforts?.length) state.effort = "medium";
   renderModelPill();
   renderModelPop();
+  if (!$("#settingsView").hidden && state.settings?.tab === "models") renderSettings();
   try {
     await api("/api/config", { method: "PUT", body: { agent_model: id } });
     if (state.sessionId) await api(`/api/agent/sessions/${state.sessionId}`, { method: "PATCH", body: { model: id, effort: state.effort } });
@@ -841,7 +842,7 @@ function autoGrow() {
 
 async function settingsDialog(tab) {
   toggleModelPop(false);
-  state.settings = { tab: tab || state.settings?.tab || "connect", adding: null };
+  state.settings = { tab: tab || state.settings?.tab || "accounts", adding: null };
   showScene($("#settingsView"));
   await renderSettings();
 }
@@ -875,6 +876,7 @@ function serviceCardsHTML() {
 function renderServiceCards() {
   const box = $("#serviceCards");
   if (box) box.outerHTML = serviceCardsHTML();
+  if ($("#acctList") && !$("#settingsView").hidden) renderSettings();
 }
 
 // Opens the service's sign-in page; the browser comes back to Glob, which finishes the sign-in.
@@ -908,7 +910,7 @@ async function connectService(id) {
 }
 
 function serviceConnected(id) {
-  if (state.serviceWaiting !== id && !$("#serviceCards")) return;
+  if (state.serviceWaiting !== id && !$("#serviceCards") && !$("#acctList")) return;
   clearTimeout(state.serviceTimer);
   state.serviceWaiting = null;
   renderServiceCards();
@@ -960,115 +962,253 @@ function refreshModelViews() {
   if (!$("#settingsView").hidden && state.settings?.tab === "models") renderSettings();
 }
 
+// Settings: five plain tabs. Each one draws at once from what Glob already knows and fills in as answers arrive.
+const SETTINGS_TABS = [["accounts", "Accounts"], ["images", "New art"], ["models", "Glob chat"], ["connect", "Your game"], ["about", "Files & app"]];
+const SETTINGS_ALIAS = { agent: "models", storage: "about" };
+
+// Every provider in one list: sign in where the provider allows it, otherwise (or as well) paste a key.
+const PROVIDERS = [
+  { id: "elevenlabs", name: "ElevenLabs", makes: "Images, sound effects, voices and music", key: "elevenlabs", service: true },
+  { id: "meshy", name: "Meshy", makes: "3D models, rigs, animations and images", key: "meshy", service: true },
+  { id: "gemini", name: "Google Gemini", makes: "Images (Nano Banana)", key: "gemini" },
+  { id: "fal", name: "fal", makes: "Hundreds of image, video and 3D models", service: true },
+  { id: "higgsfield", name: "Higgsfield", makes: "Images and cinematic video", service: true },
+  { id: "tripo", name: "Tripo", makes: "3D models", key: "tripo" },
+  { id: "stability", name: "Stability AI", makes: "Music and ambient loops", key: "stability" },
+];
+const PROVIDER_LOGO = { ...SERVICE_LOGO, gemini: "/ui/logos/gemini.svg" };
+
+// What Glob can make right now, and with what: the four lights at the top of Accounts.
+function capabilities(cfg) {
+  const sv = Object.fromEntries((state.services || []).map((s) => [s.id, s.connected]));
+  const sm = state.serviceModels || { image: [], "3d": [] };
+  const keyImages = (state.studio?.models || []).some((m) => m.available);
+  const chat = state.models.find((m) => m.id === state.model && m.ready) || state.models.find((m) => m.ready);
+  return [
+    { id: "images", label: "Images", icon: "character", ok: keyImages || sm.image.length > 0, via: keyImages ? "your API keys" : sm.image[0]?.label.split(" · ")[0] },
+    { id: "3d", label: "3D models", icon: "cube", ok: !!(cfg.meshy_configured || cfg.tripo_configured || cfg.meshy_signed_in || sm["3d"].length), via: cfg.meshy_configured || cfg.meshy_signed_in ? "Meshy" : cfg.tripo_configured ? "Tripo" : sm["3d"][0]?.label.split(" · ")[0] },
+    { id: "sounds", label: "Sounds", icon: "sound", ok: !!(cfg.elevenlabs_configured || sv.elevenlabs || cfg.stability_configured), via: cfg.elevenlabs_configured || sv.elevenlabs ? "ElevenLabs" : "Stability AI" },
+    { id: "chat", label: "Glob chat", icon: "send", ok: !!chat, via: chat?.label, tab: "models" },
+  ];
+}
+
+function accountCard(p, cfg) {
+  const sv = (state.services || []).find((s) => s.id === p.id);
+  const signedIn = !!sv?.connected, keyed = !!(p.key && cfg[`${p.key}_configured`]);
+  const waiting = state.serviceWaiting === p.id;
+  const keyInfo = KEY_PROVIDERS.find((k) => k.key === p.key);
+  const status = signedIn ? "Signed in" : keyed ? "Key saved" : waiting ? "Finish signing in in your browser…" : "Not connected";
+  const logo = PROVIDER_LOGO[p.id] ? `<img src="${PROVIDER_LOGO[p.id]}" alt="">` : `<b>${esc(p.name[0])}</b>`;
+  const keyForm = p.key ? `<details class="acct-key"><summary>${keyed ? "Replace the key" : p.service ? "Or paste an API key" : "Paste an API key"}</summary>
+      <form class="acct-key-form"><input name="${esc(p.key)}_api_key" type="password" autocomplete="off" placeholder="${esc(keyInfo?.hint || "Paste the key")}" aria-label="${esc(p.name)} API key">
+      <button class="mini">Save</button><a href="${esc(keyInfo?.url || "#")}" target="_blank" rel="noopener">Get a key ↗</a></form></details>` : "";
+  return `<div class="acct${signedIn || keyed ? " on" : ""}${waiting ? " wait" : ""}" data-acct="${p.id}">
+    <span class="acct-logo">${logo}</span>
+    <div class="acct-text"><strong>${esc(p.name)}</strong><small>${esc(p.makes)}</small>
+      <span class="acct-status">${signedIn || keyed ? "✓ " : waiting ? `<i class="agent-spin"></i>` : ""}${esc(status)}</span>${keyForm}</div>
+    <div class="acct-act">${signedIn ? `<button class="ghost" data-service-disconnect="${p.id}">Sign out</button>`
+      : p.service ? `<button class="primary" data-service-connect="${p.id}">${waiting ? "Waiting…" : "Sign in"}</button>` : ""}</div></div>`;
+}
+
+function accountsBody(cfg, budget) {
+  const caps = capabilities(cfg);
+  const missing = caps.filter((c) => !c.ok);
+  return `<h1>Accounts</h1>
+    <p class="st-lede">Glob makes art with services you sign in to. Glob is free; you pay each service directly for what you make, and everything stays on this computer.</p>
+    <div class="caps">${caps.map((c) => `<button class="cap ${c.ok ? "ok" : "no"}" ${c.tab ? `data-settings-tab="${c.tab}"` : `data-cap-jump="${c.id}"`}>
+      <span class="cap-icon">${icon(c.icon)}</span><span><strong>${c.label}</strong><small>${c.ok ? `✓ ${esc(c.via || "ready")}` : "Not set up yet"}</small></span></button>`).join("")}</div>
+    ${missing.length ? `<p class="st-hint">${missing.length === caps.length ? "Start with <b>ElevenLabs</b>: one sign-in gives you images and sounds." : `To make ${missing.map((c) => c.label.toLowerCase()).join(" and ")}, connect a service below that says so.`}</p>` : ""}
+    <div class="acct-list" id="acctList">${PROVIDERS.map((p) => accountCard(p, cfg)).join("")}</div>
+    <div class="fistbump" id="serviceFistbump" hidden></div>
+    ${budgetCard(budget)}`;
+}
+
+// New art: which service makes images and 3D models, and the shape and background of each kind.
+function defaultsHTML(cfg, studio) {
+  const sm = state.serviceModels || { image: [], "3d": [] };
+  const group = (items) => Object.entries(Object.groupBy(items, (m) => m.label.split(" · ")[0]));
+  const opt = (id, label, selected) => `<option value="${esc(id)}" ${id === selected ? "selected" : ""}>${esc(label)}</option>`;
+  const images = [...(studio.models || []).filter((m) => m.available), ...sm.image];
+  const imageSel = images.length ? `<select name="default_image_model" aria-label="Images are made with">${images.some((m) => m.id === studio.selected) ? "" : opt(studio.selected, `${humanize(String(studio.selected).split("/").pop())}${sm.loading ? " · checking…" : ""}`, studio.selected)}
+      ${group(images).map(([who, items]) => `<optgroup label="${esc(who)}">${items.map((m) => opt(m.id, `${m.label.split(" · ").slice(1).join(" · ") || m.label}${m.price ? ` · $${m.price.toFixed(3)}` : ""}`, studio.selected)).join("")}</optgroup>`).join("")}</select>`
+    : `<button type="button" class="ghost" data-settings-tab="accounts">Connect an account first →</button>`;
+  const current3d = cfg.default_3d_service_model || `keys:${cfg.default_3d_provider || "meshy"}`;
+  const own3d = [["meshy", "Meshy (rigs and animations too)"], ["tripo", "Tripo"]].filter(([id]) => cfg[`${id}_configured`] || cfg[`${id}_signed_in`]).map(([id, label]) => ({ id: `keys:${id}`, label: `Your account · ${label}` }));
+  const meshes = [...own3d, ...sm["3d"]];
+  const meshSel = meshes.length ? `<select name="default_3d" aria-label="3D models are made with">${group(meshes).map(([who, items]) => `<optgroup label="${esc(who)}">${items.map((m) => opt(m.id, m.label.split(" · ").slice(1).join(" · "), current3d)).join("")}</optgroup>`).join("")}</select>`
+    : `<button type="button" class="ghost" data-settings-tab="accounts">Connect Meshy first →</button>`;
+  return `
+    <div class="set-row"><div><strong>Images are made with</strong><small>Every Generate window starts here and can switch for one run.</small></div>${imageSel}</div>
+    <div class="set-row"><div><strong>3D models are made with</strong><small>Turns an asset's picked image into a 3D model.</small></div>${meshSel}</div>
+    <div class="st-label">Each kind of asset</div>
+    <div class="kind-table">${Object.entries(studio.kind_defaults || {}).map(([kind, k]) => `<div class="kind-row">
+      <span class="kind-name">${kindArt(kind, "")}<strong>${esc(KIND_PLURAL[kind] || humanize(kind))}</strong></span>
+      <select data-kind-aspect="${esc(kind)}" aria-label="Shape for ${esc(kind)}">${aspectOptions(k.aspect)}</select>
+      <select data-kind-bg="${esc(kind)}" aria-label="Background for ${esc(kind)}"><option value="cutout" ${k.background === "cutout" ? "selected" : ""}>Background removed</option><option value="scene" ${k.background === "scene" ? "selected" : ""}>Full scene</option></select></div>`).join("")}</div>
+    <p class="st-note"><b>Background removed</b> suits characters, props and anything that becomes 3D or a sprite. <b>Full scene</b> keeps the background, for places and key art. Changes save at once.</p>`;
+}
+
+function readDefaults(form) {
+  const mesh = form.default_3d?.value || "";
+  const out = { kind_defaults: Object.fromEntries([...form.querySelectorAll("[data-kind-aspect]")].map((el) => [el.dataset.kindAspect, { aspect: el.value, background: form.querySelector(`[data-kind-bg="${el.dataset.kindAspect}"]`)?.value || "cutout" }])) };
+  if (form.default_image_model) Object.assign(out, { default_image_model: form.default_image_model.value, user_locked_image_model: true });
+  if (mesh.startsWith("keys:")) Object.assign(out, { default_3d_provider: mesh.slice(5), default_3d_service_model: "" });
+  else if (mesh) out.default_3d_service_model = mesh;
+  return out;
+}
+
+async function saveDefaults(form) {
+  try {
+    await api("/api/config", { method: "PUT", body: readDefaults(form) });
+    state.studio = null;
+    toast("Saved");
+  } catch (err) { toast(err.message, true); }
+}
+
+function chatBody(info, cfg) {
+  const ready = state.models.filter((m) => m.ready);
+  const current = ready.find((m) => m.id === state.model);
+  const groups = Object.groupBy(ready, (m) => m.group || m.provider);
+  const opt = (values, cur, label = (v) => v) => values.map((v) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${label(v)}</option>`).join("");
+  const k = (v) => `${v / 1000}k tokens`;
+  return `<h1>Glob chat</h1>
+    <p class="st-lede">Glob's chat plans your game's art with you and makes it. It runs on an AI you already have: log in to a coding agent once, no API key needed.</p>
+    <div class="chat-now ${current ? "ok" : "no"}">${current ? `<span class="dot live"></span><span>The chat uses <b>${esc(current.label)}</b></span>` : `<span class="dot"></span><span>The chat has no AI yet. Log in to one below.</span>`}</div>
+    <div class="st-label">Your coding agents</div>
+    <div class="preset-grid">${(info.clis || []).map((c) => `<button class="preset cli-${cliStatus(c)}" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i><img class="preset-logo" src="${AGENT_LOGO[c.id]}" alt=""></i><strong>${esc(c.label)}</strong><small>${CLI_STATUS_TEXT[cliStatus(c)]}</small></button>`).join("")}</div>
+    ${ready.length ? `<div class="st-label">Ready to use · ${ready.length}</div>
+    ${Object.entries(groups).map(([name, items]) => `<div class="conn-group"><div class="conn-head"><strong>${esc(name)}</strong>${items[0].endpoint ? `<button class="link-btn danger-text" data-remove-endpoint="${esc(items[0].endpoint)}">Remove</button>` : ""}</div>
+      ${items.map((m) => `<div class="conn-row"><span class="dot live"></span><span>${esc(m.label)}</span><span class="grow"></span>${m.id === state.model ? `<em class="in-use">In use</em>` : `<button class="mini" data-pick-model="${esc(m.id)}" data-settings-refresh>Use</button>`}<span class="test-result" id="test-${esc(m.id).replace(/[^a-z0-9]/gi, "_")}"></span><button class="mini ghost" data-test-model="${esc(m.id)}">Test</button></div>`).join("")}</div>`).join("")}` : ""}
+    <details class="st-more"${state.settings.adding ? " open" : ""}><summary>Use an API key or a local model instead</summary>
+      ${state.settings.adding ? addModelCard(info) : `<div class="preset-grid">
+        ${info.vscode_importable ? `<button class="preset featured" data-import-vscode><i>⇣</i><strong>Import from VS Code</strong><small>${info.vscode_importable} model${info.vscode_importable === 1 ? "" : "s"} found</small></button>` : ""}
+        ${Object.entries(info.presets).map(([id, p]) => `<button class="preset" data-add-preset="${id}"><i>${PRESET_ICON[id] || "•"}</i><strong>${esc(p.label)}</strong><small>${p.needs_key ? "API key" : id === "custom" ? "Any OpenAI-compatible URL" : "No key needed"}</small></button>`).join("")}</div>`}
+    </details>
+    <details class="st-more"><summary>Advanced</summary>
+      <form id="agentForm" class="agent-form">
+        <div class="set-row"><div><strong>Show the chat</strong><small>Automatic hides it while your coding agent works on the project.</small></div>
+          <select name="chat_mode">${opt(["auto", "on", "off"], cfg.chat_mode || "auto", (v) => ({ auto: "Automatic", on: "Always", off: "Never" })[v])}</select></div>
+        <div class="set-row"><div><strong>How hard it thinks</strong><small>For new chats. Each chat can change it in the model menu.</small></div>
+          <select name="agent_reasoning_effort">${opt(["low", "medium", "high", "max"], cfg.agent_reasoning_effort, (v) => EFFORT_LABEL[v])}</select></div>
+        <div class="set-row"><div><strong>Shorten long chats</strong><small>Older messages fold into a summary, so long chats stay quick and cheap.</small></div>
+          <label class="switch"><input type="checkbox" name="agent_auto_compact" ${cfg.agent_auto_compact ? "checked" : ""}><span></span></label></div>
+        <div class="set-row"><div><strong>Shorten at</strong><small>The size of the chat sent with each message.</small></div>
+          <select name="agent_compact_at_tokens">${opt([16000, 32000, 48000, 64000, 100000, 128000, 200000], cfg.agent_compact_at_tokens, k)}</select></div>
+        <div class="set-row"><div><strong>Keep word for word</strong><small>The newest messages never fold.</small></div>
+          <select name="agent_keep_recent_messages">${opt([2, 4, 6, 8, 12, 16], cfg.agent_keep_recent_messages)}</select></div>
+        <div class="set-row"><div><strong>Steps per message</strong><small>How many rounds the chat may take for one message.</small></div>
+          <select name="agent_max_tool_rounds">${opt([4, 8, 12, 16, 24], cfg.agent_max_tool_rounds)}</select></div>
+      </form>
+    </details>`;
+}
+
 async function renderSettings() {
   const st = state.settings;
-  await loadModels();
-  const info = state.modelInfo || { presets: {}, endpoints: [] };
-  const nav = [["connect", "Your game"], ["images", "Generators"], ["agent", "Glob chat"], ["models", "Chat models"], ["storage", "Storage & access"], ["about", "About"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
-  let body = "";
-  if (st.tab === "models") {
-    const ready = state.models.filter((m) => m.ready);
-    const groups = {};
-    for (const m of ready) (groups[m.group || m.provider] ||= []).push(m);
-    body = `
-      <h1>Chat models</h1><p class="st-lede">The model behind Glob's chat in this app. Connect one in a few clicks: pick a provider, paste a key, choose models.</p>
-      ${st.adding ? addModelCard(info) : `
-        <div class="st-label">Add a model</div>
-        <div class="preset-grid">
-          ${info.vscode_importable ? `<button class="preset featured" data-import-vscode><i>⇣</i><strong>Import from VS Code</strong><small>${info.vscode_importable} model${info.vscode_importable === 1 ? "" : "s"} found, keys included</small></button>` : ""}
-          ${Object.entries(info.presets).map(([id, p]) => `<button class="preset" data-add-preset="${id}"><i>${PRESET_ICON[id] || "•"}</i><strong>${esc(p.label)}</strong><small>${p.needs_key ? "API key" : id === "custom" ? "Any OpenAI-compatible URL" : "No key needed"}</small></button>`).join("")}
-        </div>`}
-      <div class="st-label">Coding agents · your own login</div>
-      <p class="st-empty">Claude Code, Codex, Gemini CLI and OpenCode can run Glob's chat on your existing subscription, no API key. Installed ones appear in the model menu.</p>
-      <div class="preset-grid">
-        ${(info.clis || []).map((c) => `<button class="preset cli-${cliStatus(c)}" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i><img class="preset-logo" src="${AGENT_LOGO[c.id]}" alt=""></i><strong>${esc(c.label)}</strong><small>${CLI_STATUS_TEXT[cliStatus(c)]}</small></button>`).join("")}
-      </div>
-      <div class="st-label">Connected · ${ready.length}</div>
-      ${ready.length ? Object.entries(groups).map(([group, items]) => {
-        const ep = items[0].endpoint;
-        return `<div class="conn-group"><div class="conn-head"><strong>${esc(group)}</strong>${ep ? `<button class="link-btn danger-text" data-remove-endpoint="${esc(ep)}">Remove</button>` : ""}</div>
-          ${items.map((m) => `<div class="conn-row"><span class="dot live"></span><span>${esc(m.label)}</span>${m.id === state.model ? `<em class="in-use">In use</em>` : ""}<span class="grow"></span><span class="test-result" id="test-${esc(m.id).replace(/[^a-z0-9]/gi, "_")}"></span><button class="mini" data-test-model="${esc(m.id)}">Test</button></div>`).join("")}</div>`;
-      }).join("") : `<p class="st-empty">Nothing connected yet. Pick a provider above.</p>`}`;
-  } else if (st.tab === "agent") {
-    const cfg = await api("/api/config");
-    const opt = (values, current, label = (v) => v) => values.map((v) => `<option value="${v}" ${String(v) === String(current) ? "selected" : ""}>${label(v)}</option>`).join("");
-    const k = (v) => `${v / 1000}k tokens`;
-    body = `
-      <h1>Glob chat</h1><p class="st-lede">Glob can also run right here, in a chat next to your project. It's optional: a connected coding agent can do the same work with the <code>glob</code> skill.</p>
-      <form id="agentForm" class="agent-form">
-        <div class="set-row"><div><strong>Show the Glob chat</strong><small>Automatic hides it while a coding agent is connected to the project; the panel button still brings it back.</small></div>
-          <select name="chat_mode">${opt(["auto", "on", "off"], cfg.chat_mode || "auto", (v) => ({ auto: "Automatic", on: "Always", off: "Never" })[v])}</select></div>
-        <div class="set-row"><div><strong>Default reasoning effort</strong><small>For new chats. Each chat can change it in the model pill.</small></div>
-          <select name="agent_reasoning_effort">${opt(["low", "medium", "high", "max"], cfg.agent_reasoning_effort, (v) => EFFORT_LABEL[v])}</select></div>
-        <div class="set-row"><div><strong>Auto-compact long chats</strong><small>When a chat gets long, Glob folds the older messages into a summary so it stays fast and cheap without forgetting decisions.</small></div>
-          <label class="switch"><input type="checkbox" name="agent_auto_compact" ${cfg.agent_auto_compact ? "checked" : ""}><span></span></label></div>
-        <div class="set-row"><div><strong>Compact when the context reaches</strong><small>Estimated size of the chat sent with each message.</small></div>
-          <select name="agent_compact_at_tokens">${opt([16000, 32000, 48000, 64000, 100000, 128000, 200000], cfg.agent_compact_at_tokens, k)}</select></div>
-        <div class="set-row"><div><strong>Keep recent messages</strong><small>The newest messages always stay word for word.</small></div>
-          <select name="agent_keep_recent_messages">${opt([2, 4, 6, 8, 12, 16], cfg.agent_keep_recent_messages)}</select></div>
-        <div class="set-row"><div><strong>Steps per message</strong><small>How many read/write rounds Glob may take for one message.</small></div>
-          <select name="agent_max_tool_rounds">${opt([4, 8, 12, 16, 24], cfg.agent_max_tool_rounds)}</select></div>
-        <div class="row"><button class="primary">Save</button></div>
-      </form>`;
-  } else if (st.tab === "connect") {
-    body = await connectSettings();
-  } else if (st.tab === "storage") {
-    body = await storageSettings();
-  } else if (st.tab === "about") {
-    body = await aboutSettings();
+  st.tab = SETTINGS_ALIAS[st.tab] || st.tab;
+  if (!SETTINGS_TABS.some(([id]) => id === st.tab)) st.tab = "accounts";
+  const tab = st.tab;
+  const nav = SETTINGS_TABS.map(([id, label]) => `<button class="${tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
+  const draw = (body) => {
+    if (state.settings !== st || st.tab !== tab || $("#settingsView").hidden) return;
+    const same = $("#settingsView .st-body")?.dataset.tab === tab;
+    const scroll = same ? $("#settingsView .st-body").scrollTop : 0;
+    const open = same ? [...document.querySelectorAll("#settingsView details[open] > summary")].map((s) => s.textContent) : [];
+    $("#settingsView").innerHTML = `
+      <header class="pv-top"><div class="glob-brand static"><img class="glob-mark" src="/ui/glob.svg" alt=""><span class="glob-word">Glob<small>settings</small></span></div>
+        <button class="icon-btn" type="button" data-close-settings title="Close" aria-label="Close">✕</button></header>
+      <div class="st-main"><nav class="st-nav">${nav}</nav><div class="st-body" data-tab="${tab}">${body}</div></div>`;
+    document.querySelectorAll("#settingsView details > summary").forEach((s) => { if (open.includes(s.textContent)) s.parentElement.open = true; });
+    $("#settingsView .st-body").scrollTop = scroll;
+  };
+  if ($("#settingsView .st-nav")) $("#settingsView .st-nav").innerHTML = nav; // the tab lights up at once
+  // Draw what is known now; answers that take a moment (signed-in services' models) redraw when they come.
+  if (tab === "accounts" || tab === "images") {
+    const [cfg, budget] = await Promise.all([api("/api/config"), tab === "accounts" ? api("/api/budget").catch(() => null) : null, studioOptions(), state.services ? null : loadServices(), state.models.length ? null : loadModels()]);
+    st.cfg = cfg;
+    const body = () => (tab === "accounts" ? accountsBody(cfg, budget)
+      : `<h1>New art</h1><p class="st-lede">How Glob makes new art: which service, and what each kind of asset looks like. One asset can still change this in its Generate window.</p><form id="defaultsForm" class="gen-defaults">${defaultsHTML(cfg, state.studio)}</form>`);
+    draw(body());
+    if (state.serviceModels?.loading) state.serviceModelsReady.then(() => draw(body()));
+  } else if (tab === "models") {
+    const [cfg] = await Promise.all([api("/api/config"), state.modelInfo ? null : loadModels()]);
+    draw(chatBody(state.modelInfo || { presets: {}, clis: [] }, cfg));
+    loadModels().then(() => draw(chatBody(state.modelInfo || { presets: {}, clis: [] }, cfg)));
+  } else if (tab === "connect") {
+    draw(await connectSettings());
   } else {
-    const cfg = await api("/api/config");
-    const studio = await studioOptions();
-    state.settings.cfg = cfg;
-    state.settings.defaults = null;
-    body = `
-      <h1>Generators</h1><p class="st-lede">Sign in or paste a key and Glob can make 2D art, 3D models and sounds. Everything stays on this computer; you pay the providers directly.</p>
-      ${budgetCard(await api("/api/budget").catch(() => null))}
-      <div class="st-label">Default generators</div>
-      <form id="defaultsForm" class="gen-defaults">${(await (state.serviceModelsReady || loadServiceModels()), defaultsHTML(cfg, studio))}</form>
-      <div class="st-label">Sign in · no API key</div>
-      ${(await loadServices(), serviceCardsHTML())}
-      <div class="fistbump" id="serviceFistbump" hidden></div>
-      <p class="st-empty">Glob's chat uses connected services with your account's plan, including features an API key doesn't unlock.</p>
-      <div class="st-label">API keys</div>
-      <form id="keysForm" class="key-cards">
-        ${KEY_PROVIDERS.map((k) => `<div class="key-card${cfg[`${k.key}_configured`] ? " on" : ""}">
-          <div class="key-top"><span class="dot ${cfg[`${k.key}_configured`] ? "live" : ""}"></span><strong>${k.name}</strong><a href="${k.url}" target="_blank" rel="noopener">Get a key ↗</a></div>
-          <small>${k.use}</small>
-          <input name="${k.key}_api_key" type="password" autocomplete="off" placeholder="${cfg[`${k.key}_configured`] ? `Connected (${esc(cfg[`${k.key}_api_key`])}). Paste to replace` : k.hint}">
-        </div>`).join("")}
-        <div class="row"><button class="primary">Save</button></div>
-      </form>`;
+    draw(await filesSettings());
   }
-  $("#settingsView").innerHTML = `
-    <header class="pv-top"><div class="glob-brand static"><img class="glob-mark" src="/ui/glob.svg" alt=""><span class="glob-word">Glob<small>settings</small></span></div>
-      <button class="icon-btn" type="button" data-close-settings title="Close" aria-label="Close">✕</button></header>
-    <div class="st-main"><nav class="st-nav">${nav}</nav><div class="st-body">${body}</div></div>`;
-  $("#keysForm")?.addEventListener("submit", saveKeys);
-  $("#defaultsForm")?.addEventListener("submit", saveDefaults);
-  $("#defaultsForm")?.addEventListener("change", (event) => {
-    const kind = event.target.dataset.defSource;
-    if (!kind) return;
-    // A new source: show its models, starting from its recommended one.
-    const source = event.target.value;
-    const pick = kind === "3d" ? (source === "keys" ? "" : (state.serviceModels["3d"].find((m) => m.id === SERVICE_DEFAULT_MODEL[`${source}/3d`]) || state.serviceModels["3d"].find((m) => m.service === source) || {}).id || "")
-      : source === "keys" ? (state.studio.models.find((m) => m.available) || {}).id || "" : (state.serviceModels.image.find((m) => m.id === SERVICE_DEFAULT_MODEL[`${source}/image`]) || state.serviceModels.image.find((m) => m.service === source) || {}).id || "";
-    state.settings.defaults = { ...readDefaults(event.target.form), ...(kind === "3d" ? { model3d: pick } : { image: pick }) };
-    event.target.form.innerHTML = defaultsHTML(state.settings.cfg, state.studio, state.settings.defaults);
-  });
-  $("#agentForm")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.target;
-    const updates = {
-      agent_reasoning_effort: form.agent_reasoning_effort.value,
-      agent_auto_compact: form.agent_auto_compact.checked,
-      agent_compact_at_tokens: Number(form.agent_compact_at_tokens.value),
-      agent_keep_recent_messages: Number(form.agent_keep_recent_messages.value),
-      agent_max_tool_rounds: Number(form.agent_max_tool_rounds.value),
-      chat_mode: form.chat_mode.value,
-    };
-    try { await api("/api/config", { method: "PUT", body: updates }); state.agentCfg = { ...state.agentCfg, ...updates }; toast("Saved"); syncComposer(); applyChatMode(); } catch (err) { toast(err.message, true); }
-  });
+}
+
+// Settings save as they change: no Save button to forget.
+$("#settingsView").addEventListener("change", async (event) => {
+  const form = event.target.form;
+  if (form?.id === "defaultsForm") return saveDefaults(form);
+  if (form?.id !== "agentForm") return;
+  const updates = {
+    agent_reasoning_effort: form.agent_reasoning_effort.value,
+    agent_auto_compact: form.agent_auto_compact.checked,
+    agent_compact_at_tokens: Number(form.agent_compact_at_tokens.value),
+    agent_keep_recent_messages: Number(form.agent_keep_recent_messages.value),
+    agent_max_tool_rounds: Number(form.agent_max_tool_rounds.value),
+    chat_mode: form.chat_mode.value,
+  };
+  try { await api("/api/config", { method: "PUT", body: updates }); state.agentCfg = { ...state.agentCfg, ...updates }; toast("Saved"); syncComposer(); applyChatMode(); } catch (err) { toast(err.message, true); }
+});
+
+$("#settingsView").addEventListener("submit", async (event) => {
+  const form = event.target.closest(".acct-key-form");
+  if (!form) return;
+  event.preventDefault();
+  const input = form.querySelector("input");
+  if (!input.value.trim()) return input.focus();
+  try {
+    await api("/api/config", { method: "PUT", body: { [input.name]: input.value.trim() } });
+    state.studio = null;
+    loadServiceModels();
+    toast("✓ Key saved");
+    await renderSettings();
+  } catch (err) { toast(err.message, true); }
+});
+
+// A capability that isn't set up points at the services that give it.
+document.addEventListener("click", (event) => {
+  const jump = event.target.closest("[data-cap-jump]");
+  if (!jump) return;
+  const want = { images: /image/i, "3d": /3d/i, sounds: /sound|music/i }[jump.dataset.capJump];
+  const cards = [...document.querySelectorAll("#acctList .acct")].filter((el) => want?.test(el.querySelector("small")?.textContent || ""));
+  cards[0]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  for (const card of cards) { card.classList.add("flash"); setTimeout(() => card.classList.remove("flash"), 1600); }
+});
+
+async function filesSettings() {
+  const [a, info, grants, health] = await Promise.all([api("/api/about"), api("/api/storage"), loadGrants(), api("/api/health").catch(() => ({})), state.update ? null : checkForUpdate()]);
+  const shortcut = a.shortcuts.length
+    ? `<p class="st-note">Open Glob any time with the <strong>Glob</strong> shortcut on your desktop or in the Start menu.${a.background ? " Closing the window leaves Glob running; its icon in the taskbar tray opens or quits it." : ""}</p>`
+    : `<p class="st-note">There's no Glob shortcut yet. Add one to open Glob without a terminal or an agent.</p>`;
+  return `
+    <h1>Files & app</h1><p class="st-lede">Glob ${esc(a.version)} runs on this computer. Here is where your work is saved and how to open Glob again.</p>
+    <div class="st-label">Open Glob</div>
+    ${shortcut}
+    <div class="row wrap"><button class="ghost" data-st-shortcut>${a.shortcuts.length ? "Make the shortcut again" : "Add a Glob shortcut"}</button>${health.background ? `<button class="ghost danger-text" data-st-quit>Quit Glob</button>` : ""}</div>
+    <div class="st-label">Your projects</div>
+    <div class="path-row"><code>${esc(info.projects_dir)}</code><button class="mini" data-st-open="projects">Open</button><button class="mini" data-st-move>Move…</button></div>
+    ${state.project ? `<div class="st-label">This project · ${esc(humanize(state.project))}</div>
+    <div class="path-row"><code>${esc(info.workspace_dir)}</code><button class="mini" data-st-open="workspace">Open</button></div>` : ""}
+    <div class="row wrap">${state.project ? `<button class="ghost" data-st-export="${esc(state.project)}">Save as .zip…</button>` : ""}<button class="ghost" data-st-import-zip>Open a .zip…</button><button class="ghost" data-imp-open>Import a game…</button></div>
+    ${updateSettings()}
+    <details class="st-more"><summary>Advanced</summary>
+      <div class="st-label">Folders Glob may use</div>
+      <div class="grant-list">${grantRows(grants)}</div>
+      <div class="row"><button class="ghost" data-grant-add>+ Add a folder</button></div>
+      <p class="st-note">Glob's chat can read these folders, and write in them when allowed. API keys and .env files are always off-limits. When Glob needs another folder, it asks in the chat.</p>
+      <div class="st-label">Where Glob is installed · ${esc(INSTALL_KIND[a.install_kind] || a.install_kind)}</div>
+      <div class="path-row"><code>${esc(a.install_dir)}</code><button class="mini" data-st-open="install">Open</button></div>
+      <div class="st-label">Settings and keys</div>
+      <div class="path-row"><code>${esc(a.config_dir)}</code><button class="mini" data-st-open="config">Open</button></div>
+      <p class="st-note">If something goes wrong, the log is <code>${esc(a.log)}</code>.</p>
+      <div class="row"><button class="ghost" data-setup-open>Run the welcome setup again</button></div>
+    </details>`;
 }
 
 // ---------- coding agent: connect the game folder ----------
@@ -1219,69 +1359,7 @@ async function saveEndpoint() {
   } catch (err) { toast(err.message, true); }
 }
 
-// The default 2D and 3D generators: where each runs (your keys or a signed-in service) and with which model.
-const KIND_PLURAL = { character: "Characters", creature: "Creatures", item: "Items", weapon: "Weapons", prop: "Props", vehicle: "Vehicles", environment: "Places", ui: "UI", vfx: "Effects" };
-
-function defaultsHTML(cfg, studio, d = null) {
-  d = d || { image: studio.selected, kinds: studio.kind_defaults, model3d: cfg.default_3d_service_model, provider3d: cfg.default_3d_provider };
-  const sm = state.serviceModels || { image: [], "3d": [] };
-  const sources = (kind) => [...new Map(sm[kind].map((m) => [m.service, m.label.split(" · ")[0]])).entries()];
-  const src2d = modelSource(d.image), src3d = modelSource(d.model3d);
-  const sourceSelect = (kind, current, keysLabel) => `<select data-def-source="${kind}"><option value="keys" ${current === "keys" ? "selected" : ""}>${keysLabel}</option>
-    ${sources(kind).map(([id, label]) => `<option value="${esc(id)}" ${current === id ? "selected" : ""}>${esc(label)} · signed in (MCP)</option>`).join("")}</select>`;
-  const keys3d = [["meshy", "Meshy (rigging & animation too)"], ["tripo", "Tripo"]].map(([id, label]) => `<option value="${id}" ${d.provider3d === id ? "selected" : ""} ${cfg[`${id}_configured`] || cfg[`${id}_signed_in`] ? "" : "disabled"}>${label}${cfg[`${id}_configured`] ? "" : cfg[`${id}_signed_in`] ? " · signed in" : " · no key"}</option>`).join("");
-  return `
-    <div class="gen-row"><div class="gen-kind"><strong>2D images</strong><small>Generate 2D, variants, edits, views</small></div>
-      <label>Source ${sourceSelect("image", src2d, "Glob · your API keys")}</label>
-      <label>Model <select name="default_image_model">${src2d === "keys" ? imageModelOptions(studio.models, d.image) : serviceModelOptions("image", src2d, d.image)}</select></label>
-</div>
-    <div class="st-label">Shape and background per kind</div>
-    <div class="kind-table">${Object.entries(d.kinds || studio.kind_defaults || {}).map(([kind, k]) => `<div class="kind-row">
-      <strong>${esc(KIND_PLURAL[kind] || humanize(kind))}</strong>
-      <select data-kind-aspect="${esc(kind)}" aria-label="Shape for ${esc(kind)}">${aspectOptions(k.aspect)}</select>
-      <select data-kind-bg="${esc(kind)}" aria-label="Background for ${esc(kind)}"><option value="cutout" ${k.background === "cutout" ? "selected" : ""}>Cut out</option><option value="scene" ${k.background === "scene" ? "selected" : ""}>Full scene</option></select></div>`).join("")}</div>
-    <p class="st-empty">New images of each kind start with this shape. <b>Cut out</b> removes the background (for sprites and 3D); <b>Full scene</b> keeps it. A single asset can still pick another shape in its Generate window.</p>
-    <div class="gen-row"><div class="gen-kind"><strong>3D models</strong><small>Make 3D from the winner image</small></div>
-      <label>Source ${sourceSelect("3d", src3d, "Glob · Meshy / Tripo")}</label>
-      <label>Model ${src3d === "keys" ? `<select name="default_3d_provider">${keys3d}</select>` : `<select name="default_3d_service_model">${serviceModelOptions("3d", src3d, d.model3d)}</select>`}</label></div>
-    <p class="st-empty">Every Generate window starts from these and can switch for one run. ${sm.loading ? "Checking your signed-in services…" : ""}</p>
-    <div class="row"><button class="primary">Save defaults</button></div>`;
-}
-
-function readDefaults(form) {
-  return {
-    image: form.default_image_model?.value || "",
-    kinds: Object.fromEntries([...form.querySelectorAll("[data-kind-aspect]")].map((el) => [el.dataset.kindAspect, { aspect: el.value, background: form.querySelector(`[data-kind-bg="${el.dataset.kindAspect}"]`)?.value || "cutout" }])),
-    model3d: form.default_3d_service_model?.value || "",
-    provider3d: form.default_3d_provider?.value || state.settings.cfg.default_3d_provider,
-  };
-}
-
-async function saveDefaults(event) {
-  event.preventDefault();
-  const d = readDefaults(event.target);
-  const updates = { default_image_model: d.image, user_locked_image_model: true, kind_defaults: d.kinds,
-    default_3d_service_model: d.model3d, default_3d_provider: d.provider3d };
-  try {
-    await api("/api/config", { method: "PUT", body: updates });
-    state.studio = null;
-    toast("Defaults saved");
-    await renderSettings();
-  } catch (err) { toast(err.message, true); }
-}
-
-async function saveKeys(event) {
-  event.preventDefault();
-  const updates = {};
-  for (const [key, value] of new FormData(event.target)) if (String(value).trim()) updates[key] = String(value).trim();
-  if (updates.default_image_model) updates.user_locked_image_model = true;
-  try {
-    await api("/api/config", { method: "PUT", body: updates });
-    state.studio = null;
-    toast("Saved");
-    await renderSettings();
-  } catch (err) { toast(err.message, true); }
-}
+const KIND_PLURAL = { character: "Characters", creature: "Creatures", item: "Items", weapon: "Weapons", prop: "Props", vehicle: "Vehicles", environment: "Places", level: "Level kits", ui: "UI", vfx: "Effects" };
 
 async function testModel(id) {
   const out = $(`#test-${id.replace(/[^a-z0-9]/gi, "_")}`);
@@ -1336,7 +1414,6 @@ function renderSections() {
   $("#sections").innerHTML = `
     <div class="proj-card"><span class="proj-badge">${esc(initials || "F")}</span><div><strong>${esc(projectTitle())}</strong><small>${esc(ov.excerpt || "Your game project")}</small></div></div>
     <button class="sec${state.view.type === "home" ? " active" : ""}" data-home><small>00</small>Overview</button>
-    <button class="sec vault-sec${state.view.type === "board" ? " active" : ""}" data-board>${icon("grid")}<span class="sec-name">Board</span></button>
     <button class="sec vault-sec${state.view.type === "vault" ? " active" : ""}" data-vault>${icon("box")}<span class="sec-name">Final Vault</span></button>
     ${ov.sections.length ? `<div class="sec-label">Sections</div>` : ""}
     ${ov.sections.map((s) => `<button class="sec${s.path === active ? " active" : ""}" data-folder="${esc(s.path)}"><small>${s.number}</small><span class="sec-name">${esc(s.title)}</span>${s.children?.length ? `<span class="caret${s.path === active ? " open" : ""}"></span>` : ""}</button>${s.path === active ? subTree(s.children) : ""}`).join("")}
@@ -1397,7 +1474,7 @@ function folderCards(folders, numbered) {
 function assetTiles(assets, folderPath) {
   return `<div class="asset-grid">${assets.map((f) => `
     <button class="asset-tile" data-open="${esc(f.path)}"${f.audio ? ` data-hover-audio="${esc(f.audio)}"` : ""}${f.model ? ` data-hover-model="${esc(f.model)}"` : ""}>
-      <span class="asset-img">${f.thumb ? `<img src="${esc(fileUrl(f.thumb))}" alt="" loading="lazy">` : f.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : `<span class="asset-empty">No image yet</span>`}<span class="kind-tag">${esc(f.asset_kind)}</span>${f.model ? `<span class="tile-3d">${icon("cube")}3D</span>` : ""}</span>
+      <span class="asset-img">${f.thumb ? `<img src="${esc(fileUrl(f.thumb))}" alt="" loading="lazy">` : f.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : kindArt(f.asset_kind)}<span class="kind-tag">${esc(f.asset_kind)}</span>${f.model ? `<span class="tile-3d">${icon("cube")}3D</span>` : ""}</span>
       <strong>${esc(f.title)}</strong>
     </button>`).join("")}
     ${folderPath !== undefined ? `<button class="asset-tile add" data-new-asset="${esc(folderPath)}"><span class="asset-img"><span class="plus">+</span></span><strong>New asset</strong></button>` : ""}</div>`;
@@ -1511,7 +1588,7 @@ async function addCandidateImages(files) {
   });
 }
 
-const KIND_ICON = { character: "☺", creature: "◆", item: "◇", weapon: "⚔", prop: "▣", environment: "⛰", vehicle: "➤", ui: "▤", vfx: "✺" };
+const KIND_ICON = new Proxy({}, { get: (_, k) => (ICON[k] ? icon(k) : "") });
 
 function kindTags(kinds, selected) {
   return `<div class="kind-tags" role="radiogroup" aria-label="Kind">${kinds.map((k) => `<label class="kind-chip"><input type="radio" name="kind" value="${esc(k)}" ${k === selected ? "checked" : ""} required><span>${KIND_ICON[k] || "•"} ${esc(k === "ui" ? "UI" : k === "vfx" ? "VFX" : k[0].toUpperCase() + k.slice(1))}</span></label>`).join("")}</div>`;
@@ -1629,7 +1706,6 @@ async function renderViewBody() {
         ${ov.cover ? "" : `<button class="keyart-cta" data-key-art="${esc(state.project)}"${jobsHere ? " disabled" : ""}>${icon("sparkle")}<span><strong>${jobsHere ? "Painting key art…" : "Make key art"}</strong><small>${jobsHere ? "It becomes the cover when it lands" : "A cover image from your pitch, for this page and the projects overview"}</small></span></button>`}
       </header>
       <div class="actions-row">
-        <button class="ghost" data-board>${icon("grid")} Board</button>
         <button class="ghost" data-batch="">${icon("sparkle")} Generate all missing</button>
         <button class="ghost" data-press-kit>${icon("download")} Press kit</button>
         ${ov.page ? `<button class="ghost" data-open="${esc(ov.page)}">Open ${esc(ov.page)}</button>` : ""}
@@ -1717,7 +1793,7 @@ function vaultRow(e) {
     ? `<button class="vault-thumb mesh" data-view-model="${esc(e.model.path)}" title="Open in the 3D viewer">${e.model.thumb ? `<img src="${esc(fileUrl(e.model.thumb))}" alt="" loading="lazy">` : icon("cube")}</button>`
     : `<button class="vault-thumb mesh missing" data-open="${esc(e.path)}" title="Make 3D"><span>No 3D</span></button>`;
   return `<div class="vault-row${e.ready ? " ready" : ""}">
-    <button class="vault-thumb" data-open="${esc(e.path)}" title="Final image">${e.winner ? `<img src="${esc(fileUrl(e.winner))}" alt="" loading="lazy">` : `<span>No image</span>`}</button>
+    <button class="vault-thumb" data-open="${esc(e.path)}" title="Final image">${e.winner ? `<img src="${esc(fileUrl(e.winner))}" alt="" loading="lazy">` : kindArt(e.kind, "")}</button>
     ${meshBtn}
     <div class="vault-info">
       <div class="vault-name"><strong>${esc(e.title)}</strong><span class="kind-tag">${esc(e.kind)}</span>${e.ready ? `<span class="kind-tag win">Ready</span>` : ""}</div>
@@ -1788,7 +1864,7 @@ async function vaultToFolder() {
 
 // ---------- asset studio ----------
 
-const ACTION_LABEL = { candidates: "Generate 2D", variant: "Variant", edit: "Edit image", views: "Turnaround", make_3d: "Make 3D", rig: "Rig", animate: "Animate" };
+const ACTION_LABEL = { candidates: "Generate 2D", variant: "Variant", edit: "Edit image", views: "Turnaround", prop_sheet: "Prop sheet", make_3d: "Make 3D", rig: "Rig", animate: "Animate" };
 
 // Failed or interrupted runs stay on the asset page until dismissed, so a lost result is never silent.
 function dismissedJobs() { try { return new Set(JSON.parse(storeGet("forge.dismissedJobs") || "[]")); } catch { return new Set(); } }
@@ -1825,8 +1901,27 @@ const ICON = {
   inbox: `<path d="M4 13.5 6.5 5h11l2.5 8.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z"/><path d="M4 13.5h4.5l1.5 2.5h4l1.5-2.5H20"/>`,
   send: `<path d="M4 12 20 4l-5 16-3.5-6.5z"/><path d="M11.5 13.5 20 4"/>`,
   film: `<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M8 4.5v15M16 4.5v15M3.5 9h4.5M3.5 15h4.5M16 9h4.5M16 15h4.5"/>`,
+  // One per kind of asset: the picture an asset shows until it has art of its own.
+  character: `<circle cx="12" cy="7.5" r="3.6"/><path d="M4.8 20.5c0-4.1 3.2-7.2 7.2-7.2s7.2 3.1 7.2 7.2"/>`,
+  creature: `<path d="M4.5 19.5c0-6.2 3.3-11 7.5-11s7.5 4.8 7.5 11z"/><path d="M8.2 9.6 6 4.5M15.8 9.6 18 4.5"/><circle cx="9.6" cy="14" r=".9"/><circle cx="14.4" cy="14" r=".9"/>`,
+  item: `<path d="M9.5 3.5h5M10.3 3.5v5.2L5.8 16.6A2.6 2.6 0 0 0 8.1 20.5h7.8a2.6 2.6 0 0 0 2.3-3.9l-4.5-7.9V3.5"/><path d="M7.4 14h9.2"/>`,
+  weapon: `<path d="M20 4 10.5 13.5M20 4h-4.2l-8.3 8.3M20 4v4.2l-8.3 8.3"/><path d="M5.8 13.6l4.6 4.6M8.1 15.9 4 20"/>`,
+  prop: `<rect x="4" y="4.5" width="16" height="16" rx="1.6"/><path d="M4 9h16M4 16h16M8 9l8 7M16 9l-8 7"/>`,
+  vehicle: `<path d="M3.5 16v-3.4l2.2-5.1h12.6l2.2 5.1V16z"/><path d="M3.5 12.6h17"/><circle cx="7.6" cy="16.6" r="1.9"/><circle cx="16.4" cy="16.6" r="1.9"/>`,
+  environment: `<path d="M2.5 19.5 9 9.2l4 5.9 2.6-3.6 6 8z"/><circle cx="17" cy="6" r="2"/>`,
+  level: `<path d="M3.5 6.5 9 4.5l6 2 5.5-2v13l-5.5 2-6-2-5.5 2z"/><path d="M9 4.5v13M15 6.5v13"/>`,
+  ui: `<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 9h17M7 13h6M7 16h4"/>`,
+  vfx: `<path d="M12 3v4.2M12 16.8V21M3 12h4.2M16.8 12H21M5.6 5.6l3 3M15.4 15.4l3 3M5.6 18.4l3-3M15.4 8.6l3-3"/>`,
+  sound: `<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>`,
+  map: `<path d="M3.5 6.5 9 4.5l6 2 5.5-2v13l-5.5 2-6-2-5.5 2z"/><path d="M9 4.5v13M15 6.5v13"/>`,
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+// What an asset shows before it has a picture: its kind's icon on a soft tile, so an empty folder still reads.
+const KIND_HUE = { character: 340, creature: 20, item: 160, weapon: 0, prop: 35, vehicle: 200, environment: 130, level: 100, ui: 260, vfx: 290, sound: 190 };
+const kindArt = (kind, text = "No image yet") => {
+  const k = ICON[kind] ? kind : "prop";
+  return `<span class="kind-art" style="--hue:${KIND_HUE[k] ?? 330}">${icon(k)}${text ? `<small>${esc(text)}</small>` : ""}</span>`;
+};
 
 // Image outputs that can become the winner and be worked on further.
 const WORK_KINDS = new Set(["candidates", "variants", "edits"]);
@@ -1881,6 +1976,7 @@ function outputGrid(all, winner, kind = "candidates") {
     if (!WORK_KINDS.has(kind)) {
       return `<div class="out${kind === "icons" || kind === "sprites" ? " checker" : ""}">${removeBtn(o.path)}${img}<div class="out-bar">
         ${kind === "parts" || kind === "views" ? `<button class="act" data-icons="${esc(o.path)}">${icon("grid")}Icons</button><button class="act" data-winner="${esc(o.path)}">${icon("star")}Winner</button>` : ""}
+        ${kind === "sheets" ? `<button class="act hero-act" data-sheet-cut="${esc(o.path)}">${icon("scissors")}Cut into props</button>` : ""}
         <a class="act wide" href="${esc(fileUrl(o.path))}" download>${icon("download")}Download</a></div></div>`;
     }
     // One clear next step per card; everything else waits in the ⋯ menu.
@@ -1961,7 +2057,7 @@ document.addEventListener("click", async (event) => {
 
 const OUTPUT_SECTIONS = [
   ["audio", "Takes"], ["3d", "3D models"], ["rig", "Rigged"], ["animations", "Animations"], ["sprites", "Sprite sheets"], ["icons", "Icons"],
-  ["views", "Turnaround views"], ["candidates", "Candidates"], ["variants", "Variants"], ["edits", "Edits"], ["textures", "Textures"], ["parts", "Parts"],
+  ["sheets", "Prop sheets"], ["views", "Turnaround views"], ["candidates", "Candidates"], ["variants", "Variants"], ["edits", "Edits"], ["textures", "Textures"], ["parts", "Parts"],
 ];
 
 function renderAssetPage(a) {
@@ -1984,7 +2080,7 @@ function renderAssetPage(a) {
         ${heroModel.thumb ? `<img class="hero-poster" src="${esc(fileUrl(heroModel.thumb))}" alt="">` : ""}<div class="hero-stage"></div>
         <span class="out-badge mesh hero-badge">${icon("cube")}3D · drag to turn</span>
         <button type="button" class="mini hero-open" data-view-model="${esc(heroModel.path)}">${icon("eye")}Open viewer</button>
-        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy"><span class="drop-icon">⇣</span>No winner yet.<br>${(o.candidates || []).length ? `<button type="button" class="link-btn" data-scroll-candidates>Pick one of the ${(o.candidates || []).length} candidates below</button>, <b>drop or paste an image here</b>` : "Generate 2D candidates, <b>drop or paste an image here</b>"}<br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
+        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy">${kindArt(a.kind, "")}No picture yet.<br>${(o.candidates || []).length ? `<button type="button" class="link-btn" data-scroll-candidates>Pick one of the ${(o.candidates || []).length} candidates below</button>, <b>drop or paste an image here</b>` : "Generate 2D candidates, <b>drop or paste an image here</b>"}<br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
       <div class="asset-side">
         <label class="field-label" for="assetPrompt">Prompt: what this ${esc(a.kind)} looks like</label>
         <textarea id="assetPrompt" class="prompt-box" rows="6" data-asset="${esc(a.path)}">${esc(a.prompt)}</textarea>
@@ -1994,6 +2090,7 @@ function renderAssetPage(a) {
           <button class="ghost" data-action="edit"${a.winner ? "" : " disabled"}>Edit image</button>
           <button class="ghost sem-mesh" data-action="make_3d"${a.winner ? "" : " disabled"}>Make 3D</button>
         </div>
+        ${a.kind === "level" ? levelKit(a) : ""}
         ${gameTools(a)}
         <div class="applied">
           <div class="field-label pillar-head">Pillars sent with every generation
@@ -2133,6 +2230,7 @@ const ACTION_THEME = {
   edit: { tone: "violet", icon: "edit", blurb: "Change one thing in the source image and keep the rest." },
   make_3d: { tone: "sky", icon: "cube", blurb: "Turn the winner image into a textured 3D model." },
   views: { tone: "amber", icon: "turn", blurb: "Side and back views of the winner. Make 3D then uses them for a better model." },
+  prop_sheet: { tone: "amber", icon: "grid", blurb: "Every prop in the level picture, drawn once on one sheet. One image instead of one per prop; Glob cuts it up for free." },
   rig: { tone: "sky", icon: "bones", blurb: "Add a skeleton to a humanoid model so it can be animated. Includes walk and run clips." },
   animate: { tone: "violet", icon: "play", blurb: "Put preset animations on the rigged model: idle, attack, death and more." },
 };
@@ -2156,7 +2254,8 @@ function loadServiceModels() {
 }
 
 const ASPECTS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"];
-const aspectOptions = (value) => [...new Set([value || "1:1", ...ASPECTS])].map((a) => `<option ${a === (value || "1:1") ? "selected" : ""}>${esc(a)}</option>`).join("");
+const ASPECT_NAME = { "1:1": "Square", "4:3": "Wide", "3:4": "Tall", "3:2": "Wide", "2:3": "Tall", "16:9": "Very wide", "9:16": "Very tall" };
+const aspectOptions = (value) => [...new Set([value || "1:1", ...ASPECTS])].map((a) => `<option value="${esc(a)}" ${a === (value || "1:1") ? "selected" : ""}>${ASPECT_NAME[a] ? `${ASPECT_NAME[a]} · ` : ""}${esc(a)}</option>`).join("");
 
 // Where a studio model runs: "keys" (Glob's providers, with your API keys) or a signed-in service's id.
 const modelSource = (model) => (String(model || "").startsWith("svc:") ? model.slice(4).split("/")[0] : "keys");
@@ -2197,7 +2296,7 @@ function onSourceChange(kind) {
 function renderPreview() {
   const p = state.preview;
   const theme = ACTION_THEME[p.action];
-  const needsInstruction = p.action === "variant" || p.action === "edit";
+  const needsInstruction = p.action === "variant" || p.action === "edit" || p.action === "prop_sheet";
   const is3d = p.action === "make_3d";
   const models = state.studio?.models || [];
   const model = models.find((m) => m.id === p.model);
@@ -2229,7 +2328,7 @@ function renderPreview() {
         ${Object.entries(p.settings).filter(([k]) => k !== "aspect_ratio" && k !== "transparent_background").map(([k, v]) => `<span class="chip">${esc(k.replace(/_/g, " "))} <b>${esc(Array.isArray(v) ? v.join(", ") : String(v))}</b></span>`).join("")}
       </div>`}
       ${alert ? `<div class="credit-warn"><span class="bad-dot">!</span><span><b>${esc(humanize(alert.provider))} ran out of credits ${esc(timeAgo(alert.at).toLowerCase())}.</b> Top up first, or pick another Source above.</span></div>` : ""}
-      ${needsInstruction ? `<div class="sheet-instruction"><label>What should change?<textarea id="pvInstruction" rows="2" placeholder="${p.action === "variant" ? "Frost-themed armour, icy blue trim" : "Remove the shield"}"></textarea></label>
+      ${needsInstruction ? `<div class="sheet-instruction"><label>${p.action === "prop_sheet" ? "Which props? (optional: leave empty for everything in the picture)" : "What should change?"}<textarea id="pvInstruction" rows="2" placeholder="${p.action === "variant" ? "Frost-themed armour, icy blue trim" : p.action === "prop_sheet" ? "barrel, torch, broken pillar, chest, bones" : "Remove the shield"}"></textarea></label>
         <button class="ghost" data-rebuild>Update prompt</button></div>` : ""}
       <div class="sheet-body${is3d ? " mesh-body" : ""}">
         ${is3d ? (source === "keys" ? meshOptions(p) : `<section class="mesh-opts"><p class="hint-line">${esc(serviceLabel)} makes the model from the ticked image${p.references.length > 1 ? "s" : ""}, with its own settings. The GLB lands here like any other output.</p></section>`) : `<section>
@@ -2461,7 +2560,7 @@ async function makeAsset() {
 
 // The current page and the pages before it survive a refresh, per project.
 const viewKey = () => `forge.view.${state.project}`;
-const PLAIN_VIEWS = ["home", "vault", "board"];
+const PLAIN_VIEWS = ["home", "vault"];
 const plainView = (v) => (PLAIN_VIEWS.includes(v.type) ? { type: v.type } : { type: v.type, path: v.path });
 
 function saveView() {
@@ -2471,7 +2570,7 @@ function saveView() {
 }
 
 function restoreView() {
-  if (["#vault", "#board"].includes(location.hash)) { state.view = { type: location.hash.slice(1) }; return; }
+  if (location.hash === "#vault") { state.view = { type: location.hash.slice(1) }; return; }
   const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
   if (hash) {
     state.view = { type: hash[1], path: decodeURIComponent(hash[2]), restored: true };
@@ -2520,7 +2619,7 @@ function go(view) {
 window.addEventListener("hashchange", () => {
   const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
   if (hash) go({ type: hash[1], path: decodeURIComponent(hash[2]) });
-  else if (["#vault", "#board"].includes(location.hash)) go({ type: location.hash.slice(1) });
+  else if (location.hash === "#vault") go({ type: location.hash.slice(1) });
 });
 
 function openPath(path) {
@@ -2542,6 +2641,19 @@ async function saveDoc() {
 // ---------- game tools: turnaround, rig, animate, split, icons, sprites, 3D viewer, export ----------
 
 const MODEL_RE = /\.(glb|gltf|obj|fbx)$/i;
+
+// Level kit: a picture of a level section, then one sheet with all its props, cut up on this computer into props.
+function levelKit(a) {
+  const sheet = (a.outputs.sheets || []).find((o) => o.type === "image");
+  const props = `${dirOf(a.path) ? `${dirOf(a.path)}/` : ""}${a.path.split("/").pop().replace(/\.md$/, "")}-props`;
+  const step = (n, done, title, text, button) => `<li class="${done ? "done" : ""}"><b>${done ? "✓" : n}</b><div><strong>${title}</strong><small>${text}</small></div>${button}</li>`;
+  return `<div class="level-kit"><div class="field-label">${icon("map")} Level kit</div><ol>
+    ${step(1, a.winner, "Picture the level", "Describe the section above, generate, pick the one you like.", `<button class="mini" data-action="candidates">Generate</button>`)}
+    ${step(2, sheet, "All its props on one sheet", "One image, not one per prop.", `<button class="mini" data-action="prop_sheet" ${a.winner ? "" : "disabled title=\"Pick a level picture first\""}>Make sheet</button>`)}
+    ${step(3, a.meta.props_cut, "Cut into props", "Free, on this computer. Each prop gets its own asset.", `<button class="mini" ${sheet ? `data-sheet-cut="${esc(sheet.path)}"` : "disabled"}>Cut</button>`)}
+    ${step(4, false, "Make them 3D", "Open the props and make 3D for the ones you want.", `<button class="mini" ${a.meta.props_cut ? `data-folder="${esc(props)}"` : "disabled"}>Open props</button>`)}
+  </ol></div>`;
+}
 
 function gameTools(a) {
   const glb = a.outputs["3d"].some((o) => /\.glb$/i.test(o.path));
@@ -2631,14 +2743,31 @@ function prepareGameRun() {
 
 // ---- split an image into parts ----
 
-async function splitDialog(image, body = false) {
-  state.split = { image, boxes: [], asAssets: false, note: "" };
+async function splitDialog(image, body = false, sheet = false) {
+  state.split = { image, boxes: [], asAssets: sheet, sheet, note: "" };
   if (body) return guessBodyParts();
   renderSplit();
   try {
-    const { boxes } = await api(`/api/studio/detect-parts?path=${encodeURIComponent(image)}`);
+    const { boxes } = await api(`/api/studio/detect-parts?path=${encodeURIComponent(image)}${sheet ? "&sheet=1" : ""}`);
     if (state.split?.image === image && !state.split.boxes.length) { state.split.boxes = boxes.map((b, i) => ({ ...b, name: "" })); renderSplit(); }
   } catch { /* draw by hand */ }
+  if (sheet && state.split?.boxes.length) nameSheetParts();
+}
+
+async function nameSheetParts() {
+  const sp = state.split;
+  sp.busy = true;
+  sp.note = `Found ${sp.boxes.length} props. Glob is naming them…`;
+  renderSplit();
+  try {
+    const res = await api("/api/studio/name-parts", { method: "POST", body: { image: sp.image, boxes: sp.boxes } });
+    if (state.split !== sp) return;
+    syncSplitNames();
+    sp.boxes.forEach((b, i) => { if (!b.name) b.name = res.names[i] || ""; });
+    sp.note = res.source === "glob" ? `${sp.boxes.length} props, named by Glob. Fix a name or a box if one is off.` : `${res.note || "No names"}: name them yourself, or keep the numbers.`;
+  } catch (err) { sp.note = err.message; }
+  sp.busy = false;
+  renderSplit();
 }
 
 // Glob looks at the picture and boxes the head, torso, arms, legs and held items.
@@ -2662,8 +2791,8 @@ async function guessBodyParts() {
 function renderSplit() {
   const sp = state.split;
   openDialog(`<div class="dlg wide split-dlg">
-    <h2>${icon("scissors")} Split into parts</h2>
-    <p>Drag on the picture to draw a box around each part, click × to remove one. <b>Separate figures</b> boxes each character on a sheet; <b>Body parts</b> asks Glob for the head, torso, arms and legs.</p>
+    <h2>${icon("scissors")} ${sp.sheet ? "Cut into props" : "Split into parts"}</h2>
+    <p>${sp.sheet ? "Each box becomes its own prop asset with the background removed, in a folder next to the level. Drag on the picture to add a box, click × to drop one." : "Drag on the picture to draw a box around each part, click × to remove one. <b>Separate figures</b> boxes each character on a sheet; <b>Body parts</b> asks Glob for the head, torso, arms and legs."}</p>
     <div class="split-layout">
       <div class="split-stage" id="splitStage"><img src="${esc(fileUrl(sp.image))}" alt="" draggable="false">
         ${sp.boxes.map((b, i) => `<div class="split-box" style="left:${b.x * 100}%;top:${b.y * 100}%;width:${b.w * 100}%;height:${b.h * 100}%"><span>${i + 1}</span><button type="button" data-split-remove="${i}" aria-label="Remove box">×</button></div>`).join("")}</div>
@@ -2677,7 +2806,7 @@ function renderSplit() {
         <label class="target"><input type="radio" name="splitMode" value="assets" ${sp.asAssets ? "checked" : ""}><span>Separate assets<small>One asset each, the cut-out as its winner</small></span></label>
       </div>
     </div>
-    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="primary" data-split-run ${sp.boxes.length ? "" : "disabled"}>Cut ${sp.boxes.length || ""} part${sp.boxes.length === 1 ? "" : "s"}</button></div>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="primary" data-split-run ${sp.boxes.length ? "" : "disabled"}>Cut ${sp.boxes.length || ""} ${sp.sheet ? "prop" : "part"}${sp.boxes.length === 1 ? "" : "s"}</button></div>
   </div>`);
   const stage = $("#splitStage");
   stage.addEventListener("pointerdown", (event) => {
@@ -3002,7 +3131,7 @@ async function saveViewerThumb() {
 }
 
 document.addEventListener("click", (event) => {
-  const t = event.target.closest("[data-remove-output],[data-copy-request],[data-dismiss-job],[data-view-model],[data-sprites],[data-split],[data-split-body],[data-body-parts],[data-split-remove],[data-split-auto],[data-split-run],[data-icons],[data-export],[data-add-model],[data-anim],[data-viewer-thumb],[data-sprite-render],[data-sprite-save]");
+  const t = event.target.closest("[data-remove-output],[data-copy-request],[data-dismiss-job],[data-view-model],[data-sprites],[data-split],[data-sheet-cut],[data-split-body],[data-body-parts],[data-split-remove],[data-split-auto],[data-split-run],[data-icons],[data-export],[data-add-model],[data-anim],[data-viewer-thumb],[data-sprite-render],[data-sprite-save]");
   if (!t || t.disabled) return;
   if (t.dataset.removeOutput) { event.preventDefault(); event.stopPropagation(); return removeOutput(t.dataset.removeOutput, t.closest(".out, .file-chip-wrap")); }
   if (t.dataset.copyRequest !== undefined) return copyRequest(t);
@@ -3010,6 +3139,7 @@ document.addEventListener("click", (event) => {
   if (t.dataset.viewModel) return viewModel(t.dataset.viewModel);
   if (t.dataset.sprites) return viewModel(t.dataset.sprites, true);
   if (t.dataset.split) return splitDialog(t.dataset.split);
+  if (t.dataset.sheetCut) return splitDialog(t.dataset.sheetCut, false, true);
   if (t.dataset.splitRemove) { syncSplitNames(); state.split.boxes.splice(Number(t.dataset.splitRemove), 1); return renderSplit(); }
   if (t.dataset.splitAuto !== undefined) { state.split.boxes = []; return splitDialog(state.split.image); }
   if (t.dataset.splitRun !== undefined) return runSplit();
@@ -3618,47 +3748,6 @@ function grantRows(grants) {
     <button class="link-btn danger-text" data-grant-remove="${esc(g.path)}">Remove</button></div>`).join("");
 }
 
-async function storageSettings() {
-  const [info, grants, health] = await Promise.all([api("/api/storage"), loadGrants(), api("/api/health").catch(() => ({})), state.update ? null : checkForUpdate()]);
-  return `
-    <h1>Storage & access</h1><p class="st-lede">Where your projects are saved, how to move them between computers, and which folders on this computer Glob may use.</p>
-    ${health.background ? `<div class="st-bg"><span class="grow">Your coding agent started Glob, and it keeps running in the background after the agent stops. It starts again the next time the agent needs it.</span><button class="ghost danger-text" data-st-quit>Stop Glob</button></div>` : ""}
-    <div class="st-label">Projects folder</div>
-    <div class="path-row"><code>${esc(info.projects_dir)}</code><button class="mini" data-st-open="projects">Open</button><button class="mini" data-st-move>Change…</button></div>
-    <p class="st-note">Each project is a folder in here. Its <code>workspace/</code> folder holds the pages, assets, images, models and chats you see in Glob${info.env_override ? ". (Set by FORGE_PROJECTS_DIR for this session.)" : "."}</p>
-    ${state.project ? `<div class="st-label">This project · ${esc(humanize(state.project))}</div>
-    <div class="path-row"><code>${esc(info.workspace_dir)}</code><button class="mini" data-st-open="workspace">Open</button></div>` : ""}
-    <div class="row wrap">${state.project ? `<button class="ghost" data-st-export="${esc(state.project)}">Export workspace as .zip…</button>` : ""}<button class="ghost" data-st-import-zip>Import a workspace .zip…</button><button class="ghost" data-imp-open>Import a game…</button></div>
-    <div class="st-label">Folders Glob may use</div>
-    <div class="grant-list">${grantRows(grants)}</div>
-    <div class="row"><button class="ghost" data-grant-add>+ Add a folder</button></div>
-    <p class="st-note">Glob's chat agent can read these folders (and write in them, when allowed); coding agents get them as extra working folders. API keys, .env and key files are always off-limits. When Glob needs another folder it asks you in the chat.</p>
-    ${updateSettings()}
-    <div class="st-label">Setup</div>
-    <div class="row"><button class="ghost" data-setup-open>Run first-time setup again</button><button class="ghost" data-st-shortcut>Add a Glob shortcut to the desktop</button></div>
-    <p class="st-note">Settings and API keys are stored in <code>${esc(info.config_dir)}</code>.</p>`;
-}
-
-async function aboutSettings() {
-  const a = await api("/api/about");
-  const shortcut = a.shortcuts.length
-    ? `<p class="st-note">Open Glob any time with the <strong>Glob</strong> shortcut: ${a.shortcuts.map((p) => `<code>${esc(p)}</code>`).join(" and ")}. ${a.background ? "Closing the window leaves Glob running: its icon in the taskbar tray opens or quits it." : ""}</p>`
-    : `<p class="st-note">There's no Glob shortcut yet. Add one to open Glob without a terminal or an agent.</p>`;
-  return `
-    <h1>About Glob</h1><p class="st-lede">Glob ${esc(a.version)}, your game's asset studio. It runs on this computer at <code>${esc(location.origin)}</code>.</p>
-    <div class="st-label">Open Glob</div>
-    ${shortcut}
-    <div class="row"><button class="ghost" data-st-shortcut>${a.shortcuts.length ? "Make the shortcut again" : "Add a Glob shortcut"}</button></div>
-    <div class="st-label">Where Glob is installed · ${esc(INSTALL_KIND[a.install_kind] || a.install_kind)}</div>
-    <div class="path-row"><code>${esc(a.install_dir)}</code><button class="mini" data-st-open="install">Open</button></div>
-    <div class="st-label">Your projects</div>
-    <div class="path-row"><code>${esc(a.projects_dir)}</code><button class="mini" data-st-open="projects">Open</button></div>
-    <div class="st-label">Settings and keys</div>
-    <div class="path-row"><code>${esc(a.config_dir)}</code><button class="mini" data-st-open="config">Open</button></div>
-    <p class="st-note">If something goes wrong, the log is <code>${esc(a.log)}</code>.</p>
-    ${updateSettings()}`;
-}
-
 // ----- first-run setup -----
 
 const SETUP_STEPS = 4;
@@ -4023,7 +4112,7 @@ async function installUpdate() {
   try {
     state.update.state = await api("/api/update/install", { method: "POST" });
     renderUpdateBanner();
-    if (!$("#settingsView").hidden && state.settings?.tab === "storage") renderSettings();
+    if (!$("#settingsView").hidden && state.settings?.tab === "about") renderSettings();
     while (["downloading", "installing"].includes(state.update.state.status)) {
       await new Promise((r) => setTimeout(r, 800));
       try { state.update.state = await api("/api/update/state"); } catch { break; } // the app quit to install
@@ -4118,7 +4207,7 @@ async function renderBoard() {
     ${all.length ? `<div class="board" id="board"><div class="board-canvas" id="boardCanvas">${data.groups.map((g) => `
       <section class="board-col"><h2><small>${esc(g.number)}</small>${esc(g.title)}<span>${g.assets.length}</span></h2>
         ${g.assets.map((a) => `<button class="board-card${a.picked ? "" : " unpicked"}" data-open="${esc(a.path)}"${a.audio ? ` data-hover-audio="${esc(a.audio)}"` : ""} title="${esc(a.prompt)}">
-          ${a.image ? `<img src="${esc(fileUrl(a.image))}" alt="" loading="lazy" draggable="false">` : a.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : `<span class="asset-empty">No image yet</span>`}
+          ${a.image ? `<img src="${esc(fileUrl(a.image))}" alt="" loading="lazy" draggable="false">` : a.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : kindArt(f.asset_kind)}
           <span class="board-label"><strong>${esc(a.title)}</strong><em>${esc(a.kind)}${a.model ? " · 3D" : ""}${a.picked ? "" : " · no winner"}</em></span></button>`).join("")}
       </section>`).join("")}</div></div>` : `<div class="empty"><h1>Nothing on the board yet</h1><p>Assets appear here as soon as they exist. Add some on a section page, or ask the agent.</p></div>`}`;
 }
@@ -4533,7 +4622,7 @@ async function paletteItems() {
   const here = state.view.type === "folder" ? state.view.path : "";
   const actions = [
     ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")]] : []),
-    ["Overview", "layers", () => go({ type: "home" })], ["Board", "grid", () => go({ type: "board" })], ["Final vault", "box", () => go({ type: "vault" })],
+    ["Overview", "layers", () => go({ type: "home" })], ["Final vault", "box", () => go({ type: "vault" })],
     [here ? `Generate missing in ${humanize(here.split("/").pop())}` : "Generate all missing", "sparkle", () => batchDialog(here)],
     ...(here ? [["New asset here", "sparkle", () => newAssetDialog(here)]] : []),
     ["3D lineup", "cube", openLineup], ["Download press kit", "download", downloadPressKit],

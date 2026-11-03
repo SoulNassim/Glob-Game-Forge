@@ -52,6 +52,11 @@ Generation actions for an asset: "candidates" (new images from the asset prompt)
 instruction, works on the winner image), "views" (side and back turnaround views of the winner; make_3d then uses
 them for a better model), "make_3d" (3D model from the winner), "rig" (skeleton for a humanoid GLB, also gives
 walk and run clips), "animate" (needs a rig and up to 10 Meshy animation-library ids).
+Level kits (`kind: level`): the prompt describes one section of a level ("top-down view of a mossy crypt room
+with coffins, torches and broken pillars"). "candidates" pictures it; once the user picks one, "prop_sheet" draws
+every prop of that picture on ONE sheet (the instruction may list the props). The user then presses "Cut" on the
+level page: Glob cuts the sheet into one prop asset each, for free, in `<level>-props/`. Never generate one image
+per prop for a level: that is what the sheet saves.
 **Generation costs real money.** Only run it when the user asks for images, 3D, rigs or animations, or when an
 order the user approved needs it. Splitting an image into parts, icons, sprite sheets, the 3D preview and
 engine export are buttons under "Game tools" on the asset page; point the user there for those.

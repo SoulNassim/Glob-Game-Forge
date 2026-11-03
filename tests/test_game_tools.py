@@ -38,6 +38,42 @@ def test_detect_and_split_parts(tmp_path):
     assert left["kind"] == "character" and (ws / left["winner"]).is_file()
 
 
+def test_level_prop_sheet_is_cut_into_props(tmp_path):
+    """Level kit: one sheet of props on a flat background becomes one cut-out prop asset each, in the level's folder."""
+    ws = tmp_path / "ws"
+    (ws / "levels" / "crypt" / "sheets").mkdir(parents=True)
+    (ws / "levels" / "crypt.md").write_text("---\nkind: level\nprompt: A mossy crypt\n---\n# Crypt\n", encoding="utf-8")
+    sheet = Image.new("RGB", (600, 400), (229, 229, 229))
+    draw = ImageDraw.Draw(sheet)
+    for col in range(3):
+        for row in range(2):
+            x, y = 40 + col * 200, 40 + row * 190
+            draw.rectangle((x, y, x + 110, y + 120 - row * 40), fill=(90 + col * 40, 60, 40))
+    draw.rectangle((65, 65, 125, 125), fill=(229, 229, 229))  # a light window inside the first prop stays in it
+    sheet.save(ws / "levels" / "crypt" / "sheets" / "sheet.png")
+
+    boxes = game_tools.detect_sheet_items(ws, "levels/crypt/sheets/sheet.png")
+    assert len(boxes) == 6
+    assert boxes[0]["y"] < boxes[3]["y"] and boxes[0]["x"] < boxes[1]["x"] < boxes[2]["x"]  # row by row
+    props = game_tools.split_image(ws, "levels/crypt.md", "levels/crypt/sheets/sheet.png", [{**b, "name": f"Thing {i}"} for i, b in enumerate(boxes, 1)], as_assets=True)
+    assert props[0] == "levels/crypt-props/thing-1.md" and len(props) == 6
+    first = asset_studio.describe_asset(ws, props[0])
+    assert first["kind"] == "prop"
+    cut = Image.open(ws / first["winner"])
+    assert cut.mode == "RGBA" and cut.getpixel((0, 0))[3] == 255  # trimmed to the prop, background gone around it
+    assert cut.getpixel((cut.width // 2 - 10, cut.height // 2 - 10))[3] == 255  # the window inside is not a hole
+
+
+def test_prop_sheet_request_uses_the_level_image(tmp_path):
+    ws = tmp_path / "ws"
+    (ws / "levels" / "crypt" / "candidates").mkdir(parents=True)
+    Image.new("RGB", (64, 36), (10, 10, 10)).save(ws / "levels" / "crypt" / "candidates" / "a.png")
+    (ws / "levels" / "crypt.md").write_text("---\nkind: level\nprompt: A crypt\nwinner: levels/crypt/candidates/a.png\n---\n# Crypt\n", encoding="utf-8")
+    request = asset_studio.build_request(ws, "levels/crypt.md", "prop_sheet", instruction="barrel, torch")
+    assert request["count"] == 1 and request["references"][0]["path"] == "levels/crypt/candidates/a.png"
+    assert "barrel, torch" in request["prompt"] and request["settings"]["transparent_background"] is False
+
+
 def test_icons_are_square_and_transparent(tmp_path):
     ws = _workspace(tmp_path)
     icons = game_tools.make_icons(ws, "chars/duo.md", "chars/duo/candidates/sheet.png", [64, 128])

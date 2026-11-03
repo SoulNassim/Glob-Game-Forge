@@ -63,10 +63,10 @@ WORKSPACE_TOOLS_SCHEMA: list[dict[str, Any]] = [
         "generate",
         "Start image/3D generation for an asset .md (costs provider credits; runs in the Glob app, which must be open). "
         "action: candidates (new images from the asset prompt), variant / edit (need instruction, work on the winner), "
-        "views (turnaround of the winner), make_3d, rig, animate (needs action_ids).",
+        "views (turnaround of the winner), prop_sheet (level kit: all props of a level picture on one sheet), make_3d, rig, animate (needs action_ids).",
         {
             "path": _PATH,
-            "action": {"type": "string", "enum": ["candidates", "variant", "edit", "views", "make_3d", "rig", "animate"]},
+            "action": {"type": "string", "enum": ["candidates", "variant", "edit", "views", "prop_sheet", "make_3d", "rig", "animate"]},
             "count": {"type": "integer", "minimum": 1, "maximum": 4},
             "instruction": {"type": "string"},
             "source": {"type": "string", "description": "Image to work on instead of the winner."},

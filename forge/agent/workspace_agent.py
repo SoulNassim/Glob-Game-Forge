@@ -118,7 +118,8 @@ Tools (paths relative to the workspace):
 - {"tool": "move", "from": "old.md", "to": "new/old.md"}     also renames folders
 - {"tool": "delete", "path": "notes/old.md"}                  moves a file or folder to .trash/ (recoverable)
 - {"tool": "generate", "path": "02-characters/knight.md", "action": "candidates", "count": 2, "model": "svc:elevenlabs/gpt-image-2.5-sunburst"}
-      action: candidates | variant | edit (both need "instruction") | views | make_3d | rig | animate (needs "action_ids")
+      action: candidates | variant | edit (both need "instruction") | views | prop_sheet (a level kit: every prop of the
+        level picture on one sheet; "instruction" may list the props) | make_3d | rig | animate (needs "action_ids")
       model is optional (the default image model otherwise); read the generating skill first
 - {"tool": "models", "kind": "image"}                       every image (or "3d") model and how it is reached
 - {"tool": "skill", "name": "generating"}                   opens a how-to guide listed under "Skills" in the context

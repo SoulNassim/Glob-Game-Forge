@@ -34,11 +34,11 @@ from forge.providers.elevenlabs_image import resolve_image_provider
 PILLAR_DIR = "pillars"
 REF_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_REFERENCES = 8
-OUTPUT_KINDS = ("candidates", "variants", "edits", "views", "3d", "rig", "animations", "textures", "parts", "icons", "sprites", "audio")
+OUTPUT_KINDS = ("candidates", "variants", "edits", "views", "sheets", "3d", "rig", "animations", "textures", "parts", "icons", "sprites", "audio")
 # Imported engine files the browser can't preview (Godot .res clips, .blend, .anim) are still listed.
 LISTED_FILE_SUFFIXES = {".res", ".tres", ".anim", ".blend", ".dae", ".tga", ".exr", ".psd"}
-ACTIONS = ("candidates", "variant", "edit", "views", "make_3d", "rig", "animate")
-ACTION_FOLDER = {"candidates": "candidates", "variant": "variants", "edit": "edits", "views": "views", "make_3d": "3d", "rig": "rig", "animate": "animations"}
+ACTIONS = ("candidates", "variant", "edit", "views", "prop_sheet", "make_3d", "rig", "animate")
+ACTION_FOLDER = {"candidates": "candidates", "variant": "variants", "edit": "edits", "views": "views", "prop_sheet": "sheets", "make_3d": "3d", "rig": "rig", "animate": "animations"}
 # Turnaround views generated from the winner; "{view}" is filled in per image.
 TURNAROUND_VIEWS = ("left side view (profile)", "back view", "three-quarter front view")
 TEXT_PILLAR_SUFFIXES = {".md", ".txt"}
@@ -55,7 +55,7 @@ MESH_CHOICES: dict[str, list[Any]] = {
 }
 POLYCOUNT_PRESETS = (1500, 3000, 6000, 12000, 30000, 100000)
 # The fixed set of asset kinds; the UI offers these as tags so nobody has to type them.
-ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "vehicle", "ui", "vfx", "sfx", "voice", "music")
+ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "level", "vehicle", "ui", "vfx", "sfx", "voice", "music")
 # The shape and background each kind of image gets unless Settings → Generators or the asset itself says otherwise.
 # "cutout": the subject alone, background removed. "scene": a whole picture, background kept.
 KIND_DEFAULTS: dict[str, dict[str, str]] = {
@@ -66,6 +66,7 @@ KIND_DEFAULTS: dict[str, dict[str, str]] = {
     "prop": {"aspect": "1:1", "background": "cutout"},
     "vehicle": {"aspect": "4:3", "background": "cutout"},
     "environment": {"aspect": "16:9", "background": "scene"},
+    "level": {"aspect": "16:9", "background": "scene"},
     "ui": {"aspect": "3:4", "background": "cutout"},
     "vfx": {"aspect": "16:9", "background": "cutout"},
 }
@@ -110,6 +111,15 @@ VIEWS_RULE = (
     "outfit, colours, proportions, pose and art style identical; full body, centred, plain background."
 )
 EDIT_RULE = "Edit the first attached image. Change only what is described above and keep everything else identical."
+# Level kit: one picture of a level section, then every prop in it on one sheet that Glob cuts up on this computer,
+# instead of one paid image per prop.
+PROP_SHEET_RULE = (
+    "The attached image is a game level section. Make a prop sheet from it: draw every separate prop, piece of "
+    "furniture and decoration you can see in it (not the floor, walls or characters) once each, in the same art style, "
+    "materials and colours, each one whole and seen from the front at a slight top-down angle, as for a 3D model. "
+    "Lay them out in a tidy grid with wide empty space between them so none touch or overlap. Plain flat light grey "
+    "background (#E5E5E5), no shadows on the ground, no text, labels, numbers or borders."
+)
 
 
 # ---------- reading assets ----------
@@ -544,6 +554,24 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
             "model": cfg.default_3d_service_model or f"{cfg.default_3d_provider}:{cfg.default_3d_model}",
             "settings": mesh_settings(cfg),
             "choices": {**MESH_CHOICES, "polycount_presets": list(POLYCOUNT_PRESETS)},
+            "count": 1,
+        }
+
+    if action == "prop_sheet":
+        wanted = instruction.strip()
+        parts = [{"source": "Prop sheet", "text": PROP_SHEET_RULE, "role": "rule"}]
+        if wanted:
+            parts.insert(0, {"source": "Props to draw", "text": f"Props to include: {wanted}.", "role": "subject"})
+        return {
+            "action": action,
+            "asset": asset["path"],
+            "prompt": compose_prompt([part["text"] for part in parts], cfg, "1:1"),
+            "parts": parts,
+            "bible": [],
+            "use_bible": False,
+            "references": [{"path": source, "source": "Level image", "role": "source"}],
+            "model": model or default_image_model(cfg),
+            "settings": {"aspect_ratio": "1:1", "transparent_background": False},
             "count": 1,
         }
 

@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from forge.asset_studio import ASSET_KINDS, _ws_rel, output_dir, read_asset
+from forge.asset_studio import ASSET_KINDS, _ws_rel, output_dir, read_asset, update_asset
 from forge.blueprint_contract import serialize_frontmatter
 from forge.config import load_config
 from forge.overview import IMAGE_SUFFIXES, MODEL_SUFFIXES, resolve_rel, slugify
@@ -140,6 +140,58 @@ def detect_parts(ws_dir: Path, image_rel: str) -> list[dict[str, float]]:
     return boxes
 
 
+def detect_sheet_items(ws_dir: Path, image_rel: str) -> list[dict[str, float]]:
+    """One box per object on a sheet (a prop sheet), row by row. Objects are the separate blobs on the background;
+    bits close together (a pile of bones, rubble round a pillar) count as one."""
+    image = Image.open(_asset_image(ws_dir, image_rel))
+    scale = min(1.0, 320 / max(image.size))
+    mask = _foreground_mask(image.resize((max(1, int(image.width * scale)), max(1, int(image.height * scale)))))
+    mask = mask.filter(ImageFilter.MaxFilter(7))  # join an object's loose bits
+    w, h = mask.size
+    pixels = mask.load()
+    seen = bytearray(w * h)
+    boxes = []
+    for start in range(w * h):
+        if seen[start] or not pixels[start % w, start // w]:
+            continue
+        seen[start] = 1
+        stack, x0, y0, x1, y1, size = [start], w, h, 0, 0, 0
+        while stack:
+            i = stack.pop()
+            x, y = i % w, i // w
+            x0, y0, x1, y1, size = min(x0, x), min(y0, y), max(x1, x), max(y1, y), size + 1
+            for n in (i - 1 if x else -1, i + 1 if x < w - 1 else -1, i - w, i + w):
+                if 0 <= n < w * h and not seen[n] and pixels[n % w, n // w]:
+                    seen[n] = 1
+                    stack.append(n)
+        if size > w * h * 0.002:
+            boxes.append([x0, y0, x1 + 1, y1 + 1])
+    # The dilation grew every box by 3 px: give that back as padding, and read the boxes in rows, top to bottom.
+    out = [{"x": max(0.0, b[0] / w), "y": max(0.0, b[1] / h), "w": min(1.0, (b[2] - b[0]) / w), "h": min(1.0, (b[3] - b[1]) / h)} for b in boxes]
+    rows: list[list[dict[str, float]]] = []
+    for box in sorted(out, key=lambda b: b["y"] + b["h"] / 2):
+        mid = box["y"] + box["h"] / 2
+        row = next((r for r in rows if abs(mid - (r[0]["y"] + r[0]["h"] / 2)) < max(r[0]["h"], box["h"]) / 2), None)
+        (row.append(box) if row else rows.append([box]))
+    return [b for r in rows for b in sorted(r, key=lambda b: b["x"])][:24]
+
+
+def _knock_out_background(crop: Image.Image) -> Image.Image:
+    """A cut-out from a flat-background sheet: the background around the object becomes transparent, holes inside it stay."""
+    rgba = crop.convert("RGBA")
+    if rgba.getchannel("A").getextrema()[0] < 250:
+        return rgba  # already cut out
+    mask = _foreground_mask(rgba).convert("L")
+    # Only background that touches the edge goes: light parts inside the object are not holes.
+    w, h = mask.size
+    for corner in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)):
+        if mask.getpixel(corner) == 0:
+            ImageDraw.floodfill(mask, corner, 128)
+    rgba.putalpha(mask.point(lambda v: 0 if v == 128 else 255))
+    bbox = rgba.getchannel("A").getbbox()
+    return rgba.crop(bbox) if bbox else rgba
+
+
 BODY_PARTS = ("head", "torso", "left arm", "right arm", "left leg", "right leg")
 BODY_PROMPT = """Look at this game character concept image and find its body parts for cutting it into pieces.
 Return ONLY JSON: {"parts": [{"name": "head", "x": 0.41, "y": 0.02, "w": 0.18, "h": 0.17}, ...]}
@@ -224,11 +276,45 @@ async def guess_body_parts(ws_dir: Path, image_rel: str, model_call: Any) -> dic
     return {"boxes": body_template(ws_dir, image_rel), "source": "template", "note": note}
 
 
+async def name_sheet_items(ws_dir: Path, image_rel: str, boxes: list[dict[str, Any]], model_call: Any) -> dict[str, Any]:
+    """Ask Glob's model what each numbered box on a sheet shows ("wooden barrel"), for the props' names."""
+    image = Image.open(_asset_image(ws_dir, image_rel)).convert("RGB")
+    image.thumbnail((1024, 1024))
+    draw = ImageDraw.Draw(image)
+    for i, box in enumerate(boxes, start=1):
+        x, y = float(box["x"]) * image.width, float(box["y"]) * image.height
+        draw.rectangle((x, y, x + float(box["w"]) * image.width, y + float(box["h"]) * image.height), outline=(255, 0, 90), width=3)
+        draw.rectangle((x, y, x + 26, y + 20), fill=(255, 0, 90))
+        draw.text((x + 7, y + 4), str(i), fill=(255, 255, 255))
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    prompt = (f"This prop sheet has {len(boxes)} numbered pink boxes. Name the object in each box in two or three plain words "
+              'for a game asset list (e.g. "wooden barrel", "iron torch"). Answer ONLY JSON: {"names": ["...", ...]} '
+              f"with exactly {len(boxes)} names, box 1 first.")
+    try:
+        result = await model_call(prompt=prompt, system_prompt="You name objects in images and answer with JSON only.",
+                                  images_b64=[("image/png", base64.b64encode(buffer.getvalue()).decode("ascii"))], effort="low")
+        match = re.search(r"\{.*\}", str(result.get("text") or ""), re.S)
+        names = [str(n).strip()[:60] for n in (json.loads(match.group(0)).get("names") or [])] if match else []
+        if len(names) == len(boxes) and all(names):
+            return {"names": names, "source": "glob"}
+        note = "Glob's answer didn't name every box"
+    except Exception as exc:  # no chat model, no vision, timeout, bad JSON: the user names them
+        note = f"Glob could not look at the sheet ({(str(exc).strip() or type(exc).__name__)[:160]})"
+    return {"names": [f"Prop {i}" for i in range(1, len(boxes) + 1)], "source": "numbers", "note": note}
+
+
 def split_image(ws_dir: Path, asset_rel: str, image_rel: str, boxes: list[dict[str, Any]], as_assets: bool = False) -> list[str]:
     """Cut boxes out of an image. Parts go to ``<asset>/parts/``; with ``as_assets`` every part becomes
-    its own asset next to this one, with the cut-out as its winner image."""
+    its own asset next to this one, with the cut-out as its winner image.
+
+    A level kit's prop sheet becomes props in a folder named after the level, each cut out of the sheet's background."""
     asset_path, meta, _ = read_asset(ws_dir, asset_rel)
     image = Image.open(_asset_image(ws_dir, image_rel))
+    level_sheet = meta.get("kind") == "level"
+    if level_sheet and as_assets:
+        props_dir = asset_path.parent / f"{asset_path.stem}-props"
+        props_dir.mkdir(exist_ok=True)
     if not boxes:
         raise ValueError("Draw at least one box.")
     created = []
@@ -240,15 +326,17 @@ def split_image(ws_dir: Path, asset_rel: str, image_rel: str, boxes: list[dict[s
         if right - left < 4 or bottom - top < 4:
             continue
         crop = image.crop((left, top, right, bottom))
+        if level_sheet:
+            crop = _knock_out_background(crop)
         name = str(box.get("name") or "").strip() or f"{asset_path.stem} part {index}"
         slug = slugify(name) or f"part-{index}"
         if as_assets:
-            new_md = _unique(asset_path.parent / f"{slug}.md")
+            new_md = _unique((props_dir if level_sheet else asset_path.parent) / f"{slug}.md")
             folder = output_dir(new_md) / "candidates"
             folder.mkdir(parents=True, exist_ok=True)
             picture = folder / f"{new_md.stem}-split.png"
             crop.save(picture)
-            kind = meta.get("kind") if meta.get("kind") in ASSET_KINDS else "prop"
+            kind = meta.get("kind") if meta.get("kind") in ASSET_KINDS and not level_sheet else "prop"
             fields = {"kind": kind, "prompt": name, "winner": _ws_rel(ws_dir, picture), "split_from": asset_rel}
             new_md.write_text(serialize_frontmatter(fields, f"# {name}\n\nCut from {asset_path.stem}.\n"), encoding="utf-8")
             created.append(_ws_rel(ws_dir, new_md))
@@ -260,6 +348,8 @@ def split_image(ws_dir: Path, asset_rel: str, image_rel: str, boxes: list[dict[s
             created.append(_ws_rel(ws_dir, target))
     if not created:
         raise ValueError("The boxes were too small to cut.")
+    if level_sheet and as_assets:
+        update_asset(ws_dir, asset_rel, {"props_cut": len(created)})  # the level kit's step 3 is done
     return created
 
 
