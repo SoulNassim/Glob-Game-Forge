@@ -32,6 +32,11 @@ ANTHROPIC_MODELS = [
 OPENAI_MODELS = [("openai:gpt-4o", "GPT-4o")]
 
 
+# Models whose last call failed (a key without credit, an endpoint that's gone): not ready until a call works again.
+# Coding agents keep their own login status in cli_models.
+_failed: dict[str, str] = {}
+
+
 def list_agent_models() -> list[dict[str, Any]]:
     """Every model the agent can call right now, with whether its credentials are present."""
     cfg = load_config()
@@ -51,6 +56,9 @@ def list_agent_models() -> list[dict[str, Any]]:
         for vm in vscode
         if vm["model_id"] not in imported
     ]
+    for m in models:
+        if m["id"] in _failed:
+            m.update(ready=False, status="error", error=_failed[m["id"]])
     return models
 
 
@@ -127,8 +135,19 @@ async def call_agent_model(
     **_: Any,
 ) -> dict[str, Any]:
     model_id = resolve_model(model_selector)
+    if model_id.startswith("cli:"):
+        return await _dispatch(model_id, prompt, system_prompt, list(images_b64 or []), effort)
+    try:
+        result = await _dispatch(model_id, prompt, system_prompt, list(images_b64 or []), effort)
+    except Exception as exc:
+        _failed[model_id] = str(exc)[:300]
+        raise
+    _failed.pop(model_id, None)
+    return result
+
+
+async def _dispatch(model_id: str, prompt: str, system_prompt: str, images: list[tuple[str, str]], effort: str) -> dict[str, Any]:
     provider, _, name = model_id.partition(":")
-    images = list(images_b64 or [])
     if provider == "anthropic":
         return await _call_anthropic(name or DEFAULT_ANTHROPIC_MODEL, prompt, system_prompt, images, effort)
     if provider == "openai":

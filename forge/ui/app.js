@@ -628,11 +628,23 @@ const SUGGESTIONS = [
 ];
 const TOOL_ICON = { write: "✎", append: "✎", create_folder: "▣", move: "↦", delete: "✕", generate: "✦", pick_winner: "★", file_order: "⇢", request_access: "🔒", import_game: "⇣", copy_in: "⇣" };
 
+// No model ready: say exactly why, with the one button that fixes it.
+function brainBanner() {
+  const clis = (state.modelInfo?.clis || []).filter((c) => c.installed);
+  const waiting = clis.find((c) => state.cliWait?.[c.id]);
+  if (waiting) return `<div class="banner">Waiting for you to log in to ${esc(waiting.label)} in the window that opened…</div>`;
+  const checking = clis.find((c) => c.status === "unknown");
+  if (checking) return `<div class="banner">Checking your ${esc(checking.label)} login…</div>`;
+  const out = clis.find((c) => c.status === "login") || clis.find((c) => c.status !== "error") || clis[0];
+  if (out) return `<div class="banner">${esc(out.label)} isn't logged in yet, so Glob's chat can't answer. <button class="ghost" data-cli-login="${esc(out.id)}">Log in to ${esc(out.label)}</button></div>`;
+  return `<div class="banner">Glob's chat runs on Claude Code or Codex, with your own login. <button class="ghost" data-settings>Set it up</button></div>`;
+}
+
 function renderMessages() {
   const box = $("#messages");
   const messages = state.session?.messages || [];
   const noModel = !state.models.some((m) => m.ready);
-  const banner = noModel ? `<div class="banner">Glob needs a brain first. <button class="ghost" data-settings>Connect a model</button></div>` : "";
+  const banner = noModel ? brainBanner() : "";
   if (!messages.length && !state.sending) {
     box.innerHTML = `${banner}<div class="chat-empty">
       <img class="hero-glob" src="/ui/glob-forge.svg" alt="">
@@ -721,6 +733,7 @@ async function send() {
   } finally {
     state.sending = false;
     $("#sendBtn").disabled = false;
+    await loadModels(); // a failed call marks its model as not ready: the pill and the banner say so
     renderMessages();
   }
 }
@@ -912,6 +925,41 @@ const KEY_PROVIDERS = [
 ];
 const PRESET_ICON = { anthropic: "✳", openai: "◯", openrouter: "⇄", gemini: "✦", ollama: "◉", lmstudio: "▣", custom: "⚙" };
 
+// What a coding agent's card says. Only "ok" (a real call worked) means Glob's chat can use it.
+const CLI_STATUS_TEXT = { ok: "✓ Logged in", login: "Not logged in · Log in", error: "Didn't answer · Try again", unknown: "Checking the login…", missing: "Not installed · Install", waiting: "Waiting for you to log in in the window that opened…" };
+const cliStatus = (c) => (state.cliWait?.[c.id] ? "waiting" : c.status || (c.installed ? "unknown" : "missing"));
+
+// Log in (or install) in a real terminal window, then check every few seconds until it works.
+async function cliLogin(id) {
+  const label = state.modelInfo?.clis?.find((c) => c.id === id)?.label || "The coding agent";
+  try { await api(`/api/agent/cli/${id}/login`, { method: "POST" }); } catch (err) { return toast(err.message, true); }
+  state.cliWait = { ...(state.cliWait || {}), [id]: true };
+  refreshModelViews();
+  for (let i = 0; i < 60 && state.cliWait?.[id]; i++) {
+    await new Promise((r) => setTimeout(r, 4000));
+    let r;
+    try { r = await api(`/api/agent/cli/${id}/check`, { method: "POST" }); } catch { continue; }
+    if (!r.ok) continue;
+    delete state.cliWait[id];
+    await loadModels();
+    if (!state.models.some((m) => m.id === state.model && m.ready)) {
+      const pick = state.models.find((m) => m.id === `cli:${id}/`);
+      if (pick) await pickModel(pick.id);
+    }
+    toast(`✓ ${label} is logged in. Glob's chat is ready.`);
+    return refreshModelViews();
+  }
+  if (state.cliWait?.[id]) toast(`${label} still isn't logged in. Finish in the window that opened, then press Log in again.`, true);
+  delete state.cliWait?.[id];
+  refreshModelViews();
+}
+
+function refreshModelViews() {
+  renderModelPill();
+  renderMessages();
+  if (!$("#settingsView").hidden && state.settings?.tab === "models") renderSettings();
+}
+
 async function renderSettings() {
   const st = state.settings;
   await loadModels();
@@ -933,7 +981,7 @@ async function renderSettings() {
       <div class="st-label">Coding agents · your own login</div>
       <p class="st-empty">Claude Code, Codex, Gemini CLI and OpenCode can run Glob's chat on your existing subscription, no API key. Installed ones appear in the model menu.</p>
       <div class="preset-grid">
-        ${(info.clis || []).map((c) => `<button class="preset" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i><img class="preset-logo" src="${AGENT_LOGO[c.id]}" alt=""></i><strong>${esc(c.label)}</strong><small>${c.installed ? "Installed · Log in" : "Install"}</small></button>`).join("")}
+        ${(info.clis || []).map((c) => `<button class="preset cli-${cliStatus(c)}" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i><img class="preset-logo" src="${AGENT_LOGO[c.id]}" alt=""></i><strong>${esc(c.label)}</strong><small>${CLI_STATUS_TEXT[cliStatus(c)]}</small></button>`).join("")}
       </div>
       <div class="st-label">Connected · ${ready.length}</div>
       ${ready.length ? Object.entries(groups).map(([group, items]) => {
@@ -3285,6 +3333,7 @@ function connectSocket() {
   ws.onmessage = (event) => {
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
+    if (msg.type === "models_changed") loadModels().then(refreshModelViews);
     if (msg.type === "service_connected") loadServices().then(() => serviceConnected(msg.service));
     // A cover being painted for another project shows on its card as soon as it lands.
     if (msg.type === "studio_job" && msg.job.status === "done" && !$("#projectsView").hidden) openProjects();
@@ -3373,7 +3422,10 @@ document.addEventListener("click", async (event) => {
     return renderSettings();
   }
   if (t.dataset.cliLogin) {
-    try { await api(`/api/agent/cli/${t.dataset.cliLogin}/login`, { method: "POST" }); toast("Opened a terminal. Finish there, then come back."); } catch (err) { toast(err.message, true); }
+    if (state.cliWait?.[t.dataset.cliLogin]) return;
+    const cli = state.modelInfo?.clis?.find((c) => c.id === t.dataset.cliLogin);
+    if (cli?.status === "ok") return toast(`${cli.label} is logged in and ready.`);
+    cliLogin(t.dataset.cliLogin);
     return;
   }
   if (t.dataset.importVscode !== undefined) {

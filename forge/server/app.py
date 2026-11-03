@@ -2490,9 +2490,25 @@ async def api_studio_jobs(project: str = "default") -> dict[str, Any]:
     return {"jobs": [job for job in studio_jobs.values() if job["project"] == project][-30:]}
 
 
+_cli_checks: set[str] = set()
+
+
+async def _check_cli_once(cli_id: str) -> None:
+    try:
+        await cli_models.check(cli_id)
+    finally:
+        _cli_checks.discard(cli_id)
+    await ws_manager.broadcast({"type": "models_changed"})
+
+
 @app.get("/api/agent/models")
 async def api_agent_models() -> dict[str, Any]:
     cfg = load_config()
+    # Installed coding agents nobody has checked yet: test their login in the background, so "connected" is true.
+    for cli in cli_models.detect():
+        if cli["status"] == "unknown" and cli["id"] not in _cli_checks and "PYTEST_CURRENT_TEST" not in os.environ:
+            _cli_checks.add(cli["id"])
+            asyncio.create_task(_check_cli_once(cli["id"]))
     models = list_agent_models()
     return {
         "models": models,

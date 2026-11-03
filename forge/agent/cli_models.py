@@ -36,6 +36,17 @@ CLI_MODELS: dict[str, list[tuple[str, str]]] = {
 CLI_EFFORTS: dict[str, list[str]] = {"claude": ["low", "medium", "high", "max"], "codex": ["low", "medium", "high"]}
 TIMEOUT = 600
 _model_cache: dict[str, tuple[float, list[tuple[str, str]]]] = {}
+# What the last real call or check said about each CLI: "ok", "login" (needs a login) or "error" (didn't answer).
+# Nothing recorded = not checked yet.
+# Only "ok" counts as connected: an installed CLI may still be logged out.
+_login: dict[str, str] = {}
+
+
+def login_status(cli_id: str) -> str:
+    """ok (a call worked), login (it needs a login), error (it didn't answer), unknown (not checked yet) or missing."""
+    if not find(cli_id):
+        return "missing"
+    return _login.get(cli_id, "unknown")
 
 
 def _search_path() -> str:
@@ -69,7 +80,7 @@ def find(cli_id: str) -> str | None:
 
 
 def detect() -> list[dict[str, Any]]:
-    return [{"id": cli_id, **spec, "installed": bool(find(cli_id))} for cli_id, spec in CLIS.items()]
+    return [{"id": cli_id, **spec, "installed": bool(find(cli_id)), "status": login_status(cli_id)} for cli_id, spec in CLIS.items()]
 
 
 def _opencode_models(exe: str) -> list[tuple[str, str]]:
@@ -88,6 +99,7 @@ def list_models() -> list[dict[str, Any]]:
         exe = find(cli_id)
         if not exe:
             continue
+        ready = _login.get(cli_id) == "ok"
         items = CLI_MODELS[cli_id]
         if cli_id == "opencode":
             cached = _model_cache.get(cli_id)
@@ -97,7 +109,7 @@ def list_models() -> list[dict[str, Any]]:
             items = items + cached[1]
         # Labels name the agent too: the chat's model pill shows the label alone.
         out += [{"id": f"cli:{cli_id}/{mid}", "label": spec["label"] if not mid else f"{spec['label']} · {label}", "provider": "cli", "group": f"{spec['label']} · your login",
-                 "ready": True, "efforts": CLI_EFFORTS.get(cli_id, [])} for mid, label in items]
+                 "ready": ready, "status": login_status(cli_id), "efforts": CLI_EFFORTS.get(cli_id, [])} for mid, label in items]
     return out
 
 
@@ -198,11 +210,14 @@ async def call(model_id: str, prompt: str, system_prompt: str, images: list[tupl
     if not text:
         tail = (error or proc.stderr.strip() or proc.stdout.strip())[-600:]
         needs_login = any(w in tail.lower() for w in ("login", "log in", "auth", "api key", "credential", "unauthorized"))
+        if needs_login:
+            _login[cli_id] = "login"
         raise RuntimeError(
             f"{label} returned no answer (exit {proc.returncode})."
             + (f" It looks like it isn't logged in: run `{CLIS[cli_id]['login']}` in a terminal, or press Log in under Settings → Chat models." if needs_login else "")
             + (f"\n\n{tail}" if tail else "")
         )
+    _login[cli_id] = "ok"
     return {"text": text, "model": f"{label}{' · ' + model if model else ''}", "provider": "cli"}
 
 
@@ -220,7 +235,10 @@ async def check(cli_id: str) -> dict[str, Any]:
         await call(f"cli:{cli_id}/{CHECK_MODELS[cli_id]}", "Reply with exactly: ok", "You are a connection test.", [], "low")
     except RuntimeError as exc:
         text = str(exc)
-        return {"id": cli_id, "installed": True, "ok": False, "needs_login": "logged in" in text, "error": text[:400]}
+        needs_login = _login.get(cli_id) == "login"
+        if not needs_login:
+            _login[cli_id] = "error"  # installed, but it didn't answer for another reason
+        return {"id": cli_id, "installed": True, "ok": False, "needs_login": needs_login, "error": text[:400]}
     return {"id": cli_id, "installed": True, "ok": True, "needs_login": False, "error": ""}
 
 
