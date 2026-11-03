@@ -99,6 +99,9 @@ class ForgeConfig(BaseModel):
     # Default generation settings
     image_aspect_ratio: str = "1:1"
     image_remove_bg: bool = True
+    # Shape and background per kind of asset, over the built-in ones (asset_studio.KIND_DEFAULTS):
+    # {"character": {"aspect": "3:4", "background": "cutout" | "scene"}}. An asset's own `aspect:` still wins.
+    kind_defaults: dict[str, dict[str, str]] = Field(default_factory=dict)
     image_pose_mode: str = ""
     mesh_model_type: str = "standard"
     mesh_geometry_resolution: str = "standard"

@@ -1220,8 +1220,10 @@ async function saveEndpoint() {
 }
 
 // The default 2D and 3D generators: where each runs (your keys or a signed-in service) and with which model.
+const KIND_PLURAL = { character: "Characters", creature: "Creatures", item: "Items", weapon: "Weapons", prop: "Props", vehicle: "Vehicles", environment: "Places", ui: "UI", vfx: "Effects" };
+
 function defaultsHTML(cfg, studio, d = null) {
-  d = d || { image: studio.selected, aspect: cfg.image_aspect_ratio, transparent: cfg.image_remove_bg, model3d: cfg.default_3d_service_model, provider3d: cfg.default_3d_provider };
+  d = d || { image: studio.selected, kinds: studio.kind_defaults, model3d: cfg.default_3d_service_model, provider3d: cfg.default_3d_provider };
   const sm = state.serviceModels || { image: [], "3d": [] };
   const sources = (kind) => [...new Map(sm[kind].map((m) => [m.service, m.label.split(" · ")[0]])).entries()];
   const src2d = modelSource(d.image), src3d = modelSource(d.model3d);
@@ -1232,8 +1234,13 @@ function defaultsHTML(cfg, studio, d = null) {
     <div class="gen-row"><div class="gen-kind"><strong>2D images</strong><small>Generate 2D, variants, edits, views</small></div>
       <label>Source ${sourceSelect("image", src2d, "Glob · your API keys")}</label>
       <label>Model <select name="default_image_model">${src2d === "keys" ? imageModelOptions(studio.models, d.image) : serviceModelOptions("image", src2d, d.image)}</select></label>
-      <label>Aspect <select name="image_aspect_ratio">${aspectOptions(d.aspect)}</select></label>
-      <label class="gen-check"><input type="checkbox" name="image_remove_bg" ${d.transparent ? "checked" : ""}> Transparent background</label></div>
+</div>
+    <div class="st-label">Shape and background per kind</div>
+    <div class="kind-table">${Object.entries(d.kinds || studio.kind_defaults || {}).map(([kind, k]) => `<div class="kind-row">
+      <strong>${esc(KIND_PLURAL[kind] || humanize(kind))}</strong>
+      <select data-kind-aspect="${esc(kind)}" aria-label="Shape for ${esc(kind)}">${aspectOptions(k.aspect)}</select>
+      <select data-kind-bg="${esc(kind)}" aria-label="Background for ${esc(kind)}"><option value="cutout" ${k.background === "cutout" ? "selected" : ""}>Cut out</option><option value="scene" ${k.background === "scene" ? "selected" : ""}>Full scene</option></select></div>`).join("")}</div>
+    <p class="st-empty">New images of each kind start with this shape. <b>Cut out</b> removes the background (for sprites and 3D); <b>Full scene</b> keeps it. A single asset can still pick another shape in its Generate window.</p>
     <div class="gen-row"><div class="gen-kind"><strong>3D models</strong><small>Make 3D from the winner image</small></div>
       <label>Source ${sourceSelect("3d", src3d, "Glob · Meshy / Tripo")}</label>
       <label>Model ${src3d === "keys" ? `<select name="default_3d_provider">${keys3d}</select>` : `<select name="default_3d_service_model">${serviceModelOptions("3d", src3d, d.model3d)}</select>`}</label></div>
@@ -1244,8 +1251,7 @@ function defaultsHTML(cfg, studio, d = null) {
 function readDefaults(form) {
   return {
     image: form.default_image_model?.value || "",
-    aspect: form.image_aspect_ratio?.value || "1:1",
-    transparent: !!form.image_remove_bg?.checked,
+    kinds: Object.fromEntries([...form.querySelectorAll("[data-kind-aspect]")].map((el) => [el.dataset.kindAspect, { aspect: el.value, background: form.querySelector(`[data-kind-bg="${el.dataset.kindAspect}"]`)?.value || "cutout" }])),
     model3d: form.default_3d_service_model?.value || "",
     provider3d: form.default_3d_provider?.value || state.settings.cfg.default_3d_provider,
   };
@@ -1254,7 +1260,7 @@ function readDefaults(form) {
 async function saveDefaults(event) {
   event.preventDefault();
   const d = readDefaults(event.target);
-  const updates = { default_image_model: d.image, user_locked_image_model: true, image_aspect_ratio: d.aspect, image_remove_bg: d.transparent,
+  const updates = { default_image_model: d.image, user_locked_image_model: true, kind_defaults: d.kinds,
     default_3d_service_model: d.model3d, default_3d_provider: d.provider3d };
   try {
     await api("/api/config", { method: "PUT", body: updates });

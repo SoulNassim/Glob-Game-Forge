@@ -73,6 +73,14 @@ def _spawn(port: int, project: str) -> None:
     # The installed app (a frozen build) is its own CLI: any argument makes it run the server, not the launcher.
     server = ["--no-browser", "--port", str(port)]
     command = [sys.executable, *server] if getattr(sys, "frozen", False) else [sys.executable, "-m", "forge.cli", *server]
+    if sys.platform == "win32":
+        # A coding agent's terminal (or any tool runner) may run us inside a job object that kills every process
+        # in it when the command ends. Break away from it so Glob keeps running; not every job allows that.
+        try:
+            subprocess.Popen(command, **(kwargs | {"creationflags": kwargs["creationflags"] | subprocess.CREATE_BREAKAWAY_FROM_JOB}))
+            return
+        except OSError:
+            pass
     subprocess.Popen(command, **kwargs)
 
 

@@ -2065,7 +2065,8 @@ async def api_studio_run(payload: dict[str, Any], project: str = "default") -> d
 
 @app.get("/api/studio/options")
 async def api_studio_options() -> dict[str, Any]:
-    return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": asset_studio.default_image_model(load_config()), "selected_3d": load_config().default_3d_service_model, "kinds": list(asset_studio.ASSET_KINDS)}
+    return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": asset_studio.default_image_model(load_config()), "selected_3d": load_config().default_3d_service_model, "kinds": list(asset_studio.ASSET_KINDS),
+            "kind_defaults": asset_studio.kind_defaults(load_config())}
 
 
 @app.get("/api/studio/voices")

@@ -99,3 +99,13 @@ def test_shortcut_points_at_glob_open(tmp_path: Path, monkeypatch: pytest.Monkey
     assert shortcut.create() == [target] and shortcut.exists()
     if sys.platform != "win32":
         assert "open" in target.read_text(encoding="utf-8")
+
+
+def test_each_kind_has_its_own_shape_and_background() -> None:
+    cfg = SimpleNamespace(image_aspect_ratio="1:1", image_remove_bg=True, kind_defaults={"prop": {"aspect": "4:3", "background": "scene"}})
+    character = {"kind": "character", "meta": {}}
+    assert asset_studio.asset_aspect(character, cfg) == "3:4" and asset_studio.cutout_background(character, cfg)
+    prop = {"kind": "prop", "meta": {}}
+    assert asset_studio.asset_aspect(prop, cfg) == "4:3" and not asset_studio.cutout_background(prop, cfg)
+    place = {"kind": "environment", "meta": {"aspect": "21:9", "background": "cutout"}}  # the asset's own choice wins
+    assert asset_studio.asset_aspect(place, cfg) == "21:9" and asset_studio.cutout_background(place, cfg)

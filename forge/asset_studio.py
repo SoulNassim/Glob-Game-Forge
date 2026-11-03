@@ -56,10 +56,22 @@ MESH_CHOICES: dict[str, list[Any]] = {
 POLYCOUNT_PRESETS = (1500, 3000, 6000, 12000, 30000, 100000)
 # The fixed set of asset kinds; the UI offers these as tags so nobody has to type them.
 ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "vehicle", "ui", "vfx", "sfx", "voice", "music")
-# The framing each kind usually wants when the asset has no `aspect:` of its own (else the Settings default).
-KIND_ASPECT = {"environment": "16:9", "vfx": "16:9", "ui": "3:4"}
-# Kinds that are a whole picture: their background is part of the image, so it is never cut out.
-SCENE_KINDS = ("environment",)
+# The shape and background each kind of image gets unless Settings → Generators or the asset itself says otherwise.
+# "cutout": the subject alone, background removed. "scene": a whole picture, background kept.
+KIND_DEFAULTS: dict[str, dict[str, str]] = {
+    "character": {"aspect": "3:4", "background": "cutout"},
+    "creature": {"aspect": "3:4", "background": "cutout"},
+    "item": {"aspect": "1:1", "background": "cutout"},
+    "weapon": {"aspect": "1:1", "background": "cutout"},
+    "prop": {"aspect": "1:1", "background": "cutout"},
+    "vehicle": {"aspect": "4:3", "background": "cutout"},
+    "environment": {"aspect": "16:9", "background": "scene"},
+    "ui": {"aspect": "3:4", "background": "cutout"},
+    "vfx": {"aspect": "16:9", "background": "cutout"},
+}
+KIND_ASPECT = {kind: d["aspect"] for kind, d in KIND_DEFAULTS.items()}
+# Kinds that are a whole picture by default: their background is part of the image, so it is never cut out.
+SCENE_KINDS = tuple(kind for kind, d in KIND_DEFAULTS.items() if d["background"] == "scene")
 # How strongly the pillars steer an asset (`pillars:` in its header): off, light, normal (default) or strong.
 PILLAR_STRENGTHS = ("off", "light", "normal", "strong")
 # Sound assets: their "candidates" are audio files in <asset>/audio/, the prompt describes the sound (or, for a voice,
@@ -584,16 +596,24 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
     }
 
 
+def kind_defaults(cfg: Any) -> dict[str, dict[str, str]]:
+    """The built-in shape and background per kind, with what the user set in Settings on top."""
+    saved = getattr(cfg, "kind_defaults", None) or {}
+    return {kind: {**d, **{k: v for k, v in (saved.get(kind) or {}).items() if k in d and v}} for kind, d in KIND_DEFAULTS.items()}
+
+
 def asset_aspect(asset: dict[str, Any], cfg: Any) -> str:
-    """The asset's own framing, else the usual one for its kind, else the Settings default."""
-    return str(asset["meta"].get("aspect") or KIND_ASPECT.get(asset["kind"]) or cfg.image_aspect_ratio)
+    """The asset's own framing, else the one set for its kind, else the general default."""
+    return str(asset["meta"].get("aspect") or kind_defaults(cfg).get(asset["kind"], {}).get("aspect") or cfg.image_aspect_ratio)
 
 
 def cutout_background(asset: dict[str, Any], cfg: Any) -> bool:
-    """Whether new images are cut out: the Settings default, except for scenes and the key art."""
-    if asset["kind"] in SCENE_KINDS or asset["meta"].get("cover"):
+    """Whether new images are cut out: the asset's `background:`, else its kind's, else the general default.
+    The key art is always a whole picture."""
+    if asset["meta"].get("cover"):
         return False
-    return bool(cfg.image_remove_bg)
+    own = str(asset["meta"].get("background") or "") or kind_defaults(cfg).get(asset["kind"], {}).get("background")
+    return own == "cutout" if own in ("cutout", "scene") else bool(cfg.image_remove_bg)
 
 
 def pillar_strength(meta: dict[str, Any]) -> str:

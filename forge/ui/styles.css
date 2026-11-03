@@ -1701,3 +1701,9 @@ body.gallery-mode .asset-tile.add, body.gallery-mode .actions-row { display: non
 .action-row .primary svg { width: 15px; height: 15px; }
 @media (max-width: 700px) { #paletteBtn, #galleryBtn { display: none; } .proj-hero-blur { inset: -20px; } }
 .st-bg { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 13px; }
+
+/* Settings → Generators: shape and background per kind */
+.kind-table { display: grid; gap: 6px; margin: 4px 0 8px; }
+.kind-row { display: grid; grid-template-columns: 140px 96px 130px; justify-content: start; gap: 8px; align-items: center; }
+.kind-row strong { font-weight: 500; }
+@media (max-width: 520px) { .kind-row { grid-template-columns: 1fr 1fr; } .kind-row strong { grid-column: 1 / -1; } }
