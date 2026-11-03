@@ -108,10 +108,8 @@ def _launch(args: argparse.Namespace) -> None:
             agents = [a.strip() for a in args.agents.split(",") if a.strip()] or None
             result = connect_agent.connect_game(game, agents)
             project = result["project"]
-            labels = ", ".join(connect_agent.TARGETS[t]["label"] for t in result["selected"])
             print(f"\n  Glob project : {project} ({'new, in ' + os.path.join(game, 'glob') if result['created'] else 'already made'})")
-            print(f"  -> Connected : {labels} (MCP server `glob`, notes in AGENTS.md)")
-            print(f"  -> Deliveries: {result['delivery_folder']}")
+            print(f"  -> Note      : {', '.join(result['notes'])} tell your coding agent to copy art from glob/ASSETS.md")
         else:
             project = home_owner(Path(game)) or ""
             if not project:
@@ -128,7 +126,7 @@ def _launch(args: argparse.Namespace) -> None:
                 print(f"  -> Shortcut  : {made[0]} (open Glob any time, no agent needed)")
             except (RuntimeError, OSError):
                 pass
-        print("  Finish setup in the browser. Then restart your coding agent so it loads Glob's tools.\n")
+        print("  Make your art in Glob. Your coding agent copies it from glob/ASSETS.md; nothing to restart.\n")
 
 
 if __name__ == "__main__":

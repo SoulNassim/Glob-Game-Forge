@@ -729,8 +729,8 @@ def import_game(
     """Copy a game's assets into the workspace as sections, assets, kits and galleries.
 
     `plan` is what the user approved in the import preview: {"exclude": [unit ids], "move": {unit id: section key},
-    "sections": {section key: {"include": bool, "title": str}}, "orders": bool}. With "orders", everything the game
-    defines without art also becomes a filed agent order, so it shows up in Agent Orders.
+    "sections": {section key: {"include": bool, "title": str}}}. Everything the game defines without art gets a
+    "needs art" page.
     """
     say = progress or (lambda _message: None)
     say("Scanning the game folder…")
@@ -796,22 +796,6 @@ def import_game(
         md = _write_asset(writer, folder_path, target, target.files, existing=existing)
         assets_written.append(writer.rel(md))
 
-    ordered = 0
-    if plan.get("orders") and needs_art:
-        from forge import orders
-
-        for target, md in needs_art:
-            kind = target.kind if target.kind in orders.KINDS else "prop"
-            try:
-                order = orders.place(ws, target.title, kind, (target.data.get("description") or "")[:600],
-                                     writer.res(target.data["file"]), requested_by="game import")
-                if not order.get("asset"):
-                    orders.file_order(ws, order["id"], writer.rel(md))
-                ordered += 1
-            except (ValueError, KeyError, OSError):
-                continue
-        say(f"Added {ordered} 'needs art' entries to Agent Orders.")
-
     # A new section's intro opens with what it holds ("Cahara, Elia, Hooded Rogue · 2 still need art"): the
     # overview shows that line on the section's row.
     for key in created:
@@ -832,7 +816,7 @@ def import_game(
     manifest.write_text(json.dumps({"imports": [*previous[-4:], record]}, indent=1), encoding="utf-8")
     say(f"Copied {len(writer.copied)} files ({writer.bytes / 1_048_576:.0f} MB).")
     return {"summary": summary, "assets": assets_written, "copied": len(writer.copied), "bytes": writer.bytes,
-            "sections": {key: writer.rel(path) for key, path in sections.items()}, "orders": ordered}
+            "sections": {key: writer.rel(path) for key, path in sections.items()}}
 
 
 def _find_existing(folder: Path, title: str) -> Path | None:

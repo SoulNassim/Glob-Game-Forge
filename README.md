@@ -4,11 +4,10 @@
 
 # Glob
 
-### Tell your coding agent *"open Glob"*. That's it.
+### Make the art. Your coding agent puts it in the game.
 
-Glob opens in your browser, on the game your agent is building.<br>
-The agent orders the art it needs; Glob forges 2D art, 3D models, rigs, animations, icons and sounds<br>
-and drops the finished files straight into your game.
+Glob is an asset studio for your game. It runs as its own app and makes 2D art, 3D models, rigs, animations, icons and sounds.<br>
+Your coding agent copies the finished files from Glob into your game.
 
 **New here?** Paste this into your coding agent, from your game's folder:
 
@@ -16,37 +15,28 @@ and drops the finished files straight into your game.
 Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/agent.md
 ```
 
-[**Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [Generation modes](#generation-modes)
+[**Get started**](#get-started) · [**▶ Live demo**](https://soulnassim.github.io/Glob-Game-Forge/demo/) · [Website](https://soulnassim.github.io/Glob-Game-Forge/) · [What you can make](#what-you-can-make)
 
 **Free and open source (MIT).** Bring keys for the generators you use. No markup, no subscription.
 
 </div>
 
-<p align="center"><img src="docs/diagrams/how-it-works.svg" alt="1. Tell your agent: open glob. 2. Glob opens on your project, with every order on one board. 3. Finished assets land in your game's glob_delivery folder and the agent swaps its placeholder. You choose Manual, 2D auto or Full auto." width="100%"></p>
+## How it works
 
-## Just say "open Glob"
+Glob is an app you open: double-click the **Glob** shortcut on your desktop or in the Start menu, or run `glob-app`. It opens in its own window and keeps running in the background, with a tray icon (**Open Glob**, **Quit Glob**). *Settings → About* shows where it is installed.
 
-Connect your game once (your agent does it with `glob connect`). After that you never start Glob yourself: say **"open Glob"** to your agent (Claude Code, Codex, Cursor, Copilot, OpenCode, Gemini CLI), or just let it order its first asset. Without an agent, double-click the **Glob** shortcut on your desktop or in the Start menu. Glob starts on this computer and opens on the project your agent is working on, with every order, prompt, image, model and sound in one place.
+Glob has its own chat, a separate session from your coding agent. It runs on your Claude Code or Codex login. The chat organizes the workspace, writes style and prompts, and generates art. Your coding agent never manages the workspace.
 
-- **No app to keep open.** Glob runs on `localhost` while you need it. *Settings → Storage & access → Stop Glob* ends it.
-- **Rather start it yourself?** Run `glob`, and set `FORGE_NO_AUTOSTART=1` for your agent.
+The flow:
+
+1. **Make or pick the art in Glob.**
+2. **Your coding agent copies it.** Glob keeps `<game>/glob/ASSETS.md`, an index of every asset: its name, kind, page, the picked image or sound (`winner:`), and any 3D model, rig and animation files. The agent reads it and copies the files it needs into your game's own folders. It never edits or moves anything inside `glob/`.
+3. **Missing art stays a placeholder.** The agent keeps the placeholder and tells you what's needed. You make it in Glob.
 
 ![Glob with the Pocket Kaiju sample open: chat on the left, the project overview with its key art on the right](docs/screenshots/workspace.webp)
 
 <p align="center"><b>Pocket Kaiju</b>: a sample game made entirely in Glob, with 16 assets, 3D models and sounds.<br>
 <a href="https://soulnassim.github.io/Glob-Game-Forge/demo/"><b>▶ Click through it in the live demo</b></a>: the real app in your browser, read-only, no keys needed.</p>
-
-## Generation modes
-
-How far Glob goes on its own when your agent orders something. Pick it per project at the top of the **Agent Orders** board.
-
-| Mode | When an order comes in | You do |
-|---|---|---|
-| **Manual** | Glob files it as an asset page with its prompt, then asks: *"Generate the 2D images now?"* **Yes / No** | Press Generate, pick a winner, make 3D |
-| **2D auto** | Also generates 2D candidates right away | Pick the winner, then make 3D |
-| **Full auto** | Makes everything the order's kind needs: candidates, picks the first as winner, then the 3D model (or the sound) | Review, swap the winner if you like |
-
-The auto modes have a **spend cap** per project ($5 to start). They pause once they reach it, so an agent ordering 40 props overnight can't run up a bill. Every step runs once per order; a failed step waits for you instead of retrying. You can still switch off **File new orders on their own**; drafts then wait until you or the Glob chat sort them.
 
 ## What you can make
 
@@ -88,12 +78,13 @@ Set up Glob for this game: read https://soulnassim.github.io/Glob-Game-Forge/age
 Your agent follows [`docs/agent.md`](docs/agent.md). It asks you to approve one install command (a plain [uv](https://docs.astral.sh/uv/) package install, or the installer script when uv is missing; if your agent's safety settings block it, it shows you the command to run yourself). Then it runs `glob connect` in your game folder, which
 
 - makes the game's Glob project (in `<game>/glob/`), or finds the one made before;
-- connects your coding agents to it (the MCP server `glob`, a note in `AGENTS.md`, a `glob` skill);
-- starts Glob in the background and opens it in your browser on your game.
+- writes a short note into `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` telling your coding agent where the finished art is;
+- creates the **Glob** shortcut on your desktop and in the Start menu;
+- opens Glob's window on your game.
 
-### 2. Finish setup in the browser
+### 2. Set up Glob
 
-A short setup asks for generator keys (one is enough; without any, Glob makes placeholder files so you can try the whole flow). Keys go into Glob's own page and stay on your computer; they never pass through the agent's chat. Then restart your agent and approve the `glob` MCP server so it loads Glob's tools.
+A short setup asks for generator keys (one is enough; without any, Glob makes placeholder files so you can try the whole flow). Keys go into Glob's own page and stay on your computer; they never pass through the agent's chat. Your coding agent needs no server, no restart and no approval.
 
 <details>
 <summary><b>Rather do it yourself?</b> Install, then <code>glob connect</code></summary>
@@ -117,12 +108,12 @@ Then, in a new terminal, in your game folder:
 
 | Command | What it does |
 |---|---|
-| `glob connect` | Makes or finds this game's Glob project, connects its coding agents and opens Glob on it. `--agents claude,codex` picks the agents. |
+| `glob connect` | Makes or finds this game's Glob project, writes the note for your coding agents and opens Glob on it. |
 | `glob open` | Opens Glob on this game's project, starting it in the background if needed. |
 | `glob shortcut` | Puts a **Glob** shortcut on the desktop and in the Start menu (macOS: `Glob.command` on the desktop, Linux: the app menu). The installers and the first `glob connect` make it for you. |
 | `glob` | Runs Glob in this terminal and opens <http://127.0.0.1:8420>. |
 
-You can also connect from inside Glob: **Settings → Coding agent**. Projects are listed in `~/Glob/projects` (a source checkout uses its own `projects/`); a project made for a game keeps its files in that game's `glob/` folder.
+Projects are listed in `~/Glob/projects` (a source checkout uses its own `projects/`). A project made for a game keeps its files in that game's `glob/` folder.
 
 From source, with Python 3.11+ and [uv](https://docs.astral.sh/uv/):
 
@@ -132,19 +123,15 @@ cd Glob-Game-Forge
 uv run forge
 ```
 
-Glob opens in its own app window (`glob-app`, the Glob shortcut, or the installers on the [releases page](https://github.com/SoulNassim/Glob-Game-Forge/releases)). It keeps running in the background after you close the window; its tray icon opens or quits it.
+Glob opens in its own app window (`glob-app`, the Glob shortcut, or the installers on the [releases page](https://github.com/SoulNassim/Glob-Game-Forge/releases)). It keeps running in the background after you close the window; its tray icon (**Open Glob**, **Quit Glob**) opens or quits it.
 
 </details>
 
 <details>
-<summary>What connecting writes into your game folder (and removes again on Disconnect)</summary>
+<summary>What connecting writes into your game folder</summary>
 
-- The `glob` MCP server entry for each chosen agent: `.mcp.json`, `.codex/config.toml`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.json` or `.gemini/settings.json`.
-- A short note between `<!-- glob:start -->` and `<!-- glob:end -->` in `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`.
-- A `glob` skill in `.claude/skills/glob/` and `.agents/skills/glob/`.
-- `glob_delivery/README.md`.
-
-The agent starts the MCP server itself (`python -m forge.cli --mcp --project <name>`). It forwards to the running studio, so jobs and live updates show up there, and starts the studio when it isn't running (`open_glob`, or the first order or generation). `FORGE_NO_AUTOSTART=1` turns the automatic start off.
+- A short note between `<!-- glob:start -->` and `<!-- glob:end -->` in `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, saying where the finished art is and that the agent copies it from `glob/ASSETS.md`.
+- `glob/`, Glob's project for the game. Its `workspace/` folder holds the art, and `glob/ASSETS.md` indexes it. Your coding agent only reads `ASSETS.md` and copies files out; it never edits `glob/`.
 
 </details>
 
@@ -152,30 +139,11 @@ The agent starts the MCP server itself (`python -m forge.cli --mcp --project <na
 
 Ask your agent for something that needs art:
 
-> *"Add three enemy types with placeholder models and order the real ones from Glob."*
+> *"Add three enemy types with placeholder models. I'll make the real ones in Glob."*
 
-Glob opens in your browser on that project (or say *"open Glob"* any time), and the orders show up on the **Agent Orders** board. Depending on the [generation mode](#generation-modes), you generate and pick, or watch Glob do it. Finished files land in `<game>/glob_delivery/`, and the agent swaps its placeholders.
+Make the art in Glob (open it with the **Glob** shortcut, or `glob open` in your game folder). When you want it in the game, tell your agent. It copies the files from `glob/` using `glob/ASSETS.md`, and keeps placeholders for anything not made yet.
 
 Already have a game? **Projects → Import game** takes a Godot, Unity or Unreal project, or any folder of art.
-
-## Agent Orders and delivery
-
-```
-draft → filed → in_progress → ready → delivered → integrated   (or cancelled)
-```
-
-- **draft:** ordered, not in the workspace yet. New orders are filed on their own into the matching section (`agent-orders/` when nothing fits). Ask the Glob chat to move or regroup them any time.
-- **filed:** an asset page with a prompt. **in_progress / ready** are worked out live from the files.
-- **delivered:** copied to `<game>/glob_delivery/<order_id>/`, every file listed in `glob_delivery/manifest.json` with its SHA-256. Glob never writes anywhere else in your game.
-- **integrated:** the agent swapped its placeholder and called `update_order status=integrated`.
-
-| Kind | Ready when it has |
-|---|---|
-| character, creature, item, weapon, prop, vehicle | image + 3D model |
-| environment, ui, vfx | image |
-| sfx, voice, music | audio |
-
-You can change what an order needs (add a rig or animations) per order.
 
 ## More
 
@@ -199,7 +167,7 @@ Sound takes live in `<asset>/audio/`. For a voice, the prompt is the line to spe
 <details>
 <summary><b>Import a game</b></summary>
 
-**Projects → Import game** (or tell the Glob chat where your game is) scans a **Godot, Unity or Unreal** project, or any folder of game art, then shows a review step: untick sections, leave assets out, rename or merge sections, and optionally put "needs art" entries into Agent Orders.
+**Projects → Import game** (or tell the Glob chat where your game is) scans a **Godot, Unity or Unreal** project, or any folder of game art, then shows a review step: untick sections, leave assets out, and rename or merge sections.
 
 You get characters with their models, animations and textures, weapons, items and enemies with stats, kits, skies, texture packs, concept art, audio and design docs. Files are copied; your game folder is never changed.
 
@@ -243,7 +211,6 @@ You get characters with their models, animations and textures, weapons, items an
 | `pillars/*.md` | Style-bible text added in front of every prompt at or below that folder |
 | `pillars:` / `aspect:` / `height_m:` in an asset header | Pillar strength, framing (`16:9`…) and height in metres |
 | `cover: true` in an asset header | Its winner becomes the project cover |
-| `ORDERS.json`, `ORDER_MODE.json` | Agent orders and the project's generation mode |
 
 Generated files are saved next to the asset (`<asset>/candidates|variants|edits|3d/`) and in the project vault with a JSON record of the exact prompt, images and model used.
 
@@ -252,24 +219,7 @@ Generated files are saved next to the asset (`<asset>/candidates|variants|edits|
 <details>
 <summary><b>Glob chat</b></summary>
 
-Glob can also run as a chat next to your project, on any model: Anthropic, OpenAI, OpenRouter, Gemini, Ollama, LM Studio, a custom OpenAI-compatible URL, or models imported from VS Code Copilot. Ask it to sort drafts, regroup sections, rewrite prompts or generate. **Settings → Glob chat:** *Automatic* hides it while a coding agent is connected.
-
-</details>
-
-<details>
-<summary><b>MCP tools</b></summary>
-
-Over stdio (`uv run forge --mcp --project <name>`) and HTTP JSON-RPC (`POST http://127.0.0.1:8420/api/mcp`), plus an MCP prompt `glob` and server `instructions`.
-
-| Task | Tools |
-|---|---|
-| Show the studio | `open_glob` |
-| Order and track assets | `place_order`, `list_orders`, `get_order`, `file_order`, `update_order` |
-| Deliveries | `get_deliveries`, `deliver_order` |
-| Read and shape the workspace | `workspace_overview`, `workspace_list`, `workspace_read`, `workspace_write`, `workspace_create_folder`, `workspace_move`, `workspace_delete` |
-| Make assets | `generate`, `pick_winner` |
-| Costs and queue | `get_budget`, `queue_status` |
-| Existing game | `find_placeholders`, `scan_game_project`, `import_game` |
+Glob has its own chat next to your projects, separate from your coding agent. It runs on your Claude Code or Codex login. Ask it to organize the workspace, regroup sections, rewrite prompts or generate art. Your coding agent never manages the workspace.
 
 </details>
 
@@ -302,8 +252,9 @@ uv run --with pyinstaller python scripts/build_desktop.py   # standalone app
 |---|---|
 | `forge/server/` | FastAPI app and the local-only request guard |
 | `forge/agent/` | Glob chat, model endpoints, `connect.py` (game folder link), `glob_prompt.md` |
-| `forge/orders.py`, `forge/order_mode.py` | Agent Orders, delivery and the generation modes |
-| `forge/launcher.py` | Starting Glob for a coding agent (`open_glob`, auto-start) |
+| `forge/asset_index.py` | Writes `glob/ASSETS.md`, the index the coding agent copies art from |
+| `forge/appwindow.py`, `forge/tray.py` | Glob's app window and its tray icon |
+| `forge/launcher.py` | Starting Glob in the background |
 | `forge/providers/` | Gemini, Meshy, Tripo, ElevenLabs and Stability clients |
 | `forge/mcp/` | MCP server (stdio, forwards to the app when it runs) |
 | `forge/game_import.py` | Importing Godot / Unity / Unreal projects |

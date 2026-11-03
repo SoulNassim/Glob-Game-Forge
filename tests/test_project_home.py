@@ -28,7 +28,7 @@ def test_new_project_lives_in_its_game_folder(client: TestClient, tmp_path: Path
     # Linked to the game straight away: the coding agent finds Glob without a separate connect step.
     status = client.get("/api/connect", params={"project": "My_Game"}).json()
     assert status["connected"] and Path(status["game_folder"]) == game.resolve()
-    assert (game / ".mcp.json").is_file() and (game / "glob_delivery").is_dir()
+    assert (game / "AGENTS.md").is_file() and (game / "glob" / "ASSETS.md").is_file()  # the note and the index, no MCP config
 
     # Choosing the same game again opens its project instead of making a second one.
     again = client.post("/api/projects", json={"name": "Other", "unique": True, "game_folder": str(game)}).json()

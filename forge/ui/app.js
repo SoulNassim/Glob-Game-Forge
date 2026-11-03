@@ -384,7 +384,7 @@ function renderOnboarding() {
       <div class="ob-nav"><button class="ob-next" data-ob-next>Begin</button><button class="ob-back" data-imp-open title="Import a Godot, Unity or Unreal project">Import a game</button></div>
       <button class="ob-sample" data-install-sample>${icon("eye")} Or look around a finished sample project first</button></div>`,
     () => `<div class="ob-step"><p class="ob-kicker">1 / 4 · Your game</p><h1>Where's your <em>game</em>?</h1>
-      <p class="ob-sub">Pick the game's folder, even an empty one. Glob keeps this project inside it in <code>glob/</code> (or wherever you choose), and your coding agent finds finished assets in <code>glob_delivery/</code>.</p>
+      <p class="ob-sub">Pick the game's folder, even an empty one. Glob keeps this project inside it in <code>glob/</code> (or wherever you choose), and your coding agent finds finished assets in <code>glob/ASSETS.md</code>.</p>
       ${obFolders(ob)}
       <div class="ob-nav">${ob.step > 0 && !ob.seamless ? `<button class="ob-back" data-ob-back>Back</button>` : ""}<button class="ob-next" data-ob-next ${ob.game ? "" : "disabled"}>Continue</button></div></div>`,
     () => `<div class="ob-step"><p class="ob-kicker">2 / 4 · Name</p><h1>What's it called?</h1>
@@ -669,7 +669,7 @@ function renderMessage(m) {
     return `<div class="msg user"><div class="bubble">${esc(m.text)}${imgs}</div></div>`;
   }
   if (m.role === "note") return `<div class="msg note">${esc(m.text)}</div>`;
-  const actions = (m.actions || []).filter((a) => !["list", "read", "list_orders", "legacy"].includes(a.tool) || a.ok === false);
+  const actions = (m.actions || []).filter((a) => !["list", "read", "legacy"].includes(a.tool) || a.ok === false);
   const failed = actions.filter((a) => a.ok === false).length;
   const rows = actions.map((a) => {
     const openable = a.ok !== false && a.path && a.tool !== "delete";
@@ -964,7 +964,7 @@ async function renderSettings() {
   const st = state.settings;
   await loadModels();
   const info = state.modelInfo || { presets: {}, endpoints: [] };
-  const nav = [["connect", "Coding agent"], ["images", "Generators"], ["agent", "Glob chat"], ["models", "Chat models"], ["storage", "Storage & access"], ["about", "About"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
+  const nav = [["connect", "Your game"], ["images", "Generators"], ["agent", "Glob chat"], ["models", "Chat models"], ["storage", "Storage & access"], ["about", "About"]].map(([id, label]) => `<button class="${st.tab === id ? "on" : ""}" data-settings-tab="${id}">${label}</button>`).join("");
   let body = "";
   if (st.tab === "models") {
     const ready = state.models.filter((m) => m.ready);
@@ -1074,9 +1074,8 @@ async function renderSettings() {
 // ---------- coding agent: connect the game folder ----------
 
 const TRY_PROMPTS = [
-  "Add the enemies with placeholder art for now and order the real models from Glob.",
-  "Check which Glob orders are ready and swap the placeholders in.",
-  "/glob Sort the new agent orders into the workspace and write a good prompt for each.",
+  "Copy the Glob art for the main character into the game and use it instead of the placeholder.",
+  "Check glob/ASSETS.md and tell me which art the game still needs.",
 ];
 
 async function loadConnect() {
@@ -1087,52 +1086,41 @@ async function loadConnect() {
 
 async function connectSettings() {
   const cn = await loadConnect();
-  const draft = (state.cnDraft ||= { folder: "", targets: null });
-  const selected = draft.targets || cn?.selected?.length && cn.selected || cn?.suggested || ["claude", "codex"];
-  const chips = (cn?.targets || []).map((t) => `<button type="button" class="ob-chip${selected.includes(t.id) ? " on" : ""}" data-cn-target="${t.id}" title="Writes ${esc(t.files.join(", "))}">${esc(t.label)}</button>`).join("");
+  const draft = (state.cnDraft ||= { folder: "" });
   const how = `<div class="cn-how">
-      <div><b>1</b><span>Your agent codes the game and keeps placeholders. When it needs art, it <strong>orders</strong> the asset from Glob.</span></div>
-      <div><b>2</b><span>Orders show up in <strong>Agent Orders</strong>. Glob sorts them into your workspace, you generate and pick.</span></div>
-      <div><b>3</b><span>Finished assets are <strong>delivered</strong> to <code>glob_delivery/</code> in the game, with a README the agent reads on its own.</span></div>
+      <div><b>1</b><span>You make the art here in Glob, with Glob's chat or by hand.</span></div>
+      <div><b>2</b><span>Glob keeps <code>glob/ASSETS.md</code> in your game: every asset and its finished files.</span></div>
+      <div><b>3</b><span>Your coding agent reads it and copies the art it needs into the game. Nothing to install or restart.</span></div>
     </div>`;
   if (!cn?.connected) {
-    return `<h1>Coding agent</h1>
-      <p class="st-lede">Code your game with Claude Code, Codex, Cursor, Copilot or any agent you like. Connect the game folder once and that agent knows about Glob: it orders assets and can manage this workspace, without you ever saying "use Glob".</p>
+    return `<h1>Your game</h1>
+      <p class="st-lede">Link ${esc(humanize(state.project))} to your game folder. Glob writes a short note into <code>AGENTS.md</code> so any coding agent (Claude Code, Codex, Cursor, Copilot…) knows where the finished art is.</p>
       ${how}
       <div class="st-label">Game folder</div>
       <div class="cn-pick"><input id="cnFolder" placeholder="/path/to/your/game" value="${esc(draft.folder)}" spellcheck="false"><button class="ghost" data-cn-browse>Browse…</button></div>
-      <div class="st-label">Agents you use there</div>
-      <div class="ob-chips left">${chips}</div>
-      <div class="row"><button class="primary" data-cn-connect>Connect ${esc(humanize(state.project))}</button></div>
-      <p class="st-note">Glob only adds its own part to the folder: the <code>glob</code> MCP server in each agent's config, a short note in <code>AGENTS.md</code> / <code>CLAUDE.md</code>, a <code>glob</code> skill and <code>glob_delivery/</code>. Your code and notes are never changed, and Disconnect removes Glob's part again.</p>`;
+      <div class="row"><button class="primary" data-cn-connect>Link ${esc(humanize(state.project))}</button></div>
+      <p class="st-note">Glob only adds its own note (between <code>glob:start</code> and <code>glob:end</code>) and <code>glob/ASSETS.md</code>. Your code is never changed, and Unlink removes the note again.</p>`;
   }
-  return `<h1>Coding agent</h1>
-    <p class="st-lede">${esc(humanize(state.project))} is connected to your game. Agents working there can order assets from Glob and manage this workspace.</p>
+  return `<h1>Your game</h1>
+    <p class="st-lede">${esc(humanize(state.project))} is linked to your game. Coding agents working there copy finished art from <code>glob/ASSETS.md</code>.</p>
     <div class="cn-card">
       <div class="cn-top"><span class="dot ${cn.healthy ? "live" : "warn"}"></span><div><strong>${esc(cn.game_name)}</strong><small>${esc(cn.game_folder)}</small></div>
         <button class="mini" data-cn-open>Open folder</button></div>
-      ${cn.healthy ? "" : `<p class="cn-warn">Some of Glob's files in the game folder are missing or changed. <button class="link-btn" data-cn-connect>Repair</button></p>`}
-      <div class="st-label">Agents</div>
-      <div class="ob-chips left">${chips}</div>
-      <div class="row"><button class="ghost" data-cn-connect>Update agents</button></div>
-      <div class="set-row"><div><strong>Deliver finished orders automatically</strong><small>As soon as an order is ready, Glob copies its files to <code>glob_delivery/</code>. Glob never writes anywhere else in your game.</small></div>
-        <label class="switch"><input type="checkbox" data-cn-auto ${cn.auto_deliver ? "checked" : ""}><span></span></label></div>
+      ${cn.healthy ? `<p class="st-note">Note in ${(cn.notes || ["AGENTS.md"]).map((n) => `<code>${esc(n)}</code>`).join(", ")}.</p>` : `<p class="cn-warn">Glob's note in <code>AGENTS.md</code> is missing. <button class="link-btn" data-cn-connect>Write it again</button></p>`}
     </div>
     ${how}
     <div class="st-label">Try it: say this to your agent</div>
     <div class="cn-tries">${TRY_PROMPTS.map((p) => `<button type="button" class="cn-try" data-cn-copy="${esc(p)}"><span>${esc(p)}</span><i>Copy</i></button>`).join("")}</div>
-    <p class="st-note">Restart your agent (or reload its MCP servers) after connecting so it picks up Glob. <button class="link-btn danger-text" data-cn-disconnect>Disconnect</button></p>`;
+    <p class="st-note"><button class="link-btn danger-text" data-cn-disconnect>Unlink</button></p>`;
 }
 
 async function connectGame() {
-  const draft = state.cnDraft || {};
   const folder = $("#cnFolder") ? $("#cnFolder").value.trim() : state.connect?.game_folder;
   if (!folder) return toast("Choose your game folder first.", true);
-  const targets = draft.targets || state.connect?.selected || state.connect?.suggested || [];
   try {
-    state.connect = await api("/api/connect", { method: "POST", body: { folder, targets } });
+    state.connect = await api("/api/connect", { method: "POST", body: { folder } });
     state.cnDraft = null;
-    toast(`Connected to ${state.connect.game_name}. Restart your agent so it sees Glob.`);
+    toast(`Linked to ${state.connect.game_name}. Your coding agent finds the art in glob/ASSETS.md.`);
   } catch (err) { return toast(err.message, true); }
   applyChatMode();
   return inSetup() ? renderSetup() : renderSettings();
@@ -1141,27 +1129,21 @@ async function connectGame() {
 const inSetup = () => Boolean(state.setup) && !$("#setup").hidden;
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-cn-browse],[data-cn-target],[data-cn-connect],[data-cn-disconnect],[data-cn-open],[data-cn-copy]");
+  const t = event.target.closest("[data-cn-browse],[data-cn-connect],[data-cn-disconnect],[data-cn-open],[data-cn-copy]");
   if (!t) return;
   const d = t.dataset;
-  const draft = (state.cnDraft ||= { folder: "", targets: null });
+  const draft = (state.cnDraft ||= { folder: "" });
   if ($("#cnFolder")) draft.folder = $("#cnFolder").value.trim();
   const rerender = () => (inSetup() ? renderSetup() : renderSettings());
   if (d.cnBrowse !== undefined) {
     const folder = await chooseFolder("Choose your game folder");
     if (!folder) return;
     draft.folder = folder;
-    try { draft.targets = draft.targets || (await api(`/api/connect?folder=${encodeURIComponent(folder)}`)).suggested; } catch { /* keep defaults */ }
-    return rerender();
-  }
-  if (d.cnTarget) {
-    const current = draft.targets || state.connect?.selected?.length && [...state.connect.selected] || state.connect?.suggested || ["claude", "codex"];
-    draft.targets = current.includes(d.cnTarget) ? current.filter((x) => x !== d.cnTarget) : [...current, d.cnTarget];
     return rerender();
   }
   if (d.cnConnect !== undefined) return connectGame();
   if (d.cnDisconnect !== undefined) {
-    if (!confirm("Disconnect the game? Glob removes its part from the game folder; deliveries stay.")) return;
+    if (!confirm("Unlink the game? Glob removes its note from the game folder; the art in glob/ stays.")) return;
     try { state.connect = await api("/api/connect", { method: "DELETE" }); } catch (err) { return toast(err.message, true); }
     applyChatMode();
     return rerender();
@@ -1173,11 +1155,6 @@ document.addEventListener("click", async (event) => {
   if (d.cnCopy) {
     try { await navigator.clipboard.writeText(d.cnCopy); toast("Copied"); } catch { toast("Copy failed", true); }
   }
-});
-
-document.addEventListener("change", async (event) => {
-  if (!event.target.matches?.("[data-cn-auto]")) return;
-  try { state.connect = await api("/api/connect", { method: "PATCH", body: { auto_deliver: event.target.checked } }); } catch (err) { toast(err.message, true); }
 });
 
 function budgetCard(b) {
@@ -1353,7 +1330,6 @@ function renderSections() {
   $("#sections").innerHTML = `
     <div class="proj-card"><span class="proj-badge">${esc(initials || "F")}</span><div><strong>${esc(projectTitle())}</strong><small>${esc(ov.excerpt || "Your game project")}</small></div></div>
     <button class="sec${state.view.type === "home" ? " active" : ""}" data-home><small>00</small>Overview</button>
-    <button class="sec vault-sec${state.view.type === "orders" ? " active" : ""}" data-orders>${icon("inbox")}<span class="sec-name">Agent Orders</span>${orderBadge(ov.orders)}</button>
     <button class="sec vault-sec${state.view.type === "board" ? " active" : ""}" data-board>${icon("grid")}<span class="sec-name">Board</span></button>
     <button class="sec vault-sec${state.view.type === "vault" ? " active" : ""}" data-vault>${icon("box")}<span class="sec-name">Final Vault</span></button>
     ${ov.sections.length ? `<div class="sec-label">Sections</div>` : ""}
@@ -1379,7 +1355,6 @@ function renderCrumbs() {
   if (state.view.type === "home") parts.push(`<strong>${esc(projectTitle())}</strong>`);
   else if (state.view.type === "vault") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Final Vault</strong>`);
   else if (state.view.type === "board") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Board</strong>`);
-  else if (state.view.type === "orders") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Agent Orders</strong>`);
   else {
     parts.push(`<button data-home>${esc(projectTitle())}</button>`);
     const segs = path.split("/");
@@ -1662,7 +1637,6 @@ async function renderViewBody() {
   }
 
   if (view.type === "vault") return renderVault();
-  if (view.type === "orders") return renderOrders();
   if (view.type === "board") return renderBoard();
 
   if (view.type === "folder") {
@@ -1708,7 +1682,7 @@ async function renderViewBody() {
     const isMd = view.path.toLowerCase().endsWith(".md");
     if (isMd && !view.editing) {
       const asset = await api(`/api/studio/asset?path=${encodeURIComponent(view.path)}`).catch(() => null);
-      if (asset?.is_asset) { content.innerHTML = renderAssetPage(asset); content.dataset.dropAsset = ""; queueThumbs(asset); showOrderBanner(asset); return; }
+      if (asset?.is_asset) { content.innerHTML = renderAssetPage(asset); content.dataset.dropAsset = ""; queueThumbs(asset); return; }
     }
     content.innerHTML = `
       <div class="doc-bar"><span class="path"><bdi>${esc(file.path)}</bdi></span>
@@ -1717,285 +1691,6 @@ async function renderViewBody() {
         : isMd ? withToc(renderMarkdown(file.content, dirOf(file.path))) : `<div class="md"><pre><code>${esc(file.content)}</code></pre></div>`}`;
   }
 }
-
-// ---------- agent orders ----------
-// The coding agent orders assets; Glob sorts them into the workspace; finished ones are delivered to the game.
-
-const ORDER_COLUMNS = [
-  ["draft", "Drafts", ["draft"], "New orders from your coding agent, not in the workspace yet."],
-  ["work", "In the workspace", ["filed", "in_progress"], "Sorted into a folder. Generate and pick a winner."],
-  ["ready", "Ready", ["ready"], "Everything the order needs exists."],
-  ["done", "Delivered", ["delivered", "integrated"], "Copied to glob_delivery/ in your game."],
-];
-const ORDER_STATUS = { draft: "Draft", filed: "Filed", in_progress: "In progress", ready: "Ready", delivered: "Delivered", integrated: "In the game", cancelled: "Cancelled" };
-const NEED_LABEL = { image: "Image", model: "3D", rig: "Rig", animations: "Anim", audio: "Audio" };
-const ORDER_KIND_NEEDS = { character: ["image", "model"], creature: ["image", "model"], item: ["image", "model"], weapon: ["image", "model"], prop: ["image", "model"], vehicle: ["image", "model"], environment: ["image"], ui: ["image"], vfx: ["image"], sfx: ["audio"], voice: ["audio"], music: ["audio"] };
-const SORT_PROMPT = "/glob Sort the new agent orders into the workspace and write a good prompt for each.";
-const ORDER_MODES = [
-  ["manual", "Manual", "New orders get an asset page with their prompt. You press Generate; Glob asks first."],
-  ["2d", "2D auto", "Every new order also gets 2D candidates right away. You pick the winner."],
-  ["full", "Full auto", "Glob makes everything an order needs: candidates, a winner, then the 3D model or sound."],
-];
-
-function orderModeBar(mode) {
-  if (!mode) return "";
-  const info = ORDER_MODES.find(([key]) => key === mode.mode) || ORDER_MODES[0];
-  const auto = mode.mode !== "manual";
-  return `<div class="ord-mode${mode.paused ? " paused" : ""}">
-    <div class="ord-mode-pick"><span class="ord-mode-label">Generation</span>
-      <div class="seg">${ORDER_MODES.map(([key, label, hint]) => `<button class="${key === mode.mode ? "on" : ""}" data-order-mode="${key}" title="${esc(hint)}">${label}</button>`).join("")}</div></div>
-    <p class="ord-mode-hint">${esc(info[2])}${auto ? ` Runs while Glob is open.` : ""}</p>
-    ${auto ? `<div class="ord-mode-cap">${mode.paused ? `<b>Paused:</b> spent $${mode.spent_usd.toFixed(2)} of the $${mode.spend_cap_usd.toFixed(2)} cap.` : `Spent $${mode.spent_usd.toFixed(2)} of $${mode.spend_cap_usd.toFixed(2)}`}
-      <button class="link-btn" data-order-cap>${mode.paused ? "Raise the cap" : "Change cap"}</button></div>` : ""}
-    <label class="inline ord-mode-file" title="Off: new orders wait in Drafts until you or Glob file them"><input type="checkbox" data-order-autofile ${mode.auto_file ? "checked" : ""}> File new orders on their own</label>
-  </div>`;
-}
-
-// Manual mode: Glob filed orders with their prompts; ask once whether to generate their 2D images now.
-function orderAskBanner(data) {
-  if (data.mode?.mode !== "manual") return "";
-  let dismissed = [];
-  try { dismissed = JSON.parse(storeGet(`forge.orderAsk.${state.project}`) || "[]"); } catch { /* reset below */ }
-  const waiting = data.orders.filter((o) => o.status === "filed" && o.asset && !dismissed.includes(o.id));
-  if (!waiting.length) return "";
-  const ids = waiting.map((o) => o.id).join(",");
-  const sounds = waiting.some((o) => (o.needs || []).includes("audio"));
-  return `<div class="ord-ask">${icon("sparkle")}<span class="grow"><b>${plural(waiting.length, "order")} ${waiting.length === 1 ? "has its" : "have their"} prompt ready.</b> Should Glob also generate ${sounds ? "them" : "the 2D images"} now?</span>
-    <button class="primary" data-order-ask-yes="${esc(ids)}">Yes, generate</button><button class="ghost" data-order-ask-no="${esc(ids)}">No</button></div>`;
-}
-
-function dismissOrderAsk(ids) {
-  let dismissed = [];
-  try { dismissed = JSON.parse(storeGet(`forge.orderAsk.${state.project}`) || "[]"); } catch { /* start over */ }
-  storeSet(`forge.orderAsk.${state.project}`, JSON.stringify([...new Set([...dismissed, ...ids])].slice(-500)));
-}
-
-async function setOrderMode(fields) {
-  try { await api("/api/orders/mode", { method: "PUT", body: fields }); } catch (err) { toast(err.message, true); }
-  if (state.view.type === "orders") renderOrders();
-}
-
-function orderCapDialog() {
-  const mode = state.orders?.mode;
-  openDialog(`<form class="dlg" id="orderCapForm">
-    <h2>Spend cap for auto modes</h2>
-    <p>2D and Full auto pause once they have spent this much since you set the cap or switched the mode. Changing it starts the count again.</p>
-    <label>Cap in US dollars<input name="cap" type="number" min="0" step="0.5" value="${esc(String(mode?.spend_cap_usd ?? 5))}"></label>
-    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">Save cap</button></div>
-  </form>`);
-  $("#orderCapForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    closeDialog();
-    await setOrderMode({ spend_cap_usd: Number(event.target.cap.value || 0) });
-  });
-}
-
-function orderBadge(counts) {
-  const n = (counts?.draft || 0) + (counts?.ready || 0);
-  return n ? `<span class="sec-badge" title="${counts.draft || 0} new · ${counts.ready || 0} ready">${n}</span>` : "";
-}
-
-function orderCard(o) {
-  const needs = (o.needs || []).map((n) => `<span class="need${o.have?.[n] ? " ok" : ""}">${o.have?.[n] ? "✓" : "○"} ${NEED_LABEL[n] || n}</span>`).join("");
-  const actions = {
-    draft: `<button class="act" data-order-file="${esc(o.id)}">${icon("folder")}File into…</button>`,
-    filed: `<button class="act" data-open="${esc(o.asset)}">Open asset</button>`,
-    in_progress: `<button class="act" data-open="${esc(o.asset)}">Open asset</button>`,
-    ready: `<button class="act" data-open="${esc(o.asset)}">Open</button>${state.connect?.connected ? `<button class="act on" data-order-deliver="${esc(o.id)}">${icon("send")}Deliver</button>` : ""}`,
-    delivered: `<button class="act" data-open="${esc(o.asset)}">Open</button>`,
-    integrated: `<button class="act" data-open="${esc(o.asset)}">Open</button>`,
-    cancelled: `<button class="act" data-order-reopen="${esc(o.id)}">Reopen</button>`,
-  }[o.status] || "";
-  return `<div class="ord-card st-${o.status}">
-    <div class="ord-top"><span class="kind-tag">${esc(o.kind)}</span><span class="ord-status">${ORDER_STATUS[o.status] || o.status}</span>
-      <button class="ord-menu" data-order-edit="${esc(o.id)}" title="Edit order" aria-label="Edit order">⋯</button></div>
-    <strong class="ord-title">${esc(o.title)}</strong>
-    ${o.brief ? `<p class="ord-brief">${esc(o.brief)}</p>` : ""}
-    ${o.placeholder ? `<code class="ord-ph" title="Placeholder in the game">${esc(o.placeholder)}</code>` : ""}
-    ${o.asset ? `<button class="ord-asset" data-open="${esc(o.asset)}">${icon("folder")}${esc(o.asset)}</button>` : ""}
-    <div class="ord-needs">${needs}</div>
-    <div class="ord-foot"><small>${esc(o.requested_by || "")} · ${esc(timeAgo(o.created_at))}</small><span class="grow"></span>${actions}</div>
-  </div>`;
-}
-
-// An asset made for an agent order says so at the top: who ordered it, for which placeholder, and what's missing.
-async function showOrderBanner(asset) {
-  const id = asset.meta?.order;
-  if (!id) return;
-  let order;
-  try { order = (await api("/api/orders")).orders.find((o) => o.id === id); } catch { return; }
-  const head = $("#content .asset-head");
-  if (!order || !head || state.view.path !== asset.path) return;
-  const missing = Object.entries(order.have || {}).filter(([, ok]) => !ok).map(([n]) => NEED_LABEL[n] || n);
-  const note = { ready: "Ready: delivering to the game.", delivered: "Delivered to glob_delivery/.", integrated: "In the game.", cancelled: "Order cancelled." }[order.status]
-    || (missing.length ? `Still needs: ${missing.join(", ")}.` : "");
-  head.insertAdjacentHTML("afterend", `<div class="order-banner st-${order.status}">${icon("inbox")}<span class="grow">Order <b>${esc(order.id)}</b> from ${esc(order.requested_by || "your agent")}${order.placeholder ? ` for <code>${esc(order.placeholder)}</code>` : ""} · ${esc(note)}</span>
-    ${order.status === "ready" && state.connect?.connected ? `<button class="mini on" data-order-deliver="${esc(order.id)}">Deliver now</button>` : ""}<button class="mini" data-orders>All orders</button></div>`);
-}
-
-async function renderOrders() {
-  const content = $("#content");
-  let data;
-  try { data = await api("/api/orders"); } catch (err) { content.innerHTML = `<div class="empty"><h1>Orders unavailable</h1><p>${esc(err.message)}</p></div>`; return; }
-  state.orders = data;
-  const all = data.orders.filter((o) => state.showCancelled || o.status !== "cancelled");
-  const c = data.counts;
-  const connected = state.connect?.connected;
-  const column = ([key, title, statuses, hint]) => {
-    const items = all.filter((o) => statuses.includes(o.status)).sort((a, b) => b.updated_at - a.updated_at);
-    return `<section class="ord-col col-${key}"><header><strong>${title}</strong><span>${items.length}</span></header><p class="ord-hint">${hint}</p>
-      <div class="ord-list">${items.map(orderCard).join("") || `<div class="ord-empty">Nothing here.</div>`}</div></section>`;
-  };
-  const cancelled = all.filter((o) => o.status === "cancelled");
-  content.innerHTML = `
-    <div class="kicker">Project / ${esc(projectTitle())}</div>
-    <h1 class="title">Agent Orders</h1>
-    <p class="lede">Your coding agent orders the assets the game needs while it builds with placeholders. Sort them into the workspace, make them, and finished orders are delivered to the game on their own.</p>
-    ${connected ? `<div class="ord-conn"><span class="dot live"></span>Delivering to <code>${esc(state.connect.game_name)}/glob_delivery/</code>${state.connect.auto_deliver ? " automatically" : " when you press Deliver"} · <button class="link-btn" data-settings-connect>Settings</button></div>`
-      : `<div class="ord-conn off"><span class="dot"></span>No coding agent connected yet: connect your game folder so your agent can order assets and receive them. <button class="primary" data-settings-connect>Connect</button></div>`}
-    ${orderModeBar(data.mode)}
-    ${orderAskBanner(data)}
-    <div class="vault-bar">
-      <button class="primary" data-order-new>＋ New order</button>
-      ${c.draft ? `<button class="ghost" data-order-sort${state.sending ? " disabled" : ""}>${state.sending ? `<span class="spinner"></span> Glob is sorting…` : `${icon("sparkle")} Sort ${plural(c.draft, "draft")} with Glob`}</button>` : ""}
-      <span class="grow"></span>
-      ${c.cancelled ? `<label class="inline"><input type="checkbox" data-order-cancelled ${state.showCancelled ? "checked" : ""}> Show ${c.cancelled} cancelled</label>` : ""}
-    </div>
-    ${data.orders.length ? `<div class="ord-board">${ORDER_COLUMNS.map(column).join("")}</div>
-      ${state.showCancelled && cancelled.length ? `<h2 class="group-title">Cancelled <span>${cancelled.length}</span></h2><div class="ord-list row">${cancelled.map(orderCard).join("")}</div>` : ""}`
-      : `<div class="empty"><h1>No orders yet</h1><p>Ask your coding agent for something that needs art, for example:</p>
-        <p><em>“Add three enemy types with placeholder models and order the real ones from Glob.”</em></p>
-        <p>Or add one yourself with <b>New order</b>.</p></div>`}`;
-}
-
-function folderOptions(nodes, depth = 0) {
-  return (nodes || []).flatMap((n) => [`<option value="${esc(n.path)}">${"  ".repeat(depth)}${esc(n.title || n.path)}</option>`, ...folderOptions(n.children, depth + 1)]);
-}
-
-function fileOrderDialog(id) {
-  const order = state.orders?.orders.find((o) => o.id === id);
-  if (!order) return;
-  const options = folderOptions(state.overview?.sections || []).join("");
-  openDialog(`<form class="dlg" id="fileOrderForm">
-    <h2>${icon("folder")} File “${esc(order.title)}”</h2>
-    <p>Creates an asset page for the order in this folder, with the agent's brief as its prompt. Glob can do this for all drafts at once.</p>
-    <label>Folder<select name="folder">${options}<option value="__new">New folder…</option></select></label>
-    <label class="new-folder" hidden>New folder path<input name="newFolder" placeholder="02-characters/blue-faction"></label>
-    <label>File name<input name="name" value="${esc(order.id.replace(/_/g, "-"))}.md" spellcheck="false"></label>
-    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">File it</button></div>
-  </form>`);
-  const form = $("#fileOrderForm");
-  form.folder.addEventListener("change", () => { form.querySelector(".new-folder").hidden = form.folder.value !== "__new"; });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const folder = form.folder.value === "__new" ? form.newFolder.value.trim().replace(/^\/+|\/+$/g, "") : form.folder.value;
-    if (!folder) return toast("Pick or name a folder.", true);
-    const name = form.name.value.trim().replace(/\.md$/i, "") || order.id;
-    try {
-      const filed = await api(`/api/orders/${encodeURIComponent(id)}/file`, { method: "POST", body: { path: `${folder}/${name}.md` } });
-      closeDialog();
-      toast(`Filed into ${folder}`, false, { label: "Open", run: () => go({ type: "doc", path: filed.asset }) });
-      await renderOrders();
-    } catch (err) { toast(err.message, true); }
-  });
-}
-
-function orderDialog(id) {
-  const order = id ? state.orders?.orders.find((o) => o.id === id) : null;
-  const kinds = state.orders?.kinds || Object.keys(ORDER_KIND_NEEDS);
-  const kind = order?.kind || "character";
-  const needs = order?.needs || ORDER_KIND_NEEDS[kind];
-  openDialog(`<form class="dlg" id="orderForm">
-    <h2>${order ? `Order ${esc(order.id)}` : "New order"}</h2>
-    <label>What is it?<input name="title" value="${esc(order?.title || "")}" placeholder="Orc warrior (blue faction)" required ${order ? "disabled" : ""}></label>
-    <label>Kind<select name="kind">${kinds.map((k) => `<option value="${k}" ${k === kind ? "selected" : ""}>${k}</option>`).join("")}</select></label>
-    <label>Brief<textarea name="brief" rows="4" placeholder="Look, size, materials, where it's used…">${esc(order?.brief || "")}</textarea></label>
-    <label>Placeholder in the game (optional)<input name="placeholder" value="${esc(order?.placeholder || "")}" placeholder="res://enemies/orc.tscn" spellcheck="false"></label>
-    <div class="dlg-field"><span>Done when it has</span><div class="kind-tags">${Object.entries(NEED_LABEL).map(([n, label]) => `<label class="kind-chip"><input type="checkbox" name="need" value="${n}" ${needs.includes(n) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div></div>
-    <div class="row">${order ? `<button type="button" class="ghost danger-text" data-order-cancel="${esc(order.id)}">${order.status === "cancelled" ? "Delete" : "Cancel order"}</button><span class="grow"></span>` : ""}<button type="button" class="ghost" data-close>Close</button><button class="primary">${order ? "Save" : "Add order"}</button></div>
-  </form>`);
-  const form = $("#orderForm");
-  form.kind.addEventListener("change", () => {
-    const defaults = ORDER_KIND_NEEDS[form.kind.value] || ["image"];
-    form.querySelectorAll("input[name=need]").forEach((box) => { box.checked = defaults.includes(box.value); });
-  });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const body = {
-      kind: form.kind.value, brief: form.brief.value.trim(), placeholder: form.placeholder.value.trim(),
-      needs: [...form.querySelectorAll("input[name=need]:checked")].map((b) => b.value),
-    };
-    try {
-      if (order) await api(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PATCH", body });
-      else await api("/api/orders", { method: "POST", body: { ...body, title: form.title.value.trim() } });
-      closeDialog();
-      toast(order ? "Order saved" : "Order added");
-      await renderOrders();
-    } catch (err) { toast(err.message, true); }
-  });
-}
-
-async function sortDraftsWithGlob() {
-  const shell = document.querySelector(".shell");
-  if (!shell.classList.contains("chat-off") && !shell.classList.contains("chat-hidden") && state.models.some((m) => m.ready)) {
-    $("#input").value = "Sort the new agent orders into the workspace and write a good prompt for each.";
-    return send();
-  }
-  try { await navigator.clipboard.writeText(SORT_PROMPT); } catch { /* shown below anyway */ }
-  openDialog(`<div class="dlg"><h2>${icon("sparkle")} Sort drafts with Glob</h2>
-    <p>Say this to your coding agent (ideally in a second session). It loads the <code>glob</code> skill and files every draft into the right folder:</p>
-    <pre class="cn-cmd"><code>${esc(SORT_PROMPT)}</code></pre>
-    <p class="st-note">Copied to your clipboard. Prefer the built-in chat? Turn it on in Settings → Glob chat.</p>
-    <div class="row"><button class="primary" data-close>Got it</button></div></div>`);
-}
-
-document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-order-new],[data-order-edit],[data-order-file],[data-order-deliver],[data-order-reopen],[data-order-cancel],[data-order-sort],[data-settings-connect],[data-order-mode],[data-order-cap],[data-order-autofile],[data-order-ask-yes],[data-order-ask-no]");
-  if (!t) return;
-  const d = t.dataset;
-  if (d.orderMode) return setOrderMode({ mode: d.orderMode });
-  if (d.orderCap !== undefined) return orderCapDialog();
-  if (d.orderAutofile !== undefined) return setOrderMode({ auto_file: t.checked });
-  if (d.orderAskNo) { dismissOrderAsk(d.orderAskNo.split(",")); return renderOrders(); }
-  if (d.orderAskYes) {
-    const ids = d.orderAskYes.split(",");
-    const assets = (state.orders?.orders || []).filter((o) => ids.includes(o.id) && o.asset).map((o) => o.asset);
-    t.disabled = true;
-    try {
-      const res = await api("/api/studio/batch", { method: "POST", body: { assets } });
-      dismissOrderAsk(ids);
-      toast(`Generating 2D images for ${plural(res.jobs.length, "order")}${res.skipped.length ? ` (${res.skipped.length} skipped)` : ""}`);
-    } catch (err) { toast(err.message, true); }
-    return renderOrders();
-  }
-  if (d.orderNew !== undefined) return orderDialog(null);
-  if (d.orderEdit) return orderDialog(d.orderEdit);
-  if (d.orderFile) return fileOrderDialog(d.orderFile);
-  if (d.orderSort !== undefined) { if (state.sending) return; t.disabled = true; return sortDraftsWithGlob(); }
-  if (d.settingsConnect !== undefined) return settingsDialog("connect");
-  try {
-    if (d.orderDeliver) {
-      t.disabled = true;
-      await api(`/api/orders/${encodeURIComponent(d.orderDeliver)}/deliver`, { method: "POST" });
-      toast(`Delivered to ${state.connect?.game_name || "the game"}`);
-    }
-    if (d.orderReopen) await api(`/api/orders/${encodeURIComponent(d.orderReopen)}`, { method: "PATCH", body: { status: "reopen" } });
-    if (d.orderCancel) {
-      const order = state.orders?.orders.find((o) => o.id === d.orderCancel);
-      if (order?.status === "cancelled") { if (!confirm("Delete this order for good?")) return; await api(`/api/orders/${encodeURIComponent(d.orderCancel)}`, { method: "DELETE" }); }
-      else await api(`/api/orders/${encodeURIComponent(d.orderCancel)}`, { method: "PATCH", body: { status: "cancelled" } });
-      closeDialog();
-    }
-  } catch (err) { toast(err.message, true); }
-  if (state.view.type === "orders") renderOrders();
-  else renderView();
-});
-
-document.addEventListener("change", (event) => {
-  if (!event.target.matches?.("[data-order-cancelled]")) return;
-  state.showCancelled = event.target.checked;
-  renderOrders();
-});
 
 // ---------- final vault ----------
 
@@ -2137,6 +1832,19 @@ document.addEventListener("click", (event) => {
   });
 });
 
+// Drag a picture or model out of Glob into Explorer / Finder (or any folder) to copy the file there.
+const DRAG_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", glb: "model/gltf-binary", fbx: "application/octet-stream", obj: "model/obj", wav: "audio/wav", mp3: "audio/mpeg" };
+document.addEventListener("dragstart", (event) => {
+  const el = event.target.closest?.("[data-drag-file]");
+  if (!el || !event.dataTransfer) return;
+  const path = el.dataset.dragFile;
+  const name = path.split("/").pop();
+  const url = `${location.origin}${fileUrl(path)}`;
+  event.dataTransfer.setData("DownloadURL", `${DRAG_TYPES[name.split(".").pop().toLowerCase()] || "application/octet-stream"}:${name}:${url}`);
+  event.dataTransfer.setData("text/uri-list", url);
+  event.dataTransfer.effectAllowed = "copy";
+});
+
 const removeBtn = (path) =>`<button type="button" class="out-del" data-remove-output="${esc(path)}" title="Move to trash (Undo right after)" aria-label="Delete">×</button>`;
 
 function modelCard(o, kind) {
@@ -2144,7 +1852,7 @@ function modelCard(o, kind) {
   const badge = { "3d": ["cube", "3D"], rig: ["bones", "Rigged"], animations: ["film", "Animation"] }[kind] || ["cube", "3D"];
   const ext = o.path.split(".").pop().toUpperCase();
   const formats = Object.entries(o.formats || { [ext.toLowerCase()]: o.path });
-  return `<div class="out model">${removeBtn(o.path)}<button type="button" class="out-img" data-view-model="${esc(o.path)}" title="Open in the 3D viewer">${o.thumb ? `<img src="${esc(fileUrl(o.thumb))}" alt="">` : `<div class="no-thumb">${icon("cube")}<span>${esc(ext)} model</span></div>`}<span class="out-badge mesh">${icon(badge[0])}${badge[1]} · ${esc(ext)}</span></button>
+  return `<div class="out model">${removeBtn(o.path)}<button type="button" class="out-img" data-view-model="${esc(o.path)}" draggable="true" data-drag-file="${esc(o.path)}" title="Open in the 3D viewer · drag into a folder to copy the model">${o.thumb ? `<img src="${esc(fileUrl(o.thumb))}" alt="">` : `<div class="no-thumb">${icon("cube")}<span>${esc(ext)} model</span></div>`}<span class="out-badge mesh">${icon(badge[0])}${badge[1]} · ${esc(ext)}</span></button>
     <div class="out-bar"><button class="act" data-view-model="${esc(o.path)}">${icon("eye")}View</button>
     ${kind === "3d" && glb ? `<button class="act" data-action="rig" data-source="${esc(o.path)}">${icon("bones")}Rig</button>` : kind === "rig" && glb ? `<button class="act" data-action="animate">${icon("play")}Animate</button>` : `<button class="act" data-sprites="${esc(o.path)}">${icon("grid")}Sprites</button>`}
     <div class="fmt-links">${icon("download")}${formats.map(([fmt, path]) => `<a href="${esc(fileUrl(path))}" download>${esc(fmt.toUpperCase())}</a>`).join("")}</div></div></div>`;
@@ -2163,7 +1871,7 @@ function outputGrid(all, winner, kind = "candidates") {
     if (o.type === "model") return modelCard(o, kind);
     if (o.type === "audio") return audioCard(o, winner);
     const isWinner = o.path === winner;
-    const img = `<a class="out-img" href="${esc(fileUrl(o.path))}" target="_blank" rel="noopener" data-lightbox="${esc(o.path)}"><img src="${esc(fileUrl(o.path))}" alt="" loading="lazy">${isWinner ? `<span class="out-badge win">${icon("star")}Winner</span>` : ""}</a>`;
+    const img = `<a class="out-img" href="${esc(fileUrl(o.path))}" target="_blank" rel="noopener" data-lightbox="${esc(o.path)}" data-drag-file="${esc(o.path)}" title="Click to enlarge · drag into a folder to copy it"><img src="${esc(fileUrl(o.path))}" alt="" loading="lazy">${isWinner ? `<span class="out-badge win">${icon("star")}Winner</span>` : ""}</a>`;
     if (!WORK_KINDS.has(kind)) {
       return `<div class="out${kind === "icons" || kind === "sprites" ? " checker" : ""}">${removeBtn(o.path)}${img}<div class="out-bar">
         ${kind === "parts" || kind === "views" ? `<button class="act" data-icons="${esc(o.path)}">${icon("grid")}Icons</button><button class="act" data-winner="${esc(o.path)}">${icon("star")}Winner</button>` : ""}
@@ -2747,7 +2455,7 @@ async function makeAsset() {
 
 // The current page and the pages before it survive a refresh, per project.
 const viewKey = () => `forge.view.${state.project}`;
-const PLAIN_VIEWS = ["home", "vault", "orders", "board"];
+const PLAIN_VIEWS = ["home", "vault", "board"];
 const plainView = (v) => (PLAIN_VIEWS.includes(v.type) ? { type: v.type } : { type: v.type, path: v.path });
 
 function saveView() {
@@ -2757,7 +2465,7 @@ function saveView() {
 }
 
 function restoreView() {
-  if (["#vault", "#orders", "#board"].includes(location.hash)) { state.view = { type: location.hash.slice(1) }; return; }
+  if (["#vault", "#board"].includes(location.hash)) { state.view = { type: location.hash.slice(1) }; return; }
   const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
   if (hash) {
     state.view = { type: hash[1], path: decodeURIComponent(hash[2]), restored: true };
@@ -2802,11 +2510,11 @@ function go(view) {
   renderView();
 }
 
-// A link pasted or edited in the address bar (#doc=…, #folder=…, #orders) opens that view.
+// A link pasted or edited in the address bar (#doc=…, #folder=…, #vault) opens that view.
 window.addEventListener("hashchange", () => {
   const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
   if (hash) go({ type: hash[1], path: decodeURIComponent(hash[2]) });
-  else if (["#vault", "#orders", "#board"].includes(location.hash)) go({ type: location.hash.slice(1) });
+  else if (["#vault", "#board"].includes(location.hash)) go({ type: location.hash.slice(1) });
 });
 
 function openPath(path) {
@@ -3348,17 +3056,6 @@ function connectSocket() {
       if (state.view.path === msg.job.asset && !state.view.editing) renderView();
       else if (msg.job.status === "done" && ["board", "home"].includes(state.view.type)) renderView();
     }
-    if (msg.type === "orders_delivered" && msg.project === state.project) {
-      toast(`Delivered ${plural(msg.orders.length, "order")} to ${state.connect?.game_name || "the game"}`);
-    }
-    if (msg.type === "orders_filed" && msg.project === state.project) {
-      toast(`Filed ${plural(msg.orders.length, "new order")}${msg.mode === "manual" ? "" : ", generating"}`, false, { label: "Orders", run: () => go({ type: "orders" }) });
-      if (state.view.type === "orders") renderOrders();
-    }
-    if (msg.type === "order_mode_paused" && msg.project === state.project && !state.orderPauseShown) {
-      state.orderPauseShown = true;
-      toast("Auto generation paused: the spend cap is reached", true, { label: "Raise cap", run: () => { go({ type: "orders" }); setTimeout(orderCapDialog, 300); } });
-    }
     if (msg.type === "workspace_changed" && (!msg.project || msg.project === state.project)) { state.palette = null; state.board = null; }
     if (msg.type === "workspace_changed" && (!msg.project || msg.project === state.project) && !state.view.editing) {
       clearTimeout(pending);
@@ -3371,7 +3068,7 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-orders],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
@@ -3482,7 +3179,6 @@ document.addEventListener("click", async (event) => {
   if (t.dataset.folder !== undefined) return go({ type: "folder", path: t.dataset.folder });
   if (t.dataset.home !== undefined) return go({ type: "home" });
   if (t.dataset.vault !== undefined) return go({ type: "vault" });
-  if (t.dataset.orders !== undefined) return go({ type: "orders" });
   if (t.dataset.vaultFilter) { state.vaultHistory = !!$("#vaultHistory")?.checked; state.vaultFilter = t.dataset.vaultFilter; return renderVault(); }
   if (t.dataset.vaultZip !== undefined) return vaultZip(t.dataset.vaultZip);
   if (t.dataset.vaultFolder !== undefined) return vaultToFolder();
@@ -3730,7 +3426,6 @@ function renderImport() {
           <input id="impName" class="imp-name" value="${esc(imp.name || p.title)}" maxlength="60"></label>
         ${state.project ? `<label class="imp-radio"><input type="radio" name="impTarget" value="current" ${imp.target === "current" ? "checked" : ""}><span>Into <b>${esc(current)}</b> (merges with its sections and assets)</span></label>` : ""}
         <label class="imp-check"><input type="checkbox" id="impDescribe" ${imp.describe ? "checked" : ""}><span>Let Glob look at the art and write a prompt for each asset (uses your chat model)</span></label>
-        ${c.needs_art ? `<label class="imp-check"><input type="checkbox" id="impOrders" ${imp.plan.orders ? "checked" : ""}><span>Put the ${c.needs_art} ${c.needs_art === 1 ? "entry" : "entries"} the game defines without art into <b>Agent Orders</b>, so you can make them next</span></label>` : ""}
         <p class="imp-note">Copies ${c.files} files (${fmtBytes(c.bytes)}) into the project. ${p.skipped.archives ? `${p.skipped.archives} archives (.zip) are skipped. ` : ""}Glob's agent may read this folder afterwards; change that in Settings → Storage & access.</p>
       </div>
       <div class="ob-nav"><button class="ob-back" data-imp-close>Cancel</button><button class="ob-next forge" data-imp-run>✦ Import ${esc(p.title)}</button></div>
@@ -3755,7 +3450,6 @@ function syncImport() {
   const target = document.querySelector("input[name=impTarget]:checked");
   if (target) imp.target = target.value;
   if ($("#impDescribe")) imp.describe = $("#impDescribe").checked;
-  if ($("#impOrders")) imp.plan.orders = $("#impOrders").checked;
   document.querySelectorAll("[data-imp-title]").forEach((el) => {
     const sp = (imp.plan.sections[el.dataset.impTitle] ||= {});
     const original = imp.preview?.sections.find((s) => s.key === el.dataset.impTitle)?.title;
@@ -3773,7 +3467,7 @@ function importPlan() {
     sections[s.key] = { include: sp.include !== false, ...(sp.title ? { title: sp.title } : {}) };
     if (sp.into && sp.include !== false) for (const u of s.units) move[u.id] = sp.into;
   }
-  return { exclude: [...imp.plan.exclude], move, sections, orders: Boolean(imp.plan.orders) };
+  return { exclude: [...imp.plan.exclude], move, sections };
 }
 
 async function scanImport() {
@@ -3784,7 +3478,7 @@ async function scanImport() {
   try {
     imp.preview = await api("/api/import/analyze", { method: "POST", body: { folder: imp.folder } });
     imp.name = imp.preview.title;
-    imp.plan = { exclude: new Set(), sections: {}, orders: true };
+    imp.plan = { exclude: new Set(), sections: {} };
     imp.step = "preview";
   } catch (err) {
     imp.step = "pick";
@@ -3816,7 +3510,6 @@ async function runImport() {
     if (job.status !== "done") throw new Error(job.error || "The import stopped.");
     const r = job.result;
     log(`${r.assets} assets in ${Object.keys(r.sections).length} sections · ${r.copied} files copied`, "ok");
-    if (r.orders) log(`${plural(r.orders, "order")} waiting in Agent Orders`, "ok");
     imp.result = { project };
     await loadGrants();
     state.project = project;
@@ -4078,7 +3771,7 @@ async function renderSetup() {
   let body = "";
   if (st.step === 0) {
     body = `<div class="ob-step intro enter"><img class="ob-glob" src="/ui/glob-forge.svg" alt=""><p class="ob-kicker">Welcome to Glob</p><h1>Your game's<br><em>asset studio</em>.</h1>
-      <p class="ob-sub">Glob makes the art, 3D models and sounds your game needs. Code with any agent you like: it orders assets, you shape them here, Glob delivers them into the game. Two quick steps.</p>
+      <p class="ob-sub">Glob makes the art, 3D models and sounds your game needs. Code with any agent you like: you shape the art here, and your agent copies it into the game. Two quick steps.</p>
       <button class="ob-next" data-setup-next>Start setup</button></div>`;
   } else if (st.step === 1) {
     await loadModels();
@@ -4172,7 +3865,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (d.stQuit !== undefined) {
-    if (!confirm("Stop Glob? Your agent starts it again the next time it orders or generates something.")) return;
+    if (!confirm("Stop Glob? Open it again any time with the Glob shortcut.")) return;
     try { await api("/api/quit", { method: "POST" }); } catch (err) { return toast(err.message, true); }
     document.body.innerHTML = `<div class="empty" style="padding:15vh 24px;text-align:center"><h1>Glob stopped</h1><p>Double-click the Glob shortcut on your desktop, ask your coding agent to open Glob, or run <code>glob open</code>, to start it again.</p></div>`;
     return;
@@ -4834,7 +4527,7 @@ async function paletteItems() {
   const here = state.view.type === "folder" ? state.view.path : "";
   const actions = [
     ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")]] : []),
-    ["Overview", "layers", () => go({ type: "home" })], ["Board", "grid", () => go({ type: "board" })], ["Agent orders", "inbox", () => go({ type: "orders" })], ["Final vault", "box", () => go({ type: "vault" })],
+    ["Overview", "layers", () => go({ type: "home" })], ["Board", "grid", () => go({ type: "board" })], ["Final vault", "box", () => go({ type: "vault" })],
     [here ? `Generate missing in ${humanize(here.split("/").pop())}` : "Generate all missing", "sparkle", () => batchDialog(here)],
     ...(here ? [["New asset here", "sparkle", () => newAssetDialog(here)]] : []),
     ["3D lineup", "cube", openLineup], ["Download press kit", "download", downloadPressKit],

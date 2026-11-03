@@ -1,14 +1,14 @@
 # Set up Glob (instructions for coding agents)
 
-You are a coding agent (Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Copilot…). The user wants **Glob**, a free, open-source asset studio that runs on their own computer at `http://127.0.0.1:8420`. Glob makes the game's art, 3D models, animations and sounds, and delivers them into the game.
+You are a coding agent (Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Copilot…). The user wants **Glob**, a free, open-source asset studio that runs on their own computer as an app. Glob makes the game's art, 3D models, animations and sounds. You copy the finished files into the game.
 
 "Glob" here is this tool, not file glob patterns.
 
-Follow these steps exactly. Run the commands from the user's **game folder** (the project you are working in). Don't ask for API keys, and don't let the user paste keys into this chat: they enter keys in Glob's own browser page.
+Follow these steps exactly. Run the commands from the user's **game folder** (the project you are working in). Don't ask for API keys, and don't let the user paste keys into this chat: they enter keys in Glob's own window.
 
 ## 1. Already connected?
 
-If you already have a tool called `open_glob` (MCP server `glob`), call it and skip to step 5.
+If `glob/ASSETS.md` exists in the game folder, Glob is set up. Skip to step 4.
 
 ## 2. Install Glob
 
@@ -37,30 +37,28 @@ Run this in the game folder. Your shell may not see the new `glob` command yet, 
 `glob connect`:
 
 1. makes the game's Glob project (its files go in `glob/` inside the game folder), or finds the one made before;
-2. connects the coding agents for this folder: the MCP server `glob` in `.mcp.json`, `.codex/config.toml` and the others it finds, a short note in `AGENTS.md` / `CLAUDE.md`, and a `glob` skill;
-3. creates `glob_delivery/`, the only folder in the game Glob writes to;
-4. starts Glob in the background and opens it in the user's browser on this game.
+2. writes `glob/ASSETS.md` and a short note into `AGENTS.md` (and `CLAUDE.md` / `GEMINI.md` when the game has them) telling coding agents where the finished art is;
+3. creates the **Glob** shortcut on the desktop and in the Start menu;
+4. opens Glob's window on this game.
 
-Add `--agents claude,codex,cursor,vscode,opencode,gemini` to choose the agents yourself.
+No restart is needed, and no MCP server needs approving.
 
-## 4. Hand over to the browser
+## 4. Hand over to the user
 
 Tell the user, in about these words:
 
-> Glob is open in your browser (any time later: the Glob shortcut on your desktop). Finish the short setup there: pick a model and paste your image/3D keys (they stay on your computer). Then restart me and approve the `glob` MCP server, so I can order art from Glob.
+> Glob is open (any time later: the Glob shortcut on your desktop). Make your art there. When you want it in the game, tell me — I'll copy it from glob/.
 
-Stop here and wait. Setup happens in the browser, not in this chat.
+Setup is finished. Don't write into `glob/` by hand.
 
-If the user asks you to build Glob's workspace for the game before you have Glob's tools, ask them to restart you first. Don't write into `glob/` by hand: the tools carry Glob's rules for how the workspace is laid out.
+## 5. Using the art later
 
-## 5. After the restart
+When the user asks for art in the game, or for placeholders to be swapped:
 
-You now have Glob's tools, and the note in `AGENTS.md` / `CLAUDE.md` explains the loop:
+1. Read `glob/ASSETS.md`. It lists each asset with its name, kind, page, the picked image or sound (`winner:`), and any 3D model, rig and animation files.
+2. For each asset you need, copy the picked files into the game's own folders and point your code at the copies.
+3. Keep the placeholder for anything with no `winner:` yet, and tell the user what's missing so they can make it in Glob.
 
-- `open_glob` opens Glob on this game ("open Glob").
-- `place_order` orders an asset instead of a placeholder: what it is, its kind and the placeholder path it replaces.
-- `list_orders` shows every order's status.
-- Finished assets land in `glob_delivery/<order_id>/`, listed in `glob_delivery/manifest.json`. Swap your placeholder, then call `update_order` with `status: integrated`.
-- To build or reorganize the workspace itself ("build the Glob workspace for this game"), load the `glob` prompt, call `workspace_overview`, then write it with `workspace_write`: a front page, one folder per part of the game, `pillars/style-bible.md`, and one asset page per character, creature, item, place and sound. Don't generate images unless the user asks: generation spends their credits.
+Never edit, move or delete anything inside `glob/`. Making and picking art happens in Glob, not here.
 
-To open Glob yourself, run `glob open` in the game folder. The user can also double-click the **Glob** shortcut that `glob connect` put on their desktop and in the Start menu.
+To open Glob again, run `glob open` in the game folder, or use the **Glob** shortcut.

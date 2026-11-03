@@ -82,79 +82,16 @@ WORKSPACE_TOOLS_SCHEMA: list[dict[str, Any]] = [
     ),
 ]
 
-_KIND = {"type": "string", "enum": ["character", "creature", "item", "weapon", "prop", "vehicle", "environment", "ui", "vfx", "sfx", "voice", "music"]}
-_NEEDS = {
-    "type": "array",
-    "items": {"type": "string", "enum": ["image", "model", "rig", "animations", "audio"]},
-    "description": "What must exist before the order is ready. Default by kind: 3D kinds need image+model, environment/ui/vfx an image, sfx/voice/music audio. Add rig/animations for animated characters.",
-}
-
-# The agent-order loop: the coding agent orders, Glob makes, the files are delivered into the game.
-ORDER_TOOLS_SCHEMA: list[dict[str, Any]] = [
+# Opening Glob: the one tool for a coding agent. The game's finished art is listed in glob/ASSETS.md.
+APP_TOOLS_SCHEMA: list[dict[str, Any]] = [
     _ws_tool(
         "open_glob",
-        "Open Glob, the asset studio, on this project so the user sees every order, prompt, image and model. "
+        "Open Glob, the asset studio, on this project so the user sees every prompt, image and model. "
         "Starts it on this computer first if it isn't running. Call it when the user says 'open Glob' or "
         "'show me the assets'. Returns the URL.",
         {}, [],
     ),
-    _ws_tool(
-        "place_order",
-        "Order an asset the game needs (art, 3D model, sound). Keep using a placeholder in the game meanwhile. "
-        "One order per asset; describe it well and say where it is used. Returns the order with its id.",
-        {
-            "title": {"type": "string", "description": "What it is, e.g. 'Orc warrior (blue faction)'."},
-            "kind": _KIND,
-            "brief": {"type": "string", "description": "Look and purpose: shape, materials, colours, size, style hints."},
-            "placeholder": {"type": "string", "description": "Path of the placeholder this replaces, e.g. res://enemies/orc.tscn."},
-            "context": {"type": "string", "description": "Where and how the game uses it (faction, level, gameplay role, scale)."},
-            "needs": _NEEDS,
-            "requested_by": {"type": "string", "description": "Your name, e.g. claude-code."},
-        },
-        ["title", "kind"],
-    ),
-    _ws_tool(
-        "list_orders",
-        "All orders with their live status: draft, filed, in_progress, ready, delivered, integrated, cancelled.",
-        {"status": {"type": "string", "enum": ["draft", "filed", "in_progress", "ready", "delivered", "integrated", "cancelled"]}},
-        [],
-    ),
-    _ws_tool("get_order", "One order with what it still needs.", {"order_id": {"type": "string"}}, ["order_id"]),
-    _ws_tool(
-        "file_order",
-        "Glob role: sort an order into the workspace. Creates the asset .md at `path` (or links an existing one) with "
-        "the order's brief as its prompt. Rewrite the prompt afterwards so it describes the subject well.",
-        {"order_id": {"type": "string"}, "path": {"type": "string", "description": "Workspace path of the asset .md, e.g. 02-characters/blue-faction/orc-warrior.md."}},
-        ["order_id", "path"],
-    ),
-    _ws_tool(
-        "update_order",
-        "Change an order: brief, needs, placeholder, a note, or status integrated (you swapped the placeholder in), "
-        "cancelled, or reopen.",
-        {
-            "order_id": {"type": "string"},
-            "status": {"type": "string", "enum": ["integrated", "cancelled", "reopen"]},
-            "brief": {"type": "string"},
-            "context": {"type": "string"},
-            "placeholder": {"type": "string"},
-            "needs": _NEEDS,
-            "note": {"type": "string"},
-        },
-        ["order_id"],
-    ),
-    _ws_tool(
-        "get_deliveries",
-        "What Glob has delivered into the game's glob_delivery/ folder: per order the files, roles and SHA-256.",
-        {}, [],
-    ),
-    _ws_tool(
-        "deliver_order",
-        "Deliver a ready order into the game's glob_delivery/ folder now (normally happens automatically).",
-        {"order_id": {"type": "string"}},
-        ["order_id"],
-    ),
 ]
-ORDER_TOOLS = {tool["name"] for tool in ORDER_TOOLS_SCHEMA}
 
 # Legacy tools that still answer calls but are not advertised: they work on the old asset store, not the workspace.
 LISTED_LEGACY_TOOLS = ("get_budget", "queue_status", "find_placeholders", "scan_game_project", "import_game")
@@ -169,19 +106,16 @@ WORKSPACE_TOOL_CALLS = {
     "pick_winner": "pick_winner",
 }
 MUTATING_TOOLS = {
-    "place_order", "file_order", "update_order", "deliver_order",
     "workspace_write", "workspace_create_folder", "workspace_move", "workspace_delete", "generate", "pick_winner",
     "write_workspace_doc", "add_asset_requirement", "fulfill_asset_requirements", "import_game",
 }
 
 SERVER_INSTRUCTIONS = """Glob is the user's game-asset studio (2D art, 3D models, rigs, animations, sounds), running locally.
 - When the user wants to see the assets ("open Glob", "run Glob"), call open_glob: it starts Glob if needed
-  and opens it on this project. Ordering or generating starts it on its own too.
-- When the game needs an asset, keep a placeholder and order the real one with place_order (one order per
-  asset, with a good brief and the placeholder path). list_orders shows progress.
-- Finished orders are delivered into the game's glob_delivery/<order_id>/ folder (see glob_delivery/README.md
-  and manifest.json). Swap the placeholder in, then call update_order with status integrated.
-- To work as Glob itself (sort orders into the asset workspace, write prompts, generate, pick winners), load the
+  and opens it on this project.
+- Finished art is listed in the game's glob/ASSETS.md. Copy the files you need into the game's own folders;
+  don't edit anything inside glob/.
+- To work as Glob itself (organize the asset workspace, write prompts, generate, pick winners), load the
   `glob` prompt and call workspace_overview first.
 - Generation spends the user's provider credits: only generate when the user asked for it."""
 
@@ -190,14 +124,13 @@ MCP_ADDENDUM = """## Tools in this session
 You reach the workspace through the Glob MCP server: open_glob (shows the user this project in Glob, starting
 it if needed), workspace_overview (call it first), workspace_list,
 workspace_read, workspace_write (append=true to append), workspace_create_folder, workspace_move,
-workspace_delete (to .trash/), generate (path + action, see above) and pick_winner. Orders: list_orders,
-get_order, file_order (sort one into the workspace), update_order. All paths are relative to the workspace root. You may also open the workspace files directly at the folder workspace_overview reports;
+workspace_delete (to .trash/), generate (path + action, see above) and pick_winner. All paths are relative to the workspace root. You may also open the workspace files directly at the folder workspace_overview reports;
 after editing files that way, Glob's overview refreshes on its own."""
 
 
 def advertised_tools() -> list[dict[str, Any]]:
     legacy = [tool for tool in MCP_TOOLS_SCHEMA if tool["name"] in LISTED_LEGACY_TOOLS]
-    return ORDER_TOOLS_SCHEMA + WORKSPACE_TOOLS_SCHEMA + legacy
+    return APP_TOOLS_SCHEMA + WORKSPACE_TOOLS_SCHEMA + legacy
 
 
 def glob_session_prompt(project: str) -> str:
@@ -624,49 +557,6 @@ class ForgeMCPDispatcher:
             result["job"] = outcome["job"]
         return result
 
-    def _order_tool(self, name: str, args: dict[str, Any], proj: str) -> dict[str, Any]:
-        from forge import game_link, orders
-
-        ws = self.actions.get_workspace(proj).ws_dir
-        game = game_link.game_folder(proj, self.actions.root_dir)
-        if name == "place_order":
-            from forge import order_mode
-
-            placed = orders.place(
-                ws, str(args.get("title") or ""), str(args.get("kind") or ""), str(args.get("brief") or ""),
-                str(args.get("placeholder") or ""), needs=args.get("needs"), context=str(args.get("context") or ""),
-                requested_by=str(args.get("requested_by") or "coding agent"),
-            )
-            settings = order_mode.load(ws)
-            if settings["auto_file"]:
-                order_mode.file_drafts(ws)
-                placed = orders.get(ws, placed["id"])
-            placed["glob_mode"] = {
-                "manual": "Filed with its prompt. The user generates it in Glob.",
-                "2d": "Filed; Glob generates 2D candidates on its own while the app is open.",
-                "full": "Filed; Glob makes everything this order needs on its own while the app is open.",
-            }[settings["mode"]]
-            return placed
-        if name == "list_orders":
-            listed = orders.list_orders(ws, args.get("status") or None)
-            return {"orders": listed, "counts": orders.summary(orders.list_orders(ws))}
-        if name == "get_order":
-            return orders.get(ws, str(args.get("order_id") or ""))
-        if name == "file_order":
-            return orders.file_order(ws, str(args.get("order_id") or ""), str(args.get("path") or ""))
-        if name == "update_order":
-            fields = {k: v for k, v in args.items() if k not in ("order_id", "project")}
-            return orders.update(ws, str(args.get("order_id") or ""), fields)
-        if name == "get_deliveries":
-            if game is None:
-                return {"connected": False, "orders": {}, "hint": "No game folder is connected to this project yet."}
-            return {"connected": True, "folder": str(game / orders.DELIVERY_DIR)} | orders.read_manifest(game)
-        if name == "deliver_order":
-            if game is None:
-                raise ValueError("Connect the game folder in Glob (Settings → Coding agent) first.")
-            return orders.deliver(ws, game, str(args.get("order_id") or ""), proj)
-        raise ValueError(f"Unknown order tool '{name}'.")
-
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         args = arguments or {}
         proj = str(args.get("project") or "").strip() or default_project()
@@ -679,8 +569,6 @@ class ForgeMCPDispatcher:
             from forge import launcher
 
             return await to_thread(launcher.open_glob, proj, start=not self.in_app)
-        if name in ORDER_TOOLS:
-            return self._order_tool(name, args, proj)
 
         if name == "list_assets":
             return self.actions.list_assets(
@@ -891,7 +779,7 @@ class ForgeMCPDispatcher:
 
 
 # Calls that need the studio running; the first one in a session starts it and opens the project.
-AUTOSTART_TOOLS = {"place_order", "generate", "pick_winner", "deliver_order"}
+AUTOSTART_TOOLS = {"generate", "pick_winner"}
 
 
 def _with_project(request: dict[str, Any]) -> dict[str, Any]:

@@ -940,12 +940,11 @@ async def test_mcp_dispatcher_and_export_security(tmp_path: Path) -> None:
     assert list_resp is not None
     tool_names = {t["name"] for t in list_resp["result"]["tools"]}
     assert {
-        "open_glob", "place_order", "list_orders", "get_order", "file_order", "update_order", "get_deliveries", "deliver_order",
-        "workspace_overview", "workspace_list", "workspace_read", "workspace_write", "workspace_move",
+        "open_glob", "workspace_overview", "workspace_list", "workspace_read", "workspace_write", "workspace_move",
         "workspace_delete", "workspace_create_folder", "generate", "pick_winner",
         "get_budget", "queue_status", "find_placeholders", "scan_game_project", "import_game",
     } == tool_names
-    # Legacy tools are no longer advertised but still answer calls.
+    # Legacy tools are still advertised and answer calls.
     assert (await mcp.call_tool("get_budget", {}))
 
     # Export project for Godot, Unity, and Unreal and verify no key strings exist
@@ -1042,7 +1041,8 @@ async def test_workspace_inspector_lists_tree_skills_and_mcp(
     assert {"characters/royals/king.md"} <= paths
     assert ".trash" not in paths
     assert "characters/royals/ref.png" not in paths
-    assert "place_order" in payload["mcp"]["tools"] and "workspace_overview" in payload["mcp"]["tools"]
+    assert "open_glob" in payload["mcp"]["tools"] and "workspace_overview" in payload["mcp"]["tools"]
+    assert "place_order" not in payload["mcp"]["tools"]
     assert any(skill["name"] == "forge-asset-maker" for skill in payload["skills"])
 
 
@@ -1852,66 +1852,6 @@ async def test_mcp_workspace_tools_prompt_and_project_default(tmp_path: Path, mo
     assert generate["isError"] and "Glob app" in generate["content"][0]["text"]
 
 
-@pytest.mark.asyncio
-async def test_placed_orders_are_filed_and_say_the_mode(tmp_path: Path) -> None:
-    from forge import order_mode
-
-    actions = ForgeActionLayer(root_dir=tmp_path / "projects")
-    mcp = ForgeMCPDispatcher(action_layer=actions)
-    ws = actions.get_workspace("demo").ws_dir
-    placed = await mcp.call_tool("place_order", {"project": "demo", "title": "Health potion", "kind": "item"})
-    assert placed["status"] == "filed" and placed["asset"].endswith("health-potion.md")
-    assert "user generates it" in placed["glob_mode"]
-    order_mode.save(ws, {"mode": "full"}, 0)
-    placed = await mcp.call_tool("place_order", {"project": "demo", "title": "Mana potion", "kind": "item"})
-    assert "everything this order needs" in placed["glob_mode"]
-
-
-async def test_agent_orders_flow_from_order_to_delivery(tmp_path: Path) -> None:
-    from forge import asset_studio, game_link, order_mode, orders
-
-    actions = ForgeActionLayer(root_dir=tmp_path / "projects")
-    mcp = ForgeMCPDispatcher(action_layer=actions)
-    ws = actions.get_workspace("demo").ws_dir
-    game = tmp_path / "game"
-    game.mkdir()
-    game_link.set_link("demo", game, ["claude"], tmp_path / "projects")
-    order_mode.save(ws, {"auto_file": False}, 0)  # this flow files by hand
-
-    async def call(name: str, **arguments: Any) -> dict[str, Any]:
-        return await mcp.call_tool(name, {"project": "demo", **arguments})
-
-    placed = await call("place_order", title="Health potion", kind="item", brief="Red flask", placeholder="res://potion.tscn", needs=["image"])
-    assert placed["status"] == "draft" and placed["needs"] == ["image"]
-    again = await call("place_order", title="Potion again", kind="item", placeholder="res://potion.tscn")
-    assert again["id"] == placed["id"] and "already exists" in again["note"]
-    with pytest.raises(ValueError, match="kind must be one of"):
-        await call("place_order", title="Thing", kind="spaceship")
-
-    filed = await call("file_order", order_id=placed["id"], path="04-items")
-    assert filed["status"] == "filed" and filed["asset"] == "04-items/health-potion.md"
-    assert "order: health_potion" in (ws / filed["asset"]).read_text(encoding="utf-8")
-
-    image = ws / "04-items" / "health-potion" / "candidates" / "p1.png"
-    image.parent.mkdir(parents=True)
-    image.write_bytes(b"png")
-    assert (await call("get_order", order_id="health_potion"))["status"] == "in_progress"
-    asset_studio.update_asset(ws, filed["asset"], {"winner": "04-items/health-potion/candidates/p1.png"})
-    assert (await call("list_orders", status="ready"))["orders"][0]["id"] == "health_potion"
-
-    assert orders.auto_deliver(ws, game, "demo") == ["health_potion"]
-    assert (game / "glob_delivery" / "health_potion" / "health_potion.png").read_bytes() == b"png"
-    deliveries = await call("get_deliveries")
-    entry = deliveries["orders"]["health_potion"]
-    assert entry["placeholder"] == "res://potion.tscn" and len(entry["files"][0]["sha256"]) == 64
-    assert (await call("get_order", order_id="health_potion"))["status"] == "delivered"
-    assert orders.auto_deliver(ws, game, "demo") == []
-
-    assert (await call("update_order", order_id="health_potion", status="integrated"))["status"] == "integrated"
-    image.write_bytes(b"png v2")  # a changed asset is ready (and delivered) again
-    assert (await call("get_order", order_id="health_potion"))["status"] == "ready"
-
-
 def test_connect_writes_agent_files_and_disconnect_removes_only_globs_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from forge.agent import connect
 
@@ -1919,25 +1859,23 @@ def test_connect_writes_agent_files_and_disconnect_removes_only_globs_part(tmp_p
     root, game = tmp_path / "projects", tmp_path / "game"
     game.mkdir()
     (game / "CLAUDE.md").write_text("# My notes\n", encoding="utf-8")
-    (game / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}), encoding="utf-8")
+    # Left behind by an earlier Glob: its MCP entry and skill go, the user's own entries stay.
+    (game / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": {"command": "x"}, "glob": {"command": "old"}}}), encoding="utf-8")
+    (game / ".claude/skills/glob").mkdir(parents=True)
+    (game / ".claude/skills/glob/SKILL.md").write_text("---\nname: glob\n---\n", encoding="utf-8")
 
-    status = connect.connect("demo", str(game), ["claude", "codex"], root=root)
-    assert status["connected"] and status["healthy"] and status["selected"] == ["claude", "codex"]
-    servers = json.loads((game / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
-    assert servers["other"] == {"command": "x"} and servers["glob"]["args"][-2:] == ["--project", "demo"]
-    assert servers["glob"]["env"]["FORGE_PROJECTS_DIR"] == str(root.resolve())
-    assert "# My notes" in (game / "CLAUDE.md").read_text(encoding="utf-8") and "place_order" in (game / "AGENTS.md").read_text(encoding="utf-8")
-    assert "[mcp_servers.glob]" in (game / ".codex" / "config.toml").read_text(encoding="utf-8")
-    assert (game / ".claude/skills/glob/SKILL.md").read_text(encoding="utf-8").startswith("---\nname: glob")
-    assert (game / "glob_delivery" / "README.md").is_file()
-
-    connect.connect("demo", str(game), ["claude"], root=root)
-    assert not (game / ".codex" / "config.toml").exists()
+    status = connect.connect("demo", str(game), root=root)
+    assert status["connected"] and status["healthy"] and status["notes"] == ["AGENTS.md", "CLAUDE.md"]
+    assert json.loads((game / ".mcp.json").read_text(encoding="utf-8")) == {"mcpServers": {"other": {"command": "x"}}}
+    assert not (game / ".claude" / "skills" / "glob").exists()
+    assert "# My notes" in (game / "CLAUDE.md").read_text(encoding="utf-8")
+    agents = (game / "AGENTS.md").read_text(encoding="utf-8")
+    assert "<!-- glob:start -->" in agents and "ASSETS.md" in agents  # this project lives outside the game: the full path
+    assert not (game / "GEMINI.md").exists()  # only written where the game already has the file
 
     connect.disconnect("demo", root=root)
     assert (game / "CLAUDE.md").read_text(encoding="utf-8") == "# My notes\n"
-    assert json.loads((game / ".mcp.json").read_text(encoding="utf-8")) == {"mcpServers": {"other": {"command": "x"}}}
-    assert not (game / "AGENTS.md").exists() and not (game / ".claude").exists()
+    assert not (game / "AGENTS.md").exists()
     assert not connect.status("demo", root=root)["connected"]
 
 
@@ -2066,14 +2004,12 @@ def test_asset_studio_remove_output_trashes_and_restores(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_sound_asset_generates_takes_and_delivers_audio(tmp_path: Path) -> None:
-    from forge import asset_studio, orders
+    from forge import asset_studio
 
     actions = ForgeActionLayer(root_dir=tmp_path / "projects")
     ws = actions.get_workspace("demo").ws_dir
     (ws / "05-sounds").mkdir(parents=True)
     (ws / "05-sounds" / "swing.md").write_text("---\nkind: sfx\nprompt: Heavy sword whoosh\n---\n# Swing\n", encoding="utf-8")
-    order = orders.place(ws, "Swing", "sfx", "whoosh", "res://sfx/swing.wav")
-    orders.file_order(ws, order["id"], "05-sounds/swing.md")
 
     request = asset_studio.build_request(ws, "05-sounds/swing.md", "candidates")
     assert request["audio"] and request["model"].endswith(":sfx") and request["count"] == 2
@@ -2083,17 +2019,13 @@ async def test_sound_asset_generates_takes_and_delivers_audio(tmp_path: Path) ->
     created = await asset_studio.run_action(actions, "demo", {**request, "count": 1})
     assert created[0].startswith("05-sounds/swing/audio/") and created[0].endswith(".mp3")
     assert asset_studio.describe_asset(ws, "05-sounds/swing.md")["winner"] == created[0]
-    game = tmp_path / "game"
-    game.mkdir()
-    assert orders.auto_deliver(ws, game, "demo") == ["swing"]
-    assert (game / "glob_delivery" / "swing" / "swing.mp3").is_file()
 
     take = asset_studio.save_audio(ws, "05-sounds/swing.md", "my take.wav", b"RIFF")
     assert take == "05-sounds/swing/audio/my-take.wav"
 
 
 def test_import_follows_the_approved_plan(tmp_path: Path) -> None:
-    from forge import game_import, orders
+    from forge import game_import
 
     game = tmp_path / "game"
     for rel in ("characters/knight/knight.glb", "characters/rogue/rogue.glb", "enemies/zombie/zombie.glb"):
@@ -2112,13 +2044,12 @@ def test_import_follows_the_approved_plan(tmp_path: Path) -> None:
         "exclude": [units["Rogue"]["id"]],
         "move": {units["Zombie"]["id"]: "characters"},
         "sections": {"characters": {"title": "Heroes & Foes"}},
-        "orders": True,
     }
     ws = tmp_path / "ws"
     result = game_import.import_game(game, ws, plan=plan)
     heroes = ws / result["sections"]["characters"]
     assert heroes.name.endswith("heroes-foes") and (heroes / "zombie.md").is_file() and not (heroes / "rogue.md").exists()
-    assert result["orders"] == 1 and orders.list_orders(ws)[0]["placeholder"].endswith("bone_key.tres")
+    assert "orders" not in result
 
 
 def test_frontmatter_reads_prompts_with_colons():

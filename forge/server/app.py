@@ -61,7 +61,7 @@ from forge.stylepacks.builtins import VARIANT_CHIP_PRESETS, save_custom_style_pa
 from forge.models import StylePack
 from forge.watcher.folder_watcher import WatchFolderService
 from forge.watcher.workspace_watcher import WorkspaceWatcher
-from forge import game_link, order_mode, orders, service_gen, services
+from forge import game_link, service_gen, services
 from forge.agent import connect as connect_agent
 
 
@@ -107,81 +107,20 @@ workspace_agent = WorkspaceAgent(actions, _agent_model_call)
 mcp_dispatcher = ForgeMCPDispatcher(action_layer=actions, workspace_agent=workspace_agent, in_app=True)
 
 
-_order_sync_locks: dict[str, asyncio.Lock] = {}
-
-
-async def sync_orders(project: str) -> list[str]:
-    """Deliver orders that just became ready (when the project's game folder wants automatic delivery)."""
-    link = game_link.get_link(project, actions.root_dir)
-    if not link or not link.get("auto_deliver", True):
-        return []
-    lock = _order_sync_locks.setdefault(project, asyncio.Lock())
-    if lock.locked():
-        return []
-    async with lock:
-        delivered = await asyncio.to_thread(orders.auto_deliver, _ws_dir(project), Path(link["game_folder"]), project)
-    if delivered:
-        await ws_manager.broadcast({"type": "orders_delivered", "project": project, "orders": delivered})
-    return delivered
-
-
-_order_mode_locks: dict[str, asyncio.Lock] = {}
-
-
-def _spent(project: str) -> float:
-    try:
-        return float(actions.get_budget(project=project).get("spent_usd") or 0.0)
-    except Exception:  # noqa: BLE001 — no spend record yet counts as nothing spent
-        return 0.0
-
-
-async def run_order_mode(project: str) -> None:
-    """File new drafts and, in the 2D and full modes, take every order one step further (see forge/order_mode.py)."""
-    lock = _order_mode_locks.setdefault(project, asyncio.Lock())
-    if lock.locked():
-        return
-    ws = _ws_dir(project)
-    async with lock:
-        settings = order_mode.load(ws)
-        if settings["auto_file"]:
-            filed = await asyncio.to_thread(order_mode.file_drafts, ws)
-            if filed:
-                await ws_manager.broadcast({"type": "orders_filed", "project": project, "orders": filed, "mode": settings["mode"]})
-        if settings["mode"] == "manual":
-            return
-        for order in await asyncio.to_thread(orders.list_orders, ws):
-            for _ in range(3):  # picking a winner unlocks the next step at once
-                if order_mode.status(ws, _spent(project))["paused"]:
-                    await ws_manager.broadcast({"type": "order_mode_paused", "project": project})
-                    return
-                step = order_mode.next_step(ws, order, settings["mode"])
-                if step is None:
-                    break
-                kind, data = step
-                if kind == "winner":
-                    await asyncio.to_thread(order_mode.pick_winner, ws, order, data["path"])
-                    order = await asyncio.to_thread(orders.get, ws, order["id"])
-                    continue
-                try:
-                    request = asset_studio.build_request(ws, order["asset"], data["step"])
-                except (FileNotFoundError, ValueError):
-                    break
-                order_mode.mark_step(ws, order["id"], data["step"])
-                queue_studio_job(project, request)
-                break
-        _save_jobs(project)
-
-
 async def workspace_changed(project: str) -> None:
     await ws_manager.broadcast({"type": "workspace_changed", "project": project})
     try:
-        await sync_orders(project)
-    except Exception:  # noqa: BLE001 — delivery problems must never break the edit that triggered them
+        await asyncio.to_thread(write_asset_index, project)
+    except Exception:  # noqa: BLE001 — the index must never break the edit that triggered it
         pass
-    try:
-        await run_order_mode(project)
-    except Exception:  # noqa: BLE001 — same for automatic generation
-        pass
+
+
+def write_asset_index(project: str) -> None:
+    """Keep glob/ASSETS.md, the list the game's coding agent copies finished art from, up to date."""
+    from forge import asset_index
+
+    store = actions.get_store(project)
+    asset_index.write(_ws_dir(project), store.get_bible().display_name or project)
 
 
 workspace_watcher = WorkspaceWatcher(lambda project: actions.get_workspace(project).ws_dir, workspace_changed)
@@ -1286,15 +1225,6 @@ async def api_connect(payload: dict[str, Any], project: str = "default") -> dict
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.patch("/api/connect")
-async def api_connect_update(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
-    try:
-        game_link.update_link(project, {"auto_deliver": bool(payload.get("auto_deliver", True))})
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return connect_agent.status(project)
-
-
 @app.delete("/api/connect")
 async def api_disconnect(project: str = "default") -> dict[str, Any]:
     return await asyncio.to_thread(connect_agent.disconnect, project)
@@ -1419,7 +1349,7 @@ async def api_import_start(payload: dict[str, Any]) -> dict[str, Any]:
     async def run() -> None:
         try:
             result = await asyncio.to_thread(game_import.import_game, folder, ws_dir, title=title, progress=job["log"].append, plan=plan)
-            job["result"] = {key: result[key] for key in ("summary", "copied", "bytes", "sections", "orders")} | {"assets": len(result["assets"])}
+            job["result"] = {key: result[key] for key in ("summary", "copied", "bytes", "sections")} | {"assets": len(result["assets"])}
             job["status"] = "done"
         except Exception as exc:  # noqa: BLE001 — shown in the import screen
             job["status"], job["error"] = "failed", str(exc)
@@ -1845,7 +1775,6 @@ def _ws_dir(project: str) -> Path:
 async def api_overview(project: str = "default") -> dict[str, Any]:
     workspace_watcher.touch(project)
     overview = project_overview.build_overview(_ws_dir(project), project)
-    overview["orders"] = orders.summary(await asyncio.to_thread(orders.list_orders, _ws_dir(project)))
     folder = game_link.game_folder(project, actions.root_dir)
     if overview.get("empty") and folder and folder.is_dir():
         # An empty project made for a game: the overview offers to build its workspace from the game itself.
@@ -1854,78 +1783,6 @@ async def api_overview(project: str = "default") -> dict[str, Any]:
         _, engine, title = _engine(folder)
         overview["game"] = {"folder": str(folder), "title": title, "engine": engine}
     return overview
-
-
-# --- Agent orders ---
-
-def _order_call(fn: Any, *args: Any, **kwargs: Any) -> Any:
-    try:
-        return fn(*args, **kwargs)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc).strip("'\"")) from exc
-    except (ValueError, OSError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.get("/api/orders")
-async def api_orders(project: str = "default") -> dict[str, Any]:
-    listed = await asyncio.to_thread(orders.list_orders, _ws_dir(project))
-    return {"orders": listed, "counts": orders.summary(listed), "kinds": list(orders.KINDS), "needs": list(orders.NEEDS),
-            "mode": order_mode.status(_ws_dir(project), _spent(project))}
-
-
-@app.get("/api/orders/mode")
-async def api_order_mode(project: str = "default") -> dict[str, Any]:
-    return order_mode.status(_ws_dir(project), _spent(project))
-
-
-@app.put("/api/orders/mode")
-async def api_set_order_mode(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
-    _order_call(order_mode.save, _ws_dir(project), payload, _spent(project))
-    asyncio.create_task(run_order_mode(project))
-    return order_mode.status(_ws_dir(project), _spent(project))
-
-
-@app.post("/api/orders")
-async def api_place_order(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
-    order = _order_call(
-        orders.place, _ws_dir(project), str(payload.get("title") or ""), str(payload.get("kind") or ""),
-        str(payload.get("brief") or ""), str(payload.get("placeholder") or ""), needs=payload.get("needs"),
-        context=str(payload.get("context") or ""), requested_by="you",
-    )
-    await workspace_changed(project)
-    return order
-
-
-@app.patch("/api/orders/{order_id}")
-async def api_update_order(order_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
-    order = _order_call(orders.update, _ws_dir(project), order_id, payload)
-    await workspace_changed(project)
-    return order
-
-
-@app.post("/api/orders/{order_id}/file")
-async def api_file_order(order_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
-    order = _order_call(orders.file_order, _ws_dir(project), order_id, str(payload.get("path") or ""))
-    await workspace_changed(project)
-    return order
-
-
-@app.post("/api/orders/{order_id}/deliver")
-async def api_deliver_order(order_id: str, project: str = "default") -> dict[str, Any]:
-    game = game_link.game_folder(project, actions.root_dir)
-    if game is None:
-        raise HTTPException(status_code=400, detail="Connect your game folder first (Settings → Coding agent).")
-    order = _order_call(orders.deliver, _ws_dir(project), game, order_id, project)
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
-    return order
-
-
-@app.delete("/api/orders/{order_id}")
-async def api_delete_order(order_id: str, project: str = "default") -> dict[str, Any]:
-    await asyncio.to_thread(orders.remove, _ws_dir(project), order_id)
-    await ws_manager.broadcast({"type": "workspace_changed", "project": project})
-    return {"deleted": order_id}
 
 
 @app.get("/api/overview/folder")

@@ -20,7 +20,7 @@ from typing import Any, Awaitable, Callable
 from forge.models import new_id
 import httpx
 
-from forge import access, asset_studio, game_import, meshy_login, orders, service_gen, services
+from forge import access, asset_studio, game_import, meshy_login, service_gen, services
 from forge.blueprint_contract import split_frontmatter
 from forge.config import load_config
 from forge.overview import FRONT_PAGES, HIDDEN_NAMES, move_to_trash
@@ -123,9 +123,6 @@ Tools (paths relative to the workspace):
 - {"tool": "models", "kind": "image"}                       every image (or "3d") model and how it is reached
 - {"tool": "skill", "name": "generating"}                   opens a how-to guide listed under "Skills" in the context
 - {"tool": "pick_winner", "path": "02-characters/knight.md", "file": "02-characters/knight/candidates/knight-1.png"}
-- {"tool": "list_orders", "status": "draft"}               the coding agent's orders (status optional)
-- {"tool": "file_order", "order_id": "orc_warrior", "path": "02-characters/blue-faction/orc-warrior.md"}
-      sorts an order into the workspace as an asset .md; then rewrite its prompt
 
 Folders elsewhere on the user's computer (their game project, an art folder): you can reach only folders the
 user granted, listed under "Granted folders" in the context. Use ABSOLUTE paths for those with list, read and
@@ -480,13 +477,6 @@ class WorkspaceAgent:
         if tool == "skill":
             name = str(call.get("name") or "")
             return {"tool": tool, "path": name, "summary": f"Read the {name} skill", "result": read_skill(name)}
-        if tool == "list_orders":
-            listed = orders.list_orders(ws, str(call.get("status") or "") or None)
-            lines = [f"- {o['id']} [{o['status']}] {o['kind']}: {o['title']}" + (f" (asset {o['asset']})" if o.get("asset") else "") + (f" for {o['placeholder']}" if o.get("placeholder") else "") + (f"\n  brief: {o['brief'][:300]}" if o.get("brief") else "") for o in listed]
-            return {"tool": tool, "path": "", "result": "\n".join(lines) or "(no orders)", "summary": f"Listed {len(listed)} orders"}
-        if tool == "file_order":
-            filed = orders.file_order(ws, str(call.get("order_id") or ""), str(call.get("path") or ""))
-            return {"tool": tool, "path": filed["asset"], "summary": f"Filed order {filed['id']} → {filed['asset']}", "changed": True}
         if tool in ("service_tools", "service_tool_info", "service_call"):
             service = str(call.get("service") or "")
             if tool == "service_tools":
@@ -715,7 +705,7 @@ class WorkspaceAgent:
                 result_text = outcome.pop("result", None)
                 performed.append(outcome)
                 tool_log.append(f"{json.dumps(call)[:300]}\n→ {result_text if result_text is not None else outcome['summary']}"[: MAX_FILE_CHARS + 400])
-                if call.get("tool") in ("list", "read", "import_game", "list_orders", "service_tools", "service_tool_info", "service_call", "models", "skill") and outcome.get("ok"):
+                if call.get("tool") in ("list", "read", "import_game", "service_tools", "service_tool_info", "service_call", "models", "skill") and outcome.get("ok"):
                     needs_results = True
                 if outcome.get("access_request"):
                     waiting = True

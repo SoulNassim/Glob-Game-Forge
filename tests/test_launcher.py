@@ -1,4 +1,4 @@
-"""Starting Glob for a coding agent: open_glob, and the automatic start on the first order."""
+"""Starting Glob for a coding agent: open_glob, and the automatic start on the first generate or pick_winner."""
 
 from __future__ import annotations
 
@@ -85,11 +85,11 @@ def test_an_order_starts_glob_when_it_is_not_running(projects: Path, monkeypatch
     bridge = mcp_server.AppBridge()
 
     async def run() -> None:
-        await bridge.handle(_call("list_orders", project="demo"))  # reading doesn't start anything
-        await bridge.handle(_call("place_order", project="demo", title="Potion", kind="item"))
-        await bridge.handle(_call("place_order", project="demo", title="Shield", kind="item"))  # already up
+        await bridge.handle(_call("workspace_read", project="demo", path="02-characters/potion.md"))  # reading doesn't start anything
+        await bridge.handle(_call("generate", project="demo", path="02-characters/potion.md", action="candidates"))
+        await bridge.handle(_call("generate", project="demo", path="02-characters/shield.md", action="candidates"))  # already up
         running["up"] = False  # the user pressed Stop Glob
-        await bridge.handle(_call("place_order", project="demo", title="Helmet", kind="item"))
+        await bridge.handle(_call("generate", project="demo", path="02-characters/helmet.md", action="candidates"))
 
     asyncio.run(run())
     assert started == ["demo", "demo"]
@@ -109,8 +109,8 @@ def test_a_start_that_fails_is_not_retried_on_every_call(projects: Path, monkeyp
     bridge = mcp_server.AppBridge()
 
     async def run() -> None:
-        for title in ("Potion", "Shield"):
-            await bridge.handle(_call("place_order", project="demo", title=title, kind="item"))
+        for name in ("potion", "shield"):
+            await bridge.handle(_call("generate", project="demo", path=f"02-characters/{name}.md", action="candidates"))
 
     asyncio.run(run())
     assert tries == ["demo"]
@@ -121,4 +121,4 @@ def test_autostart_can_be_switched_off(projects: Path, monkeypatch: pytest.Monke
 
     monkeypatch.setenv("FORGE_NO_AUTOSTART", "1")
     monkeypatch.setattr(launcher, "open_glob", lambda *a, **kw: pytest.fail("autostart is off"))
-    asyncio.run(mcp_server.AppBridge().handle(_call("place_order", project="demo", title="Potion", kind="item")))
+    asyncio.run(mcp_server.AppBridge().handle(_call("generate", project="demo", path="02-characters/potion.md", action="candidates")))

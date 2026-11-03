@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,12 +26,28 @@ def game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_connect_game_makes_the_project_once(game: Path) -> None:
     first = connect_agent.connect_game(str(game), ["claude"])
     assert first["created"] and first["connected"] and first["project"]
-    assert (game / "glob").is_dir() and (game / "glob_delivery" / "README.md").is_file()
-    entry = json.loads((game / ".mcp.json").read_text())["mcpServers"]["glob"]
-    assert entry["args"][-2:] == ["--project", first["project"]]
+    assert (game / "glob").is_dir() and (game / "glob" / "ASSETS.md").is_file()
+    assert "<!-- glob:start -->" in (game / "AGENTS.md").read_text()
+    assert not (game / ".mcp.json").exists() and not (game / "glob_delivery").exists()
 
     again = connect_agent.connect_game(str(game), ["claude"])
     assert not again["created"] and again["project"] == first["project"]
+
+
+def test_asset_index_lists_each_pick_for_the_coding_agent(tmp_path: Path) -> None:
+    from forge import asset_index
+    from forge.blueprint_contract import serialize_frontmatter
+
+    game = tmp_path / "game"
+    ws = game / "glob" / "workspace"
+    (ws / "02-characters" / "knight" / "candidates").mkdir(parents=True)
+    (ws / "02-characters" / "knight" / "candidates" / "knight-1.png").write_bytes(b"png")
+    page = serialize_frontmatter({"kind": "character", "winner": "02-characters/knight/candidates/knight-1.png"}, "# Knight")
+    (ws / "02-characters" / "knight.md").write_text(page, encoding="utf-8")
+
+    asset_index.write(ws, "Demo")
+    text = (game / "glob" / "ASSETS.md").read_text(encoding="utf-8")
+    assert "Knight" in text and "glob/workspace/02-characters/knight/candidates/knight-1.png" in text
 
 
 def test_connect_game_needs_a_folder(game: Path) -> None:
@@ -51,7 +66,8 @@ def _run_cli(monkeypatch: pytest.MonkeyPatch, *argv: str) -> list[dict[str, Any]
 def test_cli_connect_then_open(game: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     opened = _run_cli(monkeypatch, "connect", "--game", str(game), "--agents", "codex")
     project = opened[0]["project"]
-    assert project and "[mcp_servers.glob]" in (game / ".codex" / "config.toml").read_text()
+    assert project and "<!-- glob:start -->" in (game / "AGENTS.md").read_text()
+    assert not (game / ".codex" / "config.toml").exists()
     assert "Glob is open" in capsys.readouterr().out
     assert _run_cli(monkeypatch, "open", "--game", str(game)) == [{"project": project}]
 
