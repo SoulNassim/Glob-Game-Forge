@@ -11,7 +11,7 @@
 
 `import_game()` writes those units into the workspace using Glob's conventions: sections are numbered
 top-level folders, every asset is a `.md` with `kind:` in its header and its files sit next to it in
-`<asset>/{3d,animations,textures,variants,candidates}/`. Files are copied; the game folder is never
+`<asset>/{3d,animations,textures,variants,candidates}/`. Files are hard-linked (copied across drives); the game folder is never
 changed. Importing into a workspace that already has sections merges into them, and into asset
 documents of the same name (so a character the agent sketched earlier gets the real model).
 """
@@ -513,7 +513,8 @@ class _Writer:
     def __init__(self, ws: Path, root: Path, engine: str, progress: Callable[[str], None]) -> None:
         self.ws, self.root, self.engine, self.progress = ws, root, engine, progress
         self.copied: list[dict[str, str]] = []
-        self.bytes = 0
+        self.bytes = 0  # what real copies took; hard links take no extra space
+        self.linked = 0
 
     def rel(self, path: Path) -> str:
         return path.resolve().relative_to(self.ws.resolve()).as_posix()
@@ -525,8 +526,14 @@ class _Writer:
         if dest.exists() and dest.stat().st_size == source.stat().st_size:
             return dest
         dest = _unique(dest)
-        shutil.copy2(source, dest)
-        self.bytes += dest.stat().st_size
+        # A hard link when the workspace is on the same drive (it usually lives in <game>/glob/): the file shows up
+        # in Glob without taking space twice. Elsewhere (another drive, a file system without links) a real copy.
+        try:
+            os.link(source, dest)
+            self.linked += 1
+        except OSError:
+            shutil.copy2(source, dest)
+            self.bytes += dest.stat().st_size
         self.copied.append({"from": str(source), "to": self.rel(dest)})
         return dest
 
@@ -814,8 +821,9 @@ def import_game(
         pass
     record = {"folder": str(root), "engine": engine, "at": time.time(), "files": len(writer.copied), "bytes": writer.bytes, "copied": writer.copied}
     manifest.write_text(json.dumps({"imports": [*previous[-4:], record]}, indent=1), encoding="utf-8")
-    say(f"Copied {len(writer.copied)} files ({writer.bytes / 1_048_576:.0f} MB).")
-    return {"summary": summary, "assets": assets_written, "copied": len(writer.copied), "bytes": writer.bytes,
+    copies = len(writer.copied) - writer.linked
+    say(f"Added {len(writer.copied)} files: {writer.linked} linked (no extra space)" + (f", {copies} copied ({writer.bytes / 1_048_576:.0f} MB)." if copies else "."))
+    return {"summary": summary, "assets": assets_written, "copied": len(writer.copied), "linked": writer.linked, "bytes": writer.bytes,
             "sections": {key: writer.rel(path) for key, path in sections.items()}}
 
 

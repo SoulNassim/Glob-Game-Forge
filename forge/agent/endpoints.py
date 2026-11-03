@@ -11,7 +11,6 @@ import re
 import uuid
 from typing import Any
 
-import anthropic
 import httpx
 
 from forge.config import get_config_dir, write_secret_file
@@ -157,6 +156,8 @@ async def call(model_id: str, prompt: str, system_prompt: str, images: list[tupl
     endpoint, model = find(model_id)
     key = str(endpoint.get("api_key") or "")
     if endpoint["kind"] == "anthropic":
+        import anthropic  # ~3 s to import: only when a Claude endpoint is actually called
+
         client = anthropic.AsyncAnthropic(api_key=key, base_url=endpoint["base_url"])
         content: list[dict[str, Any]] = [{"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}} for mime, data in images[:4]]
         content.append({"type": "text", "text": prompt})

@@ -3407,7 +3407,7 @@ function renderImport() {
       <div class="imp-top"><div><p class="ob-kicker">${esc(p.engine_label)} project</p><h2>${esc(p.title)}</h2><code>${esc(p.folder)}</code></div>
         <button class="ob-back" data-imp-back>Choose another folder</button></div>
       <div class="imp-tiles">${tiles.map(([label, n]) => `<div><strong>${n}</strong><span>${label}</span></div>`).join("")}</div>
-      <p class="imp-review">Review before anything is copied: untick sections or click assets to leave them out, rename sections, or merge one into another.</p>
+      <p class="imp-review">Review before anything is added: untick sections or click assets to leave them out, rename sections, or merge one into another.</p>
       <div class="imp-sections">${p.sections.map((s) => {
         const sp = imp.plan.sections[s.key] || {};
         const off = sp.include === false;
@@ -3426,7 +3426,7 @@ function renderImport() {
           <input id="impName" class="imp-name" value="${esc(imp.name || p.title)}" maxlength="60"></label>
         ${state.project ? `<label class="imp-radio"><input type="radio" name="impTarget" value="current" ${imp.target === "current" ? "checked" : ""}><span>Into <b>${esc(current)}</b> (merges with its sections and assets)</span></label>` : ""}
         <label class="imp-check"><input type="checkbox" id="impDescribe" ${imp.describe ? "checked" : ""}><span>Let Glob look at the art and write a prompt for each asset (uses your chat model)</span></label>
-        <p class="imp-note">Copies ${c.files} files (${fmtBytes(c.bytes)}) into the project. ${p.skipped.archives ? `${p.skipped.archives} archives (.zip) are skipped. ` : ""}Glob's agent may read this folder afterwards; change that in Settings → Storage & access.</p>
+        <p class="imp-note">Adds ${c.files} files (${fmtBytes(c.bytes)}) to the project. On the same drive they're linked, not copied, so they take no extra space. ${p.skipped.archives ? `${p.skipped.archives} archives (.zip) are skipped. ` : ""}Glob's agent may read this folder afterwards; change that in Settings → Storage & access.</p>
       </div>
       <div class="ob-nav"><button class="ob-back" data-imp-close>Cancel</button><button class="ob-next forge" data-imp-run>✦ Import ${esc(p.title)}</button></div>
     </div>`;
@@ -3509,7 +3509,7 @@ async function runImport() {
     }
     if (job.status !== "done") throw new Error(job.error || "The import stopped.");
     const r = job.result;
-    log(`${r.assets} assets in ${Object.keys(r.sections).length} sections · ${r.copied} files copied`, "ok");
+    log(`${r.assets} assets in ${Object.keys(r.sections).length} sections · ${r.copied} files${r.linked ? ` (${r.linked} linked, no extra space)` : ""}`, "ok");
     imp.result = { project };
     await loadGrants();
     state.project = project;

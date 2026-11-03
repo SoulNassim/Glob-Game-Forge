@@ -94,9 +94,19 @@ def ensure_running(project: str = "", timeout: float = START_TIMEOUT) -> bool:
     raise RuntimeError(f"Glob did not start at {base}. Run `glob` yourself; the log is in {get_config_dir() / 'logs' / 'glob-server.log'}.")
 
 
+LOADING_PAGE = Path(__file__).resolve().parent / "ui" / "loading.html"
+
+
 def open_glob(project: str, *, browser: bool = True, start: bool = True) -> dict[str, Any]:
-    """Make sure the studio runs and show it on `project`."""
-    started = ensure_running(project) if start else False
+    """Make sure the studio runs and show it on `project`.
+
+    When Glob has to start first, its window opens at once on a small "Starting Glob" page that switches to the
+    studio as soon as it answers, instead of the user staring at nothing for a few seconds."""
     url = project_url(project)
-    opened = open_window(url) if browser else False
+    opened = False
+    if start and browser and LOADING_PAGE.is_file() and not _health(app_url()):
+        opened = open_window(f"{LOADING_PAGE.as_uri()}#{urllib.parse.quote(url, safe='')}")
+    started = ensure_running(project) if start else False
+    if browser and not opened:
+        opened = open_window(url)
     return {"url": url, "started": started, "opened": opened, "project": project}

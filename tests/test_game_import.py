@@ -216,3 +216,13 @@ def test_pitch_comes_from_a_vision_heading_before_any_other_paragraph(tmp_path: 
     doc.write_text("# Game\n\nShort.\n\n## Overview\n\n- a list\n\nA long enough paragraph that says what this game is about, in its own words.\n", encoding="utf-8")
     assert game_import.game_pitch([doc], tmp_path).startswith("A long enough paragraph")
     assert game_import.game_pitch([], tmp_path) == ""
+
+
+def test_import_links_files_instead_of_copying_them(tmp_path: Path) -> None:
+    game = _godot_game(tmp_path)
+    ws = game / "glob" / "workspace"  # where a game's project lives: same drive, so links work
+    ws.mkdir(parents=True)
+    result = game_import.import_game(game, ws, title="Ashfall")
+    assert result["linked"] == result["copied"] > 0 and result["bytes"] == 0
+    linked = next(ws.rglob("Mira.glb"))
+    assert linked.stat().st_nlink >= 2 and linked.read_bytes() == b"model"

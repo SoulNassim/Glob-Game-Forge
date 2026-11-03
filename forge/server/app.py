@@ -1349,7 +1349,7 @@ async def api_import_start(payload: dict[str, Any]) -> dict[str, Any]:
     async def run() -> None:
         try:
             result = await asyncio.to_thread(game_import.import_game, folder, ws_dir, title=title, progress=job["log"].append, plan=plan)
-            job["result"] = {key: result[key] for key in ("summary", "copied", "bytes", "sections")} | {"assets": len(result["assets"])}
+            job["result"] = {key: result[key] for key in ("summary", "copied", "linked", "bytes", "sections")} | {"assets": len(result["assets"])}
             job["status"] = "done"
         except Exception as exc:  # noqa: BLE001 — shown in the import screen
             job["status"], job["error"] = "failed", str(exc)

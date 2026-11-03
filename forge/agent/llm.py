@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import anthropic
 import httpx
 
 from forge.agent import cli_models, endpoints
@@ -83,6 +82,8 @@ async def _call_anthropic(model: str, prompt: str, system_prompt: str, images: l
         {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}} for mime, data in images[:4]
     ]
     content.append({"type": "text", "text": prompt})
+    import anthropic  # ~3 s to import: only when Claude is actually called with an API key
+
     client = anthropic.AsyncAnthropic(api_key=key)
     try:
         async with client.beta.messages.stream(

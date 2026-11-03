@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glob</title>
+<link rel="icon" href="glob-icon.png">
+<style>
+  /* Shown the moment the Glob shortcut is clicked, while the studio starts behind it (forge/launcher.py). */
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #09090b; color: #a1a1aa; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         display: grid; place-items: center; }
+  main { display: grid; justify-items: center; gap: 18px; }
+  img { width: 112px; height: auto; animation: bob 1.6s ease-in-out infinite; }
+  p { margin: 0; letter-spacing: .02em; }
+  p.err { color: #fca5a5; max-width: 420px; text-align: center; }
+  .dots::after { content: ""; animation: dots 1.2s steps(4) infinite; }
+  @keyframes bob { 50% { transform: translateY(-8px) scale(1.04); } }
+  @keyframes dots { 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+  @media (prefers-reduced-motion: reduce) { img, .dots::after { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <img src="glob-face.svg" alt="">
+  <p id="say" class="dots">Starting Glob</p>
+</main>
+<script>
+  // The studio's address comes in the hash: loading.html#http://127.0.0.1:8420/?project=Tarky
+  const target = decodeURIComponent(location.hash.slice(1)) || "http://127.0.0.1:8420/";
+  const health = new URL("/api/health", target).href;
+  const started = Date.now();
+  async function poll() {
+    try {
+      await fetch(health, { mode: "no-cors", cache: "no-store" }); // any answer means the server is up
+      location.replace(target);
+      return;
+    } catch { /* not up yet */ }
+    if (Date.now() - started > 45000) {
+      const say = document.getElementById("say");
+      say.className = "err";
+      say.textContent = "Glob didn't start. Close this window and click the Glob shortcut again. If it keeps happening, the log is in .forge/logs/glob-server.log in your home folder.";
+      return;
+    }
+    setTimeout(poll, 250);
+  }
+  poll();
+</script>
+</body>
+</html>
