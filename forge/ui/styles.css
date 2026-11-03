@@ -325,6 +325,9 @@ dialog:has(.dlg.wide) { width: min(860px, calc(100vw - 32px)); }
 .ref img { width: 104px; height: 104px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line-strong); }
 .ref input { position: absolute; top: 6px; left: 6px; width: 16px; height: 16px; accent-color: #f4f4f5; }
 .ref.off img { opacity: .3; }
+.ref.pick { background: none; border: 0; padding: 0; text-align: left; font: inherit; font-size: 11px; }
+.ref.pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref.pick:hover img { border-color: var(--sakura); }
 .ref.add { height: 104px; justify-content: center; align-items: center; border: 1px dashed var(--line-strong); border-radius: 8px; background: none; }
 .dlg .row { align-items: center; }
 .dlg .grow { flex: 1; }
@@ -1608,6 +1611,10 @@ button.imp-unit { font: inherit; color: inherit; text-align: left; cursor: point
 @keyframes wave-bob { to { transform: scaleY(.45); } }
 .tile-3d { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 6px; font: 600 10.5px var(--mono); color: #38bdf8; background: rgba(9, 9, 11, .86); border: 1px solid rgba(56, 189, 248, .35); }
 .tile-3d svg { width: 12px; height: 12px; }
+.tile-pillar { position: absolute; bottom: 8px; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--text); background: rgba(9, 9, 11, .86); border: 1px solid var(--line-strong); opacity: 0; transition: opacity .12s, border-color .12s; cursor: pointer; }
+.tile-pillar svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.asset-tile:hover .tile-pillar, .tile-pillar:focus-visible { opacity: 1; }
+.tile-pillar:hover { border-color: var(--sakura); color: var(--sakura); }
 .hover-stage { position: absolute; inset: 0; opacity: 0; transition: opacity .25s; background: radial-gradient(circle at 50% 35%, #1f1f25, #0b0b0e); }
 .hover-stage.live { opacity: 1; }
 .hover-stage canvas { width: 100% !important; height: 100% !important; }

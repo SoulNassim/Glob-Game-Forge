@@ -1514,7 +1514,7 @@ function folderCards(folders, numbered) {
 function assetTiles(assets, folderPath) {
   return `<div class="asset-grid">${assets.map((f) => `
     <button class="asset-tile" data-open="${esc(f.path)}"${f.audio ? ` data-hover-audio="${esc(f.audio)}"` : ""}${f.model ? ` data-hover-model="${esc(f.model)}"` : ""}>
-      <span class="asset-img">${f.thumb ? `<img src="${esc(fileUrl(f.thumb))}" alt="" loading="lazy">` : f.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : kindArt(f.asset_kind)}<span class="kind-tag">${esc(f.asset_kind)}</span>${f.model ? `<span class="tile-3d">${icon("cube")}3D</span>` : ""}</span>
+      <span class="asset-img">${f.thumb ? `<img src="${esc(fileUrl(f.thumb))}" alt="" loading="lazy">` : f.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : kindArt(f.asset_kind)}<span class="kind-tag">${esc(f.asset_kind)}</span>${f.model ? `<span class="tile-3d">${icon("cube")}3D</span>` : ""}${f.thumb ? `<span class="tile-pillar" role="button" tabindex="0" data-make-pillar="${esc(f.thumb)}" title="Make this image a pillar: a style reference for a whole folder">${icon("layers")}</span>` : ""}</span>
       <strong>${esc(f.title)}</strong>
     </button>`).join("")}
     ${folderPath !== undefined ? `<button class="asset-tile add" data-new-asset="${esc(folderPath)}"><span class="asset-img"><span class="plus">+</span></span><strong>New asset</strong></button>` : ""}</div>`;
@@ -2411,9 +2411,12 @@ function renderPreview() {
             <div class="recipe">${p.parts.map((part) => `<div class="recipe-part role-${esc(part.role || "subject")}"><span>${esc(PART_ROLE[part.role] || part.source)}<em>${esc(part.source.replace(/^[^·]*·\s*/, ""))}</em></span><p>${esc(part.text || "—")}</p></div>`).join("")}</div></details>
         </section>`}
         <section>
-          <div class="field-label">Images · ${on}${is3d ? (p.references.length > 1 ? " · several views make a better model" : "") : " of 8"}</div>
+          ${p.picking && !is3d ? `<div class="field-label">Pick from this project</div>
+          <div class="refs">${(p.pool || []).map((e) => `<button type="button" class="ref pick" data-pick-ref="${esc(e.path)}" title="${esc(e.title)}">
+              <img src="${esc(fileUrl(e.path))}" alt="" loading="lazy"><span>${esc(e.title)}</span></button>`).join("") || `<p class="pillar-empty">No finished images in this project yet.</p>`}</div>
+          <div class="row"><button type="button" class="ghost" data-upload-ref>Upload from computer</button><button type="button" class="ghost" data-close-picker>Cancel</button></div>` : `<div class="field-label">Images · ${on}${is3d ? (p.references.length > 1 ? " · several views make a better model" : "") : " of 8"}</div>
           <div class="refs">${refs || `<p class="pillar-empty">No reference images. Add pillars to keep the style consistent.</p>`}
-            ${is3d ? "" : `<button type="button" class="ref add" data-add-ref>+ Add</button>`}</div>
+            ${is3d ? "" : `<button type="button" class="ref add" data-add-ref>+ Add</button>`}</div>`}
         </section>
       </div>
       <footer class="sheet-foot">
@@ -3285,7 +3288,7 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
@@ -3396,8 +3399,32 @@ document.addEventListener("click", async (event) => {
   if (t.dataset.addRef !== undefined) {
     syncPreviewFields();
     const p = state.preview;
+    try {
+      const vault = await api("/api/vault");
+      const seen = new Set();
+      p.pool = vault.groups.flatMap((g) => g.assets)
+        .filter((e) => e.winner && !AUDIO_KINDS.includes(e.kind) && /\.(png|jpe?g|webp|gif)$/i.test(e.winner) && !seen.has(e.winner) && seen.add(e.winner))
+        .map((e) => ({ path: e.winner, title: e.title || e.name }));
+    } catch (err) { p.pool = []; }
+    p.picking = true;
+    return renderPreview();
+  }
+  if (t.dataset.closePicker !== undefined) { syncPreviewFields(); state.preview.picking = false; return renderPreview(); }
+  if (t.dataset.pickRef) {
+    syncPreviewFields();
+    const p = state.preview;
+    const existing = p.references.find((r) => r.path === t.dataset.pickRef);
+    if (existing) existing.on = true;
+    else p.references.push({ path: t.dataset.pickRef, source: "Project image", role: "extra", on: true });
+    p.picking = false;
+    return renderPreview();
+  }
+  if (t.dataset.uploadRef !== undefined) {
+    syncPreviewFields();
+    const p = state.preview;
     return uploadTo(`${p.asset.replace(/\.md$/i, "")}/refs`, (saved) => {
       p.references.push(...saved.map((path) => ({ path, source: "Added", role: "extra", on: true })));
+      p.picking = false;
       renderPreview();
     });
   }
