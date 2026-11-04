@@ -1115,7 +1115,7 @@ function chatBody(info, cfg) {
     <p class="st-lede">Glob's chat plans your game's art with you and makes it. It runs on an AI you already have: log in to a coding agent once, no API key needed.</p>
     <div class="chat-now ${current ? "ok" : "no"}">${current ? `<span class="dot live"></span><span>The chat uses <b>${esc(current.label)}</b></span>` : `<span class="dot"></span><span>The chat has no AI yet. Log in to one below.</span>`}</div>
     <div class="st-label">Your coding agents</div>
-    <div class="preset-grid">${(info.clis || []).map((c) => `<button class="preset cli-${cliStatus(c)}" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i><img class="preset-logo" src="${AGENT_LOGO[c.id]}" alt=""></i><strong>${esc(c.label)}</strong><small>${CLI_STATUS_TEXT[cliStatus(c)]}</small></button>`).join("")}</div>
+    <div class="preset-grid">${(info.clis || []).map((c) => `<button class="preset cli-${cliStatus(c)}" data-cli-login="${esc(c.id)}" title="${esc(c.installed ? c.login : c.install)}"><i><img class="preset-logo" src="${AGENT_LOGO[c.id]}" alt=""></i><strong>${esc(c.label)}</strong><small>${CLI_STATUS_TEXT[cliStatus(c)]}</small>${c.installed && cliStatus(c) !== "waiting" ? `<span class="cli-logout" role="button" tabindex="0" data-cli-logout="${esc(c.id)}" title="Sign ${esc(c.label)} out, then log in again">Log out</span>` : ""}</button>`).join("")}</div>
     ${ready.length ? `<div class="st-label">Ready to use · ${ready.length}</div>
     ${Object.entries(groups).map(([name, items]) => `<div class="conn-group"><div class="conn-head"><strong>${esc(name)}</strong>${items[0].endpoint ? `<button class="link-btn danger-text" data-remove-endpoint="${esc(items[0].endpoint)}">Remove</button>` : ""}</div>
       ${items.map((m) => `<div class="conn-row"><span class="dot live"></span><span>${esc(m.label)}</span><span class="grow"></span>${m.id === state.model ? `<em class="in-use">In use</em>` : `<button class="mini" data-pick-model="${esc(m.id)}" data-settings-refresh>Use</button>`}<span class="test-result" id="test-${esc(m.id).replace(/[^a-z0-9]/gi, "_")}"></span><button class="mini ghost" data-test-model="${esc(m.id)}">Test</button></div>`).join("")}</div>`).join("")}` : ""}
@@ -3288,7 +3288,7 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-logout],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
@@ -3336,6 +3336,15 @@ document.addEventListener("click", async (event) => {
   if (t.dataset.testModel) return testModel(t.dataset.testModel);
   if (t.dataset.removeEndpoint) {
     try { await api(`/api/agent/endpoints/${t.dataset.removeEndpoint}`, { method: "DELETE" }); toast("Removed"); } catch (err) { toast(err.message, true); }
+    return renderSettings();
+  }
+  if (t.dataset.cliLogout) {
+    const id = t.dataset.cliLogout;
+    const cli = state.modelInfo?.clis?.find((c) => c.id === id);
+    delete (state.cliWait || {})[id];
+    try { await api(`/api/agent/cli/${id}/logout`, { method: "POST" }); } catch (err) { return toast(err.message, true); }
+    toast(`Logged out of ${cli?.label || "the coding agent"}. Click its card to log in again.`);
+    await loadModels();
     return renderSettings();
   }
   if (t.dataset.cliLogin) {

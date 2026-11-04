@@ -692,6 +692,9 @@ button.glob-brand:hover .glob-mark { transform: translateY(-2px) rotate(-3deg); 
 .preset { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); text-align: left; transition: all .15s; }
 .preset i { font-style: normal; font-size: 20px; color: var(--sakura); margin-bottom: 6px; }
 .preset small { color: var(--faint); font-size: 12px; }
+.preset { position: relative; }
+.cli-logout { position: absolute; top: 10px; right: 10px; font-size: 11px; color: var(--faint); padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
+.cli-logout:hover { color: var(--text); border-color: rgba(255, 122, 156, .55); }
 .preset:hover { border-color: rgba(255, 122, 156, .45); transform: translateY(-2px); }
 .preset.featured { border-color: rgba(255, 122, 156, .45); background: linear-gradient(135deg, rgba(255, 122, 156, .16), rgba(255, 122, 156, .03)); }
 .conn-group { margin-bottom: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); overflow: hidden; }

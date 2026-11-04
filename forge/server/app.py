@@ -2436,6 +2436,19 @@ def api_cli_login(cli_id: str) -> dict[str, Any]:
     return {"opened": cli_id}
 
 
+@app.post("/api/agent/cli/{cli_id}/logout")
+async def api_cli_logout(cli_id: str) -> dict[str, Any]:
+    """Sign a coding agent out, so it can be logged in again."""
+    if cli_id not in cli_models.CLIS:
+        raise HTTPException(status_code=404, detail=f"Unknown coding agent '{cli_id}'.")
+    try:
+        result = await asyncio.to_thread(cli_models.logout, cli_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await ws_manager.broadcast({"type": "models_changed"})
+    return result
+
+
 def _endpoint_call(fn, *args: Any) -> Any:
     try:
         return fn(*args)

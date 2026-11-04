@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 CLIS: dict[str, dict[str, Any]] = {
-    "claude": {"label": "Claude Code", "bin": "claude", "install": "npm install -g @anthropic-ai/claude-code", "login": "claude", "site": "https://claude.com/claude-code"},
+    "claude": {"label": "Claude Code", "bin": "claude", "install": "curl -fsSL https://claude.ai/install.sh | bash", "login": "claude auth login", "site": "https://claude.com/claude-code"},
     "codex": {"label": "Codex", "bin": "codex", "install": "npm install -g @openai/codex", "login": "codex login", "site": "https://github.com/openai/codex"},
     "gemini": {"label": "Gemini CLI", "bin": "gemini", "install": "npm install -g @google/gemini-cli", "login": "gemini", "site": "https://github.com/google-gemini/gemini-cli"},
     "opencode": {"label": "OpenCode", "bin": "opencode", "install": "npm install -g opencode-ai", "login": "opencode auth login", "site": "https://opencode.ai"},
@@ -252,16 +252,81 @@ async def check(cli_id: str) -> dict[str, Any]:
     return {"id": cli_id, "installed": True, "ok": True, "needs_login": False, "error": ""}
 
 
+# Installers that need Node's npm. Claude Code has its own installer, so it never does.
+_NATIVE_INSTALL = {
+    "claude": {"win32": 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://claude.ai/install.ps1 | iex"',
+               "posix": "curl -fsSL https://claude.ai/install.sh | bash"},
+}
+LOGOUT_ARGS = {"claude": ["auth", "logout"], "codex": ["logout"], "opencode": ["auth", "logout"]}
+# Gemini CLI has no logout command: its sign-in is these files.
+GEMINI_LOGIN_FILES = (".gemini/oauth_creds.json", ".gemini/google_accounts.json")
+
+
+def install_script(cli_id: str, windows: bool) -> str:
+    """The shell lines that install a CLI. npm-based ones install Node.js first when `npm` is missing."""
+    native = _NATIVE_INSTALL.get(cli_id)
+    if native:
+        return native["win32" if windows else "posix"]
+    install = CLIS[cli_id]["install"]
+    if windows:
+        return "\r\n".join([
+            "where npm >nul 2>nul || (",
+            "  echo Node.js is missing. Installing it first...",
+            "  winget install -e --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements",
+            r'  set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"',
+            ")",
+            "where npm >nul 2>nul || (echo Could not install Node.js. Install it from https://nodejs.org, then press Install again. & exit /b 1)",
+            "call " + install,
+        ])
+    return "\n".join([
+        "if ! command -v npm >/dev/null 2>&1; then",
+        "  if command -v brew >/dev/null 2>&1; then brew install node;",
+        '  else echo "Node.js (npm) is missing. Install it from https://nodejs.org, then press Install again."; exit 1; fi',
+        "fi",
+        install,
+    ])
+
+
 def open_login(cli_id: str) -> None:
     """Open a real terminal window running the CLI's login (or install), so the user signs in their usual way."""
-    spec = CLIS[cli_id]
-    command = spec["login"] if find(cli_id) else spec["install"]
+    installed = bool(find(cli_id))
     if sys.platform == "win32":
-        subprocess.Popen(["cmd", "/c", "start", "cmd", "/k", command], env=child_env())
-    elif sys.platform == "darwin":
-        subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to do script "{command}"'])
+        # A script file, not an inline command: the installers use pipes and quotes cmd.exe would mangle.
+        script = CLIS[cli_id]["login"] if installed else install_script(cli_id, True)
+        path = Path(tempfile.gettempdir()) / f"glob-{cli_id}-{'login' if installed else 'install'}.cmd"
+        path.write_text("@echo off\r\n" + script + "\r\necho.\r\necho Finished. You can close this window and go back to Glob.\r\n", encoding="utf-8")
+        subprocess.Popen(["cmd", "/c", "start", "", "cmd", "/k", str(path)], env=child_env())
+        return
+    command = CLIS[cli_id]["login"] if installed else install_script(cli_id, False)
+    if sys.platform == "darwin":
+        path = Path(tempfile.gettempdir()) / f"glob-{cli_id}.command"
+        path.write_text("#!/bin/bash\n" + command + "\n", encoding="utf-8")
+        path.chmod(0o755)
+        subprocess.Popen(["open", "-a", "Terminal", str(path)])
     else:
         term = shutil.which("x-terminal-emulator") or shutil.which("gnome-terminal") or shutil.which("konsole") or shutil.which("xterm")
         if not term:
             raise RuntimeError(f"No terminal found. Run this yourself: {command}")
-        subprocess.Popen([term, "-e", "bash", "-lc", f"{command}; exec bash"])
+        subprocess.Popen([term, "-e", "bash", "-lc", f"{command}; exec bash"], env=child_env())
+
+
+def logout(cli_id: str) -> dict[str, Any]:
+    """Sign the CLI out of its account, so the user can log in again (another account, or to clear a stale login)."""
+    if cli_id not in CLIS:
+        raise ValueError(f"Unknown coding agent '{cli_id}'.")
+    exe = find(cli_id)
+    if not exe:
+        raise RuntimeError(f"{CLIS[cli_id]['label']} is not installed.")
+    if cli_id == "gemini":
+        for rel in GEMINI_LOGIN_FILES:
+            (Path.home() / rel).unlink(missing_ok=True)
+    else:
+        try:
+            proc = subprocess.run([exe, *LOGOUT_ARGS[cli_id]], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                  timeout=30, env=child_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"Could not log out of {CLIS[cli_id]['label']}: {exc}") from exc
+        if proc.returncode != 0:
+            raise RuntimeError(f"{CLIS[cli_id]['label']} could not log out: {(proc.stderr or proc.stdout).strip()[-300:]}")
+    _login[cli_id] = "login"
+    return {"id": cli_id, "status": "login"}

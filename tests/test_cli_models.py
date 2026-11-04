@@ -77,3 +77,31 @@ def test_gemini_and_opencode_output_is_parsed(tmp_path: Path) -> None:
     assert cli_models.parse_output("gemini", json.dumps({"response": " done "}), tmp_path) == ("done", "")
     lines = "\n".join(json.dumps(e) for e in [{"type": "step_start"}, {"type": "text", "part": {"text": "a"}}, {"type": "text", "part": {"text": "b"}}])
     assert cli_models.parse_output("opencode", lines, tmp_path) == ("ab", "")
+
+
+def test_claude_installs_without_npm() -> None:
+    for windows in (True, False):
+        script = cli_models.install_script("claude", windows)
+        assert "npm" not in script and "claude.ai/install" in script
+
+
+def test_npm_agents_install_node_first_when_npm_is_missing() -> None:
+    assert "winget install" in cli_models.install_script("codex", True)
+    assert cli_models.install_script("codex", True).rstrip().endswith("call npm install -g @openai/codex")
+    assert "command -v npm" in cli_models.install_script("codex", False)
+
+
+def test_logout_runs_the_cli_and_marks_it_logged_out(fake_bin: Path) -> None:
+    _install(fake_bin, "claude", "#!/bin/sh\nexit 0\n")
+    cli_models._login["claude"] = "ok"
+    assert cli_models.logout("claude")["status"] == "login"
+    assert cli_models.login_status("claude") == "login"
+
+
+def test_gemini_logout_removes_its_login_files(fake_bin: Path, tmp_path: Path) -> None:
+    _install(fake_bin, "gemini", "#!/bin/sh\nexit 0\n")
+    creds = tmp_path / "home" / ".gemini" / "oauth_creds.json"
+    creds.parent.mkdir(parents=True)
+    creds.write_text("{}")
+    cli_models.logout("gemini")
+    assert not creds.exists()
