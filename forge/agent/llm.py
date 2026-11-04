@@ -3,7 +3,6 @@
 Model ids are prefixed by provider:
   ``anthropic:<model>``  — Claude via the Anthropic API (key from Settings or ANTHROPIC_API_KEY)
   ``openai:<model>``     — OpenAI Chat Completions (key from Settings or OPENAI_API_KEY)
-  ``vscode:<id>``        — a model configured in VS Code Copilot's chatLanguageModels.json
   ``ep:<endpoint>/<id>`` — a model from an endpoint added in the app (see ``forge.agent.endpoints``)
   ``cli:<agent>/<model>`` — a coding-agent CLI on the user's own login (see ``forge.agent.cli_models``)
 An empty id picks the first provider that has credentials.
@@ -17,7 +16,6 @@ import httpx
 
 from forge.agent import cli_models, endpoints
 from forge.config import load_config
-from forge.providers.auth_manager import call_vscode_copilot_model, discover_vscode_copilot_models
 
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
@@ -45,16 +43,6 @@ def list_agent_models() -> list[dict[str, Any]]:
     models += [{"id": mid, "label": label, "provider": "openai", "group": "OpenAI", "ready": has_openai, "efforts": []} for mid, label in OPENAI_MODELS]
     models += endpoints.list_models()
     models += cli_models.list_models()
-    imported = {m["id"] for e in endpoints.load_endpoints() if e.get("source") == "vscode" for m in e.get("models", [])}
-    try:
-        vscode = discover_vscode_copilot_models()
-    except Exception:  # noqa: BLE001 — VS Code discovery is best-effort
-        vscode = []
-    models += [
-        {"id": vm["id"], "label": vm["display_name"], "provider": "vscode", "group": "VS Code", "ready": True, "efforts": []}
-        for vm in vscode
-        if vm["model_id"] not in imported
-    ]
     for m in models:
         if m["id"] in _failed:
             m.update(ready=False, status="error", error=_failed[m["id"]])
@@ -64,7 +52,7 @@ def list_agent_models() -> list[dict[str, Any]]:
 def resolve_model(selector: str | None) -> str:
     """Turn a stored selector into a concrete, prefixed model id."""
     selector = (selector or "").strip()
-    if selector.startswith(("anthropic:", "openai:", "vscode:", "ep:", "cli:")):
+    if selector.startswith(("anthropic:", "openai:", "ep:", "cli:")):
         return selector
     if selector.startswith("claude-"):
         return f"anthropic:{selector}"
@@ -157,4 +145,4 @@ async def _dispatch(model_id: str, prompt: str, system_prompt: str, images: list
         return await endpoints.call(model_id, prompt, system_prompt, images, effort)
     if provider == "cli":
         return await cli_models.call(model_id, prompt, system_prompt, images, effort)
-    return await call_vscode_copilot_model(prompt=prompt, system_prompt=system_prompt, model_selector=model_id, images_b64=images or None)
+    raise RuntimeError(f"Unknown model \"{model_id}\". Pick a model in Settings → Glob chat.")

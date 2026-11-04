@@ -20,7 +20,6 @@ from PIL import Image
 
 from forge.config import load_config
 from forge.models import CriticReport, ProjectBible
-from forge.providers.auth_manager import call_vscode_copilot_model, discover_vscode_copilot_models
 
 
 CRITIC_SYSTEM_PROMPT = """You are Forge's Vision Critic for game asset prototyping.
@@ -59,8 +58,10 @@ class VisionCriticAdapter:
         cfg = load_config()
         self.provider = cfg.default_critic_provider or self.provider
         self.model = cfg.default_critic_model or self.model
-        use_vscode = self.provider == "vscode_copilot" or self.model.startswith("vscode:")
-        key = "vscode" if use_vscode else cfg.get_key(self.provider)
+        if self.provider == "vscode_copilot" or self.model.startswith("vscode:"):
+            # Saved by an older Glob that could borrow VS Code models: back to the built-in critic.
+            self.provider, self.model = "gemini", "gemini-2.5-flash"
+        key = cfg.get_key(self.provider)
         is_demo = force_demo if force_demo is not None else (cfg.demo_mode or not bool(key))
 
         # Local heuristic inspection first (used to ground demo mode & supplement live critic)
@@ -116,27 +117,6 @@ class VisionCriticAdapter:
             img_b64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
 
         try:
-            if use_vscode:
-                cop_res = await call_vscode_copilot_model(
-                    prompt=user_text,
-                    system_prompt=CRITIC_SYSTEM_PROMPT,
-                    model_selector=self.model,
-                    image_b64=img_b64 or None,
-                )
-                raw_txt = cop_res["text"].strip()
-                if "```" in raw_txt:
-                    raw_txt = raw_txt.split("```")[1].lstrip("json").strip()
-                parsed = json.loads(raw_txt)
-                return CriticReport(
-                    passed=bool(parsed.get("passed", parsed.get("overall_score", 0.88) >= threshold)),
-                    overall_score=float(parsed.get("overall_score", 0.90)),
-                    scores=parsed.get("scores", {}),
-                    feedback=str(parsed.get("feedback", f"Evaluated via VS Code Copilot ({cop_res['model']}).")),
-                    action_recommendation=parsed.get("action_recommendation", "keep"),
-                    provider="vscode_copilot",
-                    model=cop_res["model"],
-                )
-
             async with httpx.AsyncClient(timeout=45.0) as client:
                 if self.provider == "gemini":
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"

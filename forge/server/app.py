@@ -39,10 +39,7 @@ from forge.config import get_config_dir, get_projects_root, load_config, save_co
 from forge.mcp.server import MUTATING_TOOLS, ForgeMCPDispatcher, advertised_tools, default_project
 from forge.models import JobStatus
 from forge.providers.auth_manager import (
-    call_vscode_copilot_model,
     get_all_auth_status,
-    poll_github_copilot_device_flow,
-    start_github_copilot_device_flow,
     switch_codex_profile,
 )
 from forge.providers.base import ProviderError
@@ -2412,7 +2409,6 @@ async def api_agent_models() -> dict[str, Any]:
         "effort": cfg.agent_reasoning_effort,
         "presets": model_endpoints.PRESETS,
         "endpoints": [model_endpoints.public(e) for e in model_endpoints.load_endpoints()],
-        "vscode_importable": sum(1 for m in models if m["provider"] == "vscode"),
         "clis": clis,
     }
 
@@ -2475,11 +2471,6 @@ def api_add_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
 def api_remove_endpoint(endpoint_id: str) -> dict[str, Any]:
     model_endpoints.remove_endpoint(endpoint_id)
     return {"removed": endpoint_id}
-
-
-@app.post("/api/agent/endpoints/import-vscode")
-def api_import_vscode_models() -> dict[str, Any]:
-    return {"imported": model_endpoints.import_vscode()}
 
 
 @app.post("/api/agent/test")
@@ -2623,27 +2614,11 @@ def api_update_config(updates: dict[str, Any]) -> dict[str, Any]:
     return cfg.masked_dict()
 
 
-# --- Connected Accounts, VS Code Copilot Bridge & CLI Logins ---
+# --- Coding-agent logins ---
 
 @app.get("/api/auth/status")
 def api_auth_status() -> dict[str, Any]:
     return get_all_auth_status()
-
-
-@app.post("/api/auth/github/device-start")
-async def api_github_device_start() -> dict[str, Any]:
-    try:
-        return await start_github_copilot_device_flow()
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/api/auth/github/device-poll")
-async def api_github_device_poll() -> dict[str, Any]:
-    try:
-        return await poll_github_copilot_device_flow()
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/auth/codex/switch")
@@ -2653,42 +2628,6 @@ def api_codex_switch_profile(payload: dict[str, Any]) -> dict[str, Any]:
         return switch_codex_profile(prof)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/api/auth/select-model")
-def api_select_agent_model(payload: dict[str, Any]) -> dict[str, Any]:
-    model_id = str(payload.get("model_id", "vscode:gpt-6-studierende"))
-    provider = "vscode_copilot" if model_id.startswith("vscode:") else (
-        "codex" if model_id.startswith("codex:") else "gemini"
-    )
-    save_config({"default_critic_provider": provider, "default_critic_model": model_id})
-    return get_all_auth_status()
-
-
-@app.post("/api/auth/chat")
-async def api_copilot_chat(payload: dict[str, Any]) -> dict[str, Any]:
-    prompt = str(payload.get("prompt", ""))
-    model_id = payload.get("model_id")
-    project = str(payload.get("project", "default"))
-    store = actions.get_store(project)
-    bible = store.get_bible()
-    sys_prompt = (
-        f"You are Forge's Game Asset & Pipeline Architect for project '{project}'. "
-        f"Game style: {bible.art_style}. Camera: {bible.camera_perspective}. "
-        f"Be concise, technical, and actionable."
-    )
-    effort = str(payload.get("reasoning_effort") or "").strip().lower()
-    if effort in {"low", "medium", "high", "max"}:
-        sys_prompt += f" Reasoning effort: {effort} — scale the depth of your analysis accordingly."
-    try:
-        res = await call_vscode_copilot_model(prompt=prompt, system_prompt=sys_prompt, model_selector=model_id)
-        return res
-    except Exception as exc:
-        return {
-            "text": f"[Local Studio Assistant] (Live endpoint note: {str(exc)[:110]})\nI can still execute all Forge verbs, `.md` requirements, and ComfyUI nodes locally.",
-            "model": model_id or "local-assistant",
-            "provider": "fallback",
-        }
 
 
 @app.get("/api/proxy")

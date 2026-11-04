@@ -36,7 +36,7 @@ from forge.blueprint_contract import (
     split_frontmatter,
 )
 from forge.models import ActivityLogEntry, Asset, AssetStatus, AssetType, ProjectBible, new_id
-from forge.providers.auth_manager import call_vscode_copilot_model
+from forge.agent.llm import call_agent_model
 from forge.storage.project_store import ProjectStore
 
 
@@ -1413,7 +1413,7 @@ The collapsible log below retains generation prompts and technical history witho
                 f"=== USER MESSAGE ===\n{instruction}"
             )
 
-            res = await call_vscode_copilot_model(
+            res = await call_agent_model(
                 prompt=full_context_prompt,
                 system_prompt=sys_prompt,
                 images_b64=vision_images,
@@ -1706,7 +1706,7 @@ The collapsible log below retains generation prompts and technical history witho
                 "Respond ONLY with JSON: {\"mapping\": {\"asset_slug\": {\"category\": \"character|item|card_art|environment|ui\", \"subfolder\": \"clean_snake_case_subfolder\"}}}\n"
                 "For example, chess pieces should be grouped into `pawns_infantry`, `knights_cavalry`, `rooks_heavy`, `bishops_casters`, `royals_commanders`."
             )
-            res = await call_vscode_copilot_model(
+            res = await call_agent_model(
                 prompt="Organize these assets into logical subfolders:\n" + "\n".join(summary_lines),
                 system_prompt=sys_prompt,
             )

@@ -41,7 +41,7 @@ from forge.recipes.engine import (
 from forge.config import get_projects_root, load_config
 from forge.prompt_sanitize import finalize_generation_prompt, strip_palette_values
 from forge.blueprint_contract import pipeline_item_frontmatter
-from forge.providers.auth_manager import call_vscode_copilot_model
+from forge.agent.llm import call_agent_model
 from forge.storage.project_catalog import get_default_project, remove_project_from_catalog
 from forge.storage.project_store import ProjectStore, list_all_projects, sanitize_project_name
 from forge.stylepacks.builtins import (
@@ -658,7 +658,7 @@ class ForgeActionLayer:
         prompt = json.dumps(
             {"request": instruction, "active_context": context or {}, "asset_blueprint": current}, ensure_ascii=False
         )
-        completion = await call_vscode_copilot_model(prompt=prompt, system_prompt=system_prompt)
+        completion = await call_agent_model(prompt=prompt, system_prompt=system_prompt)
         response = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(completion.get("text", "")).strip(), flags=re.IGNORECASE)
         start = response.find("{")
         if start < 0:
@@ -676,7 +676,7 @@ class ForgeActionLayer:
             "summary": str(proposal.get("summary") or "Blueprint update proposal"),
             "patch": patch,
             "before": {key: current.get(key) for key in patch},
-            "model": completion.get("model", "configured VS Code model"),
+            "model": completion.get("model", "configured AI model"),
         }
 
     def list_asset_requirements(self, project: str = "default") -> dict[str, Any]:
@@ -1218,13 +1218,13 @@ class ForgeActionLayer:
             "than inventing a human personality. No markdown or extra keys."
         )
         try:
-            completion = await call_vscode_copilot_model(
+            completion = await call_agent_model(
                 prompt=json.dumps(context, ensure_ascii=False),
                 system_prompt=system_prompt,
             )
         except Exception as exc:
             raise RuntimeError(
-                "The configured VS Code text model could not generate a blueprint. Check its connection and try again."
+                "The configured AI model could not generate a blueprint. Check its connection and try again."
             ) from exc
 
         response_text = str(completion.get("text", "")).strip()
@@ -1283,7 +1283,7 @@ class ForgeActionLayer:
             "item": item.model_dump(),
             "written_fields": written_fields,
             "markdown_path": item.md_rel_path,
-            "model": completion.get("model", "configured VS Code model"),
+            "model": completion.get("model", "configured AI model"),
         }
 
     def preview_pipeline_candidate_prompts(

@@ -93,8 +93,8 @@ class ForgeConfig(BaseModel):
     default_3d_model: str = "meshy-7.1"
     # A signed-in service's 3D model (svc:<service>/<model>) for Make 3D; empty uses default_3d_provider.
     default_3d_service_model: str = ""
-    default_critic_provider: str = "vscode_copilot"
-    default_critic_model: str = "vscode:gpt-6-studierende"
+    default_critic_provider: str = "gemini"
+    default_critic_model: str = "gemini-2.5-flash"
 
     # Default generation settings
     image_aspect_ratio: str = "1:1"

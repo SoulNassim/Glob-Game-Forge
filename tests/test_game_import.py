@@ -226,3 +226,11 @@ def test_import_links_files_instead_of_copying_them(tmp_path: Path) -> None:
     assert result["linked"] == result["copied"] > 0 and result["bytes"] == 0
     linked = next(ws.rglob("Mira.glb"))
     assert linked.stat().st_nlink >= 2 and linked.read_bytes() == b"model"
+
+
+def test_mob_keyword_files_under_creatures() -> None:
+    """The creatures pattern once held a literal backspace after "mob", so "mob" never matched."""
+    from forge import game_import
+
+    assert game_import._section_for("mob spawner", default="other") == "creatures"
+    assert game_import._section_for("mobile ui", default="other") != "creatures"

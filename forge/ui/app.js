@@ -1121,7 +1121,6 @@ function chatBody(info, cfg) {
       ${items.map((m) => `<div class="conn-row"><span class="dot live"></span><span>${esc(m.label)}</span><span class="grow"></span>${m.id === state.model ? `<em class="in-use">In use</em>` : `<button class="mini" data-pick-model="${esc(m.id)}" data-settings-refresh>Use</button>`}<span class="test-result" id="test-${esc(m.id).replace(/[^a-z0-9]/gi, "_")}"></span><button class="mini ghost" data-test-model="${esc(m.id)}">Test</button></div>`).join("")}</div>`).join("")}` : ""}
     <details class="st-more"${state.settings.adding ? " open" : ""}><summary>Use an API key or a local model instead</summary>
       ${state.settings.adding ? addModelCard(info) : `<div class="preset-grid">
-        ${info.vscode_importable ? `<button class="preset featured" data-import-vscode><i>⇣</i><strong>Import from VS Code</strong><small>${info.vscode_importable} model${info.vscode_importable === 1 ? "" : "s"} found</small></button>` : ""}
         ${Object.entries(info.presets).map(([id, p]) => `<button class="preset" data-add-preset="${id}"><i>${PRESET_ICON[id] || "•"}</i><strong>${esc(p.label)}</strong><small>${p.needs_key ? "API key" : id === "custom" ? "Any OpenAI-compatible URL" : "No key needed"}</small></button>`).join("")}</div>`}
     </details>
     <details class="st-more"><summary>Advanced</summary>
@@ -2740,12 +2739,11 @@ function gameTools(a) {
   const tool = (attrs, name, label, enabled, tip) => `<button type="button" class="tool" ${attrs}${enabled ? "" : " disabled"} title="${esc(tip)}">${icon(name)}${label}</button>`;
   const three = !is2d() || glb;
   return `<div class="tool-row"><div class="field-label">Game tools</div><div class="tool-btns">
-    ${three ? `${tool(`data-action="views"`, "turn", "Turnaround", a.winner, a.winner ? "Side and back views of the winner, for a better 3D model" : "Pick a winner first")}
-    ${tool(`data-action="rig"`, "bones", "Rig", glb, glb ? "Add a skeleton to the GLB model" : "Make or drop a GLB model first")}
-    ${tool(`data-action="animate"`, "play", "Animate", rigged, rigged ? "Preset animations for the rigged model" : "Rig the model first")}` : ""}
-    ${tool(`data-split="${winner}"`, "scissors", "Split", a.winner, "Cut the winner into separate parts or assets")}
-    ${tool(`data-body-parts="${winner}"`, "bones", "Body parts", a.winner, "Glob boxes the head, torso, arms and legs so you can cut them apart")}
-    ${tool(`data-icons="${winner}"`, "grid", "Icons", a.winner, "Square inventory icons from the winner")}
+    ${three && a.winner ? tool(`data-action="views"`, "turn", "Turnaround", true, "Side and back views of the winner, for a better 3D model") : ""}
+    ${glb ? tool(`data-action="rig"`, "bones", "Rig", true, "Add a skeleton to the GLB model") : ""}
+    ${rigged ? tool(`data-action="animate"`, "play", "Animate", true, "Preset animations for the rigged model") : ""}
+    ${a.winner ? tool(`data-split="${winner}"`, "scissors", "Split", true, "Cut the winner into separate figures or body parts") : ""}
+    ${a.winner ? tool(`data-icons="${winner}"`, "grid", "Icons", true, "Square inventory icons from the winner") : ""}
     ${three ? tool(`data-add-model`, "upload", "Add 3D model", true, "GLB, glTF, OBJ or FBX — or drop the file anywhere on this page") : ""}
     ${tool(`data-export="${esc(a.path)}"`, "box", "Export", true, "ZIP for Godot, Unity or Unreal")}
   </div></div>`;
@@ -3288,7 +3286,7 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-import-vscode],[data-cli-logout],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-cli-logout],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
@@ -3353,10 +3351,6 @@ document.addEventListener("click", async (event) => {
     if (cli?.status === "ok") return toast(`${cli.label} is logged in and ready.`);
     cliLogin(t.dataset.cliLogin);
     return;
-  }
-  if (t.dataset.importVscode !== undefined) {
-    try { const { imported } = await api("/api/agent/endpoints/import-vscode", { method: "POST" }); toast(`Imported ${imported.reduce((n, e) => n + e.models.length, 0)} models from VS Code`); } catch (err) { toast(err.message, true); }
-    return renderSettings();
   }
   if (t.dataset.newProject !== undefined) return startOnboarding();
   if (t.dataset.obGame !== undefined) return chooseGameFolder();
@@ -4009,7 +4003,7 @@ async function renderSetup() {
       <p class="ob-sub">Glob runs on the AI you already pay for. Pick yours and sign in once: no API key needed.</p>
       <div class="agent-cards" id="agentCards">${agentCardsHTML()}</div>
       <div class="fistbump" id="fistbump" hidden></div>
-      <p class="setup-alt">No coding agent? <button type="button" class="link-btn" data-setup-settings="models">Use an API key instead</button>${state.modelInfo?.vscode_importable ? ` · <button type="button" class="link-btn" data-setup-vscode>Import from VS Code</button>` : ""}</p>
+      <p class="setup-alt">No coding agent? <button type="button" class="link-btn" data-setup-settings="models">Use an API key instead</button></p>
       ${nav(connected ? "Continue" : "Skip for now")}</div>`;
   } else if (st.step === 2) {
     const cfg = await api("/api/config");
@@ -4053,7 +4047,7 @@ async function setupNext() {
 // ----- events -----
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-st-quit],[data-st-shortcut],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-vscode],[data-setup-refresh],[data-setup-agent]");
+  const t = event.target.closest("[data-access-allow],[data-access-deny],[data-imp-open],[data-imp-close],[data-imp-browse],[data-imp-scan],[data-imp-use],[data-imp-back],[data-imp-run],[data-imp-unit],[data-imp-enter],[data-st-open],[data-st-move],[data-st-export],[data-st-import-zip],[data-st-quit],[data-st-shortcut],[data-grant-add],[data-grant-remove],[data-setup-open],[data-setup-next],[data-setup-back],[data-setup-skip],[data-setup-finish],[data-setup-settings],[data-setup-refresh],[data-setup-agent]");
   if (!t) return;
   const d = t.dataset;
   if (d.accessAllow) return answerAccess(d.accessAllow, true, d.write === "1");
@@ -4122,12 +4116,6 @@ document.addEventListener("click", async (event) => {
   }
   if (d.setupSkip !== undefined) return closeSetup();
   if (d.setupRefresh !== undefined) return renderSetup();
-  if (d.setupVscode !== undefined) {
-    try { const { imported } = await api("/api/agent/endpoints/import-vscode", { method: "POST" }); toast(`Imported ${imported.reduce((n, e) => n + e.models.length, 0)} models from VS Code`); } catch (err) { toast(err.message, true); }
-    await loadModels();
-    renderModelPill();
-    return renderSetup();
-  }
   if (d.setupSettings) {
     hideScene($("#setup"));
     state.setupReturn = true;
@@ -4703,6 +4691,16 @@ function stopHover() {
   hoverAudio = null;
   if (hoverModel) { hoverModel.view?.dispose(); hoverModel.host.remove(); hoverModel = null; }
 }
+
+// One sound at a time: pressing a tile or starting any player silences the hover preview
+// (and any other player). Capture phase, because media "play" events don't bubble.
+document.addEventListener("pointerdown", () => stopHover(), true);
+document.addEventListener("click", () => stopHover(), true);
+document.addEventListener("play", (event) => {
+  if (event.target === hoverAudio) return;
+  stopHover();
+  document.querySelectorAll("audio").forEach((a) => { if (a !== event.target && !a.paused) a.pause(); });
+}, true);
 
 document.addEventListener("pointerover", (event) => {
   const tile = event.target.closest?.("[data-hover-audio],[data-hover-model]");

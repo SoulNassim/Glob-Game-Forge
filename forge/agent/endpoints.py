@@ -98,32 +98,6 @@ def remove_endpoint(endpoint_id: str) -> None:
     _save([e for e in load_endpoints() if e["id"] != endpoint_id])
 
 
-def import_vscode() -> list[dict[str, Any]]:
-    """Copy the models configured in VS Code (with their keys) into Glob, one endpoint per provider."""
-    from forge.providers.auth_manager import discover_vscode_copilot_models
-
-    existing = load_endpoints()
-    known = {(e.get("source"), e["name"]) for e in existing}
-    grouped: dict[str, dict[str, Any]] = {}
-    for m in discover_vscode_copilot_models(include_secret_key=True):
-        name = m["provider_name"]
-        if ("vscode", name) in known:
-            continue
-        ep = grouped.setdefault(name, {
-            "id": uuid.uuid4().hex[:8], "name": name, "preset": "custom", "kind": "openai", "source": "vscode",
-            "base_url": _base(m["url"]), "api_key": m.get("api_key") or "", "models": [],
-        })
-        ep["models"].append({
-            "id": m["model_id"], "label": m["display_name"], "url": m["url"],
-            "api": "responses" if m.get("api_type") == "responses" or m["url"].endswith("/responses") else "chat",
-            "vision": m.get("vision", False),
-        })
-    added = list(grouped.values())
-    if added:
-        _save(existing + added)
-    return [public(e) for e in added]
-
-
 def list_models() -> list[dict[str, Any]]:
     out = []
     for e in load_endpoints():

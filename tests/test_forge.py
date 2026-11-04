@@ -562,7 +562,7 @@ async def test_blueprint_delete_keeps_assets_until_separately_confirmed(
     async def fail_model(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         raise AssertionError("Souly should handle folder and delete commands locally")
 
-    monkeypatch.setattr("forge.pipeline_manager.call_vscode_copilot_model", fail_model)
+    monkeypatch.setattr("forge.pipeline_manager.call_agent_model", fail_model)
     actions = ForgeActionLayer(root_dir=tmp_path)
     project = "blueprint_admin"
     pipeline = actions.get_pipeline(project)
@@ -1213,8 +1213,8 @@ async def test_game_wiki_property_updates_sync_to_project_bible(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_vscode_copilot_and_cli_auth_discovery() -> None:
-    """Verify VS Code Copilot chatLanguageModels.json discovery, Codex/Claude login detection, and /api/auth/status."""
+async def test_cli_auth_discovery() -> None:
+    """Codex/Claude login detection and /api/auth/status, with no VS Code or key leaks."""
     from forge.server.app import app
 
     transport = httpx.ASGITransport(app=app)
@@ -1222,56 +1222,9 @@ async def test_vscode_copilot_and_cli_auth_discovery() -> None:
         r_auth = await client.get("/api/auth/status")
         assert r_auth.status_code == 200
         data = r_auth.json()
-        assert "vscode_copilot" in data
-        assert "codex" in data
-        assert "claude" in data
-        assert len(data["selectable_models"]) >= 3
-        # Ensure secret keys are never leaked in /api/auth/status
-        assert "api_key" not in json.dumps(data["vscode_copilot"])
-
-
-def test_chromium_v10_secret_roundtrip() -> None:
-    """VS Code macOS safeStorage blobs decrypt with the keychain password, not the placeholder."""
-    import platform
-
-    if platform.system().lower() != "darwin":
-        pytest.skip("CommonCrypto is only used on macOS")
-    from forge.providers.auth_manager import _decrypt_chromium_v10, _aes128_cbc_decrypt
-    from hashlib import pbkdf2_hmac
-
-    password = "keychain-password"
-    key = pbkdf2_hmac("sha1", password.encode(), b"saltysalt", 1003, 16)
-    plain = b"sk-test-forge-key"
-    pad = 16 - (len(plain) % 16)
-    padded = plain + bytes([pad]) * pad
-    lib = __import__("ctypes").CDLL("/usr/lib/libSystem.B.dylib")
-    lib.CCCrypt.restype = __import__("ctypes").c_int
-    ctypes = __import__("ctypes")
-    lib.CCCrypt.argtypes = [
-        ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
-        ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p,
-        ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
-    ]
-    iv = b" " * 16
-    key_buf = ctypes.create_string_buffer(key, len(key))
-    iv_buf = ctypes.create_string_buffer(iv, len(iv))
-    in_buf = ctypes.create_string_buffer(padded, len(padded))
-    out = ctypes.create_string_buffer(len(padded) + 16)
-    moved = ctypes.c_size_t(0)
-    status = lib.CCCrypt(
-        0, 0, 0,
-        ctypes.cast(key_buf, ctypes.c_void_p), len(key),
-        ctypes.cast(iv_buf, ctypes.c_void_p),
-        ctypes.cast(in_buf, ctypes.c_void_p), len(padded),
-        ctypes.cast(out, ctypes.c_void_p), len(out),
-        ctypes.byref(moved),
-    )
-    assert status == 0
-    encrypted = b"v10" + out.raw[: moved.value]
-    assert _decrypt_chromium_v10(password, encrypted) == "sk-test-forge-key"
-    assert _decrypt_chromium_v10("", encrypted) == ""
-    assert _aes128_cbc_decrypt(key, iv, b"") == b""
+        assert "codex" in data and "claude" in data
+        assert "vscode_copilot" not in data
+        assert "\"api_key\"" not in json.dumps(data)
 
 
 @pytest.mark.asyncio
@@ -1447,7 +1400,7 @@ async def test_auto_generate_blueprint_preserves_existing_and_syncs_markdown(
         captured_prompts.append(prompt)
         return model_replies.pop(0)
 
-    monkeypatch.setattr("forge.agent.action_layer.call_vscode_copilot_model", fake_model)
+    monkeypatch.setattr("forge.agent.action_layer.call_agent_model", fake_model)
     item = actions.get_pipeline(project).list_pipeline_items()[0]
 
     generated = await actions.generate_pipeline_item_blueprint(item.id, project=project)
@@ -1727,17 +1680,6 @@ def test_agent_generate_tool_builds_the_same_request(tmp_path: Path) -> None:
     assert outcome["job"] == "job_1" and started[0]["count"] == 3 and "A tiny pig in a flat cap" in started[0]["prompt"]
     with pytest.raises(FileNotFoundError):
         agent.run_tool("tool_probe", {"tool": "pick_winner", "path": "hero.md", "file": "nope.png"})
-
-
-def test_vscode_models_file_with_bom_is_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from forge.providers import auth_manager
-
-    user_dir = tmp_path / "Code" / "User"
-    user_dir.mkdir(parents=True)
-    models = [{"name": "Lab", "apiType": "responses", "apiKey": "k", "models": [{"id": "lab-model", "url": "https://example.invalid/v1/responses"}]}]
-    (user_dir / "chatLanguageModels.json").write_bytes(b"\xef\xbb\xbf" + json.dumps(models).encode("utf-8"))
-    monkeypatch.setattr(auth_manager, "get_vscode_user_dirs", lambda: [user_dir])
-    assert [m["id"] for m in auth_manager.discover_vscode_copilot_models()] == ["vscode:lab-model"]
 
 
 def test_doc_becomes_folder_and_folders_hold_assets(tmp_path):

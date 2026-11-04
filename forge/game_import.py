@@ -74,7 +74,7 @@ NOISE_WORDS = {"3d", "model", "models", "fbx", "glb", "obj", "mesh", "meshy", "a
 
 # (key, title, asset kind, keywords). Order matters: the first section whose words match wins.
 SECTIONS: list[tuple[str, str, str | None, str]] = [
-    ("creatures", "Creatures & enemies", "creature", r"enem|monster|creature|mob|boss|zombie|beast|demon|undead|ghoul"),
+    ("creatures", "Creatures & enemies", "creature", r"enem|monster|creature|mob\b|boss|zombie|beast|demon|undead|ghoul"),
     ("characters", "Characters", "character", r"player|character|hero|npc|playable|protagonist|companion|rogue|knight|warrior|mage|wizard|soldier|merchant|villager|guard|archer|biped|humanoid"),
     ("weapons", "Weapons", "weapon", r"weapon|sword|katana|gun|axe|mace|bow|blade|dagger|spear|cannon|rifle|pistol|shotgun|hammer|staff|shield|sweeper|fists?\b"),
     ("items", "Items", "item", r"item|pickup|loot|potion|lantern|relic|key\b|coin|consumable|artifact|artefact|chalice|medkit|ammo|rounds|eye\b|bloodthirst"),
