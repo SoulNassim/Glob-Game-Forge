@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from forge import access, asset_studio, game_import, game_tools, modular, overview as project_overview, showcase, updater, vault
+from forge import access, asset_studio, game_import, game_tools, level_pack, modular, overview as project_overview, showcase, updater, vault
 from forge.agent.action_layer import ForgeActionLayer
 from forge.agent.autonomous import execute_agent_brief
 from forge.agent import cli_models, endpoints as model_endpoints
@@ -1906,7 +1906,7 @@ def api_studio_asset(path: str, project: str = "default") -> dict[str, Any]:
 @app.patch("/api/studio/asset")
 async def api_studio_update_asset(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     # The voice sheet remembers its pick; pillars, aspect and height are set from the asset page and the viewer.
-    allowed = {"kind", "prompt", "winner", "style", "title", "voice", "voice_name", "pillars", "aspect", "height_m", "tile_m", "kit_cell", "kit_height", "kit_thickness", "kit_wall", "kit_floor", "kit_ceiling"}
+    allowed = {"kind", "prompt", "winner", "style", "title", "voice", "voice_name", "pillars", "aspect", "height_m", "tile_m", "kit_cell", "kit_height", "kit_thickness", "kit_relief", "kit_wall", "kit_wall_2", "kit_wall_3", "kit_floor", "kit_floor_2", "kit_ceiling"}
     fields = {key: value for key, value in dict(payload.get("fields") or {}).items() if key in allowed}
     result = _overview_call(asset_studio.update_asset, _ws_dir(project), str(payload.get("path") or ""), fields)
     await workspace_changed(project)
@@ -2341,6 +2341,73 @@ async def api_studio_split(payload: dict[str, Any], project: str = "default") ->
     )
     await workspace_changed(project)
     return {"created": created}
+
+
+# A pack in progress, per project and level, so one level can't run twice at once.
+_pack_runs: dict[tuple[str, str], asyncio.Task] = {}
+
+
+async def _run_pack_job(project: str, request: dict[str, Any]) -> dict[str, Any]:
+    """One image of a pack: an ordinary queued job, shown in the job list, that the chain waits for."""
+    job = {
+        "id": f"job_{int(time.time() * 1000)}_{len(studio_jobs)}", "project": project, "asset": request.get("asset"),
+        "action": request.get("action"), "status": "queued", "batch": True, "started_at": time.time(),
+    }
+    _load_jobs(project)
+    studio_jobs[job["id"]] = job
+    await _run_queued(project, job, request)
+    return job
+
+
+async def _run_pack(project: str, level: str, items: list[str]) -> None:
+    ws_dir = _ws_dir(project)
+    try:
+        await level_pack.run_pack(ws_dir, level, items, lambda request: _run_pack_job(project, request), _agent_model_call)
+    except Exception as exc:  # noqa: BLE001 — say so on the level's page
+        asset_studio.update_asset(ws_dir, level, {"pack_note": f"The pack stopped: {str(exc)[:300]}"})
+    finally:
+        _pack_runs.pop((project, level), None)
+    await workspace_changed(project)
+
+
+@app.get("/api/studio/levels")
+def api_studio_levels(project: str = "default") -> dict[str, Any]:
+    ws_dir = _ws_dir(project)
+    return {"levels": level_pack.list_levels(ws_dir), "folder": level_pack.new_level_folder(ws_dir)}
+
+
+@app.get("/api/studio/level-pack")
+def api_studio_level_pack(path: str, project: str = "default") -> dict[str, Any]:
+    state = _overview_call(level_pack.status, _ws_dir(project), path)
+    return {**state, "running": (project, path) in _pack_runs, "mesh_usd": 0.3 if asset_studio.mesh_settings(load_config()).get("should_texture") else 0.2}
+
+
+@app.post("/api/studio/level-pack")
+async def api_studio_level_pack_start(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    level = str(payload.get("asset") or "")
+    items = [str(i) for i in payload.get("items") or []]
+    known = _overview_call(level_pack.plan, _ws_dir(project), level)
+    if not items:
+        raise HTTPException(status_code=400, detail="Tick at least one thing to make.")
+    if not asset_studio.describe_asset(_ws_dir(project), level)["winner"]:
+        raise HTTPException(status_code=400, detail="Pick a level picture first.")
+    if (project, level) in _pack_runs:
+        raise HTTPException(status_code=409, detail="This pack is already being made.")
+    _pack_runs[(project, level)] = asyncio.create_task(_run_pack(project, level, items))
+    return {"started": [item["id"] for item in known if item["id"] in items and not item["done"]]}
+
+
+@app.post("/api/studio/level-pack/make-3d")
+async def api_studio_level_pack_make_3d(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    ws_dir = _ws_dir(project)
+    jobs, skipped = [], []
+    for rel in [str(a) for a in payload.get("assets") or []][:48]:
+        try:
+            jobs.append(queue_studio_job(project, level_pack.make_3d_request(ws_dir, rel)))
+        except (FileNotFoundError, ValueError) as exc:
+            skipped.append({"asset": rel, "reason": str(exc)})
+    _save_jobs(project)
+    return {"jobs": jobs, "skipped": skipped}
 
 
 @app.get("/api/studio/materials")

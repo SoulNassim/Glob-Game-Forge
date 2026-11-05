@@ -37,8 +37,8 @@ MAX_REFERENCES = 8
 OUTPUT_KINDS = ("candidates", "variants", "edits", "views", "sheets", "3d", "rig", "animations", "textures", "parts", "icons", "sprites", "audio")
 # Imported engine files the browser can't preview (Godot .res clips, .blend, .anim) are still listed.
 LISTED_FILE_SUFFIXES = {".res", ".tres", ".anim", ".blend", ".dae", ".tga", ".exr", ".psd"}
-ACTIONS = ("candidates", "variant", "edit", "views", "prop_sheet", "make_3d", "rig", "animate")
-ACTION_FOLDER = {"candidates": "candidates", "variant": "variants", "edit": "edits", "views": "views", "prop_sheet": "sheets", "make_3d": "3d", "rig": "rig", "animate": "animations"}
+ACTIONS = ("candidates", "variant", "edit", "views", "prop_sheet", "trim_sheet", "make_3d", "rig", "animate")
+ACTION_FOLDER = {"candidates": "candidates", "variant": "variants", "edit": "edits", "views": "views", "prop_sheet": "sheets", "trim_sheet": "sheets", "make_3d": "3d", "rig": "rig", "animate": "animations"}
 # Turnaround views generated from the winner; "{view}" is filled in per image.
 TURNAROUND_VIEWS = ("left side view (profile)", "back view", "three-quarter front view")
 TEXT_PILLAR_SUFFIXES = {".md", ".txt"}
@@ -133,6 +133,15 @@ def prop_sheet_rule(dimension: str) -> str:
         "Lay them out in a tidy grid with wide empty space between them so none touch or overlap. Plain flat light grey "
         "background (#E5E5E5), no shadows on the ground, no text, labels, numbers or borders."
     )
+
+
+TRIM_SHEET_RULE = (
+    "The attached image is a game level. Make a sheet of its architectural trim: draw a pillar, an arch, a door frame, a "
+    "wall corner cap, a beam and a skirting or ledge section, once each, in the same art style, materials and colours, "
+    "each one whole, straight and seen from the front, as for a 3D model. Lay them out in a tidy grid with wide empty "
+    "space between them so none touch or overlap. Plain flat light grey background (#E5E5E5), no shadows on the ground, "
+    "no text, labels, numbers or borders."
+)
 
 
 # ---------- reading assets ----------
@@ -592,6 +601,21 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
             "count": 1,
         }
 
+    if action == "trim_sheet":
+        parts = [{"source": "Trim sheet", "text": TRIM_SHEET_RULE, "role": "rule"}]
+        return {
+            "action": action,
+            "asset": asset["path"],
+            "prompt": compose_prompt([TRIM_SHEET_RULE], cfg, "1:1"),
+            "parts": parts,
+            "bible": asset["text_pillars"],
+            "use_bible": True,
+            "references": [{"path": source, "source": "Level image", "role": "source"}],
+            "model": model or default_image_model(cfg),
+            "settings": {"aspect_ratio": "1:1", "transparent_background": False},
+            "count": 1,
+        }
+
     if action == "views":
         subject = VIEWS_RULE
         parts = [{"source": "Turnaround", "text": subject, "role": "rule"}]
@@ -843,6 +867,17 @@ def _store_id_for(store: Any, ws_dir: Path, asset_rel: str, file_rel: str) -> st
         return None
 
 
+def demo_safe_request(request: dict[str, Any], demo_mode: bool) -> dict[str, Any]:
+    """Demo mode never spends: a signed-in service is a real account, so its requests go to the demo generators instead."""
+    model = str(request.get("model") or "")
+    if not demo_mode or not model.startswith("svc:"):
+        return request
+    if request.get("audio"):
+        mode = model.rsplit("/", 1)[-1]
+        return {**request, "model": "stability_audio:music" if mode == "music" else f"elevenlabs_audio:{mode}"}
+    return {**request, "model": ""}
+
+
 async def run_action(actions: Any, project: str, request: dict[str, Any]) -> list[str]:
     """Run a request (as built by ``build_request`` and possibly edited by the user)."""
     action = request.get("action")
@@ -855,6 +890,7 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
     executor = actions.get_executor(project)
     bible = store.get_bible()
     cfg = load_config()
+    request = demo_safe_request(request, cfg.demo_mode)
     refs = [resolve_rel(ws_dir, ref["path"]) for ref in request.get("references") or [] if ref.get("path")]
     refs = [ref for ref in refs if ref.is_file()][:MAX_REFERENCES]
     # Sound effects come in pools (five footsteps), so audio may ask for a few more takes.
@@ -984,7 +1020,9 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
             bible=bible,
             run_spent_tracker=tracker,
         )
-        created.append(_record(actions, project, ws_dir, asset_rel, action, stored, request, f"{asset_path.stem}-{stamp}-{index + 1}"))
+        # The tag keeps a trim sheet apart from the prop sheet made in the same second.
+        tag = "-trim" if action == "trim_sheet" else ""
+        created.append(_record(actions, project, ws_dir, asset_rel, action, stored, request, f"{asset_path.stem}{tag}-{stamp}-{index + 1}"))
     remember: dict[str, Any] = {}
     if action == "candidates" and params["aspect_ratio"] != str(meta.get("aspect") or ""):
         remember["aspect"] = params["aspect_ratio"]  # the next run opens with the framing picked this time

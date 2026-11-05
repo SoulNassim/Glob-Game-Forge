@@ -283,3 +283,76 @@ def test_index_and_export_include_kits_and_maps(tmp_path: Path) -> None:
     # The file names kit.json points at sit right beside it in the export.
     manifest = json.loads((ws / "kits" / "crypt" / "3d" / "kit.json").read_text(encoding="utf-8"))
     assert f"assets/kits/crypt/models/{manifest['file']}" in names
+
+
+def _bumpy_kit(ws: Path, header: str = "") -> dict:
+    stone = _material(ws, "stone")
+    _asset(ws, "crypt.md", f"kind: kit\nprompt: crypt\nkit_wall: {stone}\nkit_floor: {stone}{header}")
+    return modular.build_kit(ws, "crypt.md")
+
+
+def test_relief_gives_walls_depth_without_leaving_the_cell(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    built = _bumpy_kit(ws)
+    manifest = json.loads((ws / built["manifest"]).read_text(encoding="utf-8"))
+    pieces = {p["name"]: p for p in manifest["pieces"]}
+    wall = pieces["wall"]
+    assert wall["triangles"] > 1000 and wall["bounds"]["min"] == [-1, 0, -1] and wall["bounds"]["max"] == [1, 3, -0.8]
+    assert pieces["floor"]["bounds"]["max"][1] == 0
+    assert pieces["ceiling"]["triangles"] == 12 and "lod1" not in pieces["ceiling"]
+    assert wall["lod1"] == "wall_lod1" and manifest["grid"]["relief_depth"] == 0.05
+
+
+def test_relief_faces_are_valid_and_really_uneven() -> None:
+    relief = type("Flat", (), {})()
+    relief.size = 512
+    relief.depth = 0.05
+    relief.at = lambda u, v: 0.05 * (0.5 + 0.5 * math.sin(u * 2 * math.pi))
+    geo = modular._Geometry({"wall": 2.0}, {"wall": relief})
+    geo.box("wall", (-1, 1), (0, 3), (-1, -0.8), skip=("-y",), relief=("+z",))
+    data = geo.slots["wall"]
+    front = [p for p, n in zip(data["p"], data["n"]) if n[2] > 0.5]
+    depths = {round(p[2], 3) for p in front}
+    assert max(depths) <= -0.8 and min(depths) >= -0.85 and len(depths) > 5  # dents go into the wall, never out of the cell
+    assert max(data["i"]) < len(data["p"]) and len(data["i"]) % 3 == 0
+    checked = 0
+    for i in range(0, len(data["i"]), 3):  # the relief's triangles still face into the room
+        tri = [data["i"][i + k] for k in range(3)]
+        if not all(data["n"][k][2] > 0.5 for k in tri):
+            continue
+        a, b, c = (data["p"][k] for k in tri)
+        assert (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) > 0
+        checked += 1
+    assert checked > 1000
+    assert all(abs(math.sqrt(sum(v * v for v in n)) - 1) < 1e-6 for n in data["n"])
+
+
+def test_relief_lines_up_between_neighbouring_walls() -> None:
+    """Two walls side by side dip by the same amount where they touch, because the height map tiles with the cell."""
+    relief = modular._Relief.__new__(modular._Relief)
+    relief.size = 4
+    relief.depth = 1.0
+    relief.values = bytes(range(0, 160, 10))
+    assert relief.at(-0.5, 0.25) == relief.at(0.5, 0.25) == relief.at(1.5, 0.25)
+
+
+def test_kit_builds_variants_that_share_a_piece_shape(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    stone = _material(ws, "stone")
+    moss = _material(ws, "moss")
+    _asset(ws, "crypt.md", f"kind: kit\nprompt: crypt\nkit_wall: {stone}\nkit_wall_2: {moss}\nkit_floor_2: {moss}")
+    built = modular.build_kit(ws, "crypt.md")
+    manifest = json.loads((ws / built["manifest"]).read_text(encoding="utf-8"))
+    pieces = {p["name"]: p for p in manifest["pieces"]}
+    assert pieces["wall_2"]["variant_of"] == "wall" and pieces["wall_2"]["bounds"] == pieces["wall"]["bounds"]
+    assert pieces["floor_2"]["variant_of"] == "floor" and "wall_3" not in pieces
+    assert manifest["materials"]["wall_2"]["asset"] == moss
+    doc, _ = _read_glb(ws / built["kit"])
+    assert {"wall", "wall_2", "wall_lod1", "wall_2_lod1"} <= {n["name"] for n in doc["nodes"]}
+
+
+def test_relief_can_be_switched_off(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    built = _bumpy_kit(ws, "\nkit_relief: 0")
+    pieces = {p["name"]: p for p in json.loads((ws / built["manifest"]).read_text(encoding="utf-8"))["pieces"]}
+    assert pieces["wall"]["triangles"] == 10 and "lod1" not in pieces["wall"]

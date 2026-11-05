@@ -1398,7 +1398,7 @@ async function saveEndpoint() {
   } catch (err) { toast(err.message, true); }
 }
 
-const KIND_PLURAL = { character: "Characters", creature: "Creatures", item: "Items", weapon: "Weapons", prop: "Props", vehicle: "Vehicles", environment: "Places", level: "Level kits", material: "Materials", kit: "Modular kits", ui: "UI", vfx: "Effects" };
+const KIND_PLURAL = { character: "Characters", creature: "Creatures", item: "Items", weapon: "Weapons", prop: "Props", vehicle: "Vehicles", environment: "Places", level: "Levels", material: "Materials", kit: "Modular kits", ui: "UI", vfx: "Effects" };
 
 async function testModel(id) {
   const out = $(`#test-${id.replace(/[^a-z0-9]/gi, "_")}`);
@@ -1450,12 +1450,14 @@ function renderSections() {
   const ov = state.overview;
   const active = PLAIN_VIEWS.includes(state.view.type) ? "" : (state.view.path || "").split("/")[0];
   const initials = projectTitle().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  const sections = ov.sections.filter((s) => s.path !== "levels");  // the Levels button above is that folder's way in
   $("#sections").innerHTML = `
     <div class="proj-card"><span class="proj-badge">${esc(initials || "F")}</span><div><strong>${esc(projectTitle())}</strong><small>${esc(ov.excerpt || "Your game project")}</small></div></div>
     <button class="sec${state.view.type === "home" ? " active" : ""}" data-home><small>00</small>Overview</button>
     <button class="sec vault-sec${state.view.type === "vault" ? " active" : ""}" data-vault>${icon("box")}<span class="sec-name">Final Vault</span></button>
-    ${ov.sections.length ? `<div class="sec-label">Sections</div>` : ""}
-    ${ov.sections.map((s) => `<button class="sec${s.path === active ? " active" : ""}" data-folder="${esc(s.path)}"><small>${s.number}</small><span class="sec-name">${esc(s.title)}</span>${s.children?.length ? `<span class="caret${s.path === active ? " open" : ""}"></span>` : ""}</button>${s.path === active ? subTree(s.children) : ""}`).join("")}
+    <button class="sec vault-sec${state.view.type === "levels" || (state.view.path || "").startsWith("levels/") ? " active" : ""}" data-levels>${icon("map")}<span class="sec-name">Levels</span></button>
+    ${sections.length ? `<div class="sec-label">Sections</div>` : ""}
+    ${sections.map((s) => `<button class="sec${s.path === active ? " active" : ""}" data-folder="${esc(s.path)}"><small>${s.number}</small><span class="sec-name">${esc(s.title)}</span>${s.children?.length ? `<span class="caret${s.path === active ? " open" : ""}"></span>` : ""}</button>${s.path === active ? subTree(s.children) : ""}`).join("")}
     <div class="spacer"></div>
     <div class="tip">Ask the agent to add, rename or reorder sections.</div>`;
 }
@@ -1476,6 +1478,7 @@ function renderCrumbs() {
   const path = state.view.path || "";
   if (state.view.type === "home") parts.push(`<strong>${esc(projectTitle())}</strong>`);
   else if (state.view.type === "vault") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Final Vault</strong>`);
+  else if (state.view.type === "levels") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Levels</strong>`);
   else if (state.view.type === "board") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Board</strong>`);
   else {
     parts.push(`<button data-home>${esc(projectTitle())}</button>`);
@@ -1629,7 +1632,7 @@ async function addCandidateImages(files) {
 
 const KIND_ICON = new Proxy({}, { get: (_, k) => (ICON[k] ? icon(k) : AUDIO_KINDS.includes(k) ? icon("sound") : "") });
 
-const KIND_LABEL = { environment: "Place", level: "Level kit", kit: "Modular kit", ui: "UI", vfx: "Effect", sfx: "Sound effect", voice: "Voice line", music: "Music" };
+const KIND_LABEL = { environment: "Place", level: "Level", kit: "Modular kit", ui: "UI", vfx: "Effect", sfx: "Sound effect", voice: "Voice line", music: "Music" };
 
 function kindTags(kinds, selected) {
   return `<div class="kind-tags" role="radiogroup" aria-label="Kind">${kinds.map((k) => `<label class="kind-chip"><input type="radio" name="kind" value="${esc(k)}" ${k === selected ? "checked" : ""}><span>${KIND_ICON[k] || "•"} ${esc(KIND_LABEL[k] || humanize(k))}</span></label>`).join("")}</div>`;
@@ -1790,6 +1793,7 @@ async function renderViewBody() {
   }
 
   if (view.type === "vault") return renderVault();
+  if (view.type === "levels") return renderLevels();
   if (view.type === "board") return renderBoard();
 
   if (view.type === "folder") {
@@ -1835,6 +1839,7 @@ async function renderViewBody() {
     const isMd = view.path.toLowerCase().endsWith(".md");
     if (isMd && !view.editing) {
       const asset = await api(`/api/studio/asset?path=${encodeURIComponent(view.path)}`).catch(() => null);
+      if (asset?.kind === "level") state.pack = await api(`/api/studio/level-pack?path=${encodeURIComponent(asset.path)}`).catch(() => null);
       if (asset?.kind === "kit") state.materials = (await api("/api/studio/materials").catch(() => ({ materials: [] }))).materials;
       if (asset?.is_asset) { content.innerHTML = renderAssetPage(asset); content.dataset.dropAsset = ""; queueThumbs(asset); return; }
     }
@@ -1936,7 +1941,7 @@ async function vaultToFolder() {
 
 // ---------- asset studio ----------
 
-const ACTION_LABEL = { candidates: "Generate 2D", variant: "Variant", edit: "Edit image", views: "Turnaround", prop_sheet: "Prop sheet", make_3d: "Make 3D", rig: "Rig", animate: "Animate" };
+const ACTION_LABEL = { candidates: "Generate 2D", variant: "Variant", edit: "Edit image", views: "Turnaround", prop_sheet: "Prop sheet", trim_sheet: "Trim sheet", make_3d: "Make 3D", rig: "Rig", animate: "Animate" };
 
 // Failed or interrupted runs stay on the asset page until dismissed, so a lost result is never silent.
 function dismissedJobs() { try { return new Set(JSON.parse(storeGet("forge.dismissedJobs") || "[]")); } catch { return new Set(); } }
@@ -2163,9 +2168,9 @@ function renderAssetPage(a) {
           <button class="primary" data-action="candidates">Generate 2D</button>
           <button class="ghost" data-action="variant"${a.winner ? "" : " disabled"}>Variant</button>
           <button class="ghost" data-action="edit"${a.winner ? "" : " disabled"}>Edit image</button>
-          ${is2d() || a.kind === "material" ? "" : `<button class="ghost sem-mesh" data-action="make_3d"${a.winner ? "" : " disabled"}>Make 3D</button>`}
+          ${is2d() || a.kind === "material" || a.kind === "level" ? "" : `<button class="ghost sem-mesh" data-action="make_3d"${a.winner ? "" : " disabled"}>Make 3D</button>`}
         </div>
-        ${a.kind === "level" ? levelKit(a) : ""}
+        ${a.kind === "level" ? levelPanel(a) : ""}
         ${a.kind === "material" ? materialPanel(a) : ""}
         ${gameTools(a)}
         <div class="applied">
@@ -2179,6 +2184,7 @@ function renderAssetPage(a) {
         </div>
       </div>
     </div>
+    ${a.kind === "level" ? packPicks() : ""}
     ${OUTPUT_SECTIONS.map(([kind, label]) => (o[kind] || []).length ? (kind === "animations" ? animationBlock(o[kind], Boolean(heroModel && !a.winner))
       : kind === "textures" ? textureStrip(o[kind]) : `<h2 class="block-title" id="out-${kind}">${label}</h2>${outputGrid(o[kind], a.winner, kind)}`) : "").join("")}
     <h2 class="block-title">Notes</h2>
@@ -2306,6 +2312,7 @@ const ACTION_THEME = {
   edit: { tone: "violet", icon: "edit", blurb: "Change one thing in the source image and keep the rest." },
   make_3d: { tone: "sky", icon: "cube", blurb: "Turn the winner image into a textured 3D model." },
   views: { tone: "amber", icon: "turn", blurb: "Side and back views of the winner. Make 3D then uses them for a better model." },
+  trim_sheet: { tone: "amber", icon: "grid", blurb: "Pillars, arches and door frames from the level picture, on one sheet. They also hide the joins between walls." },
   prop_sheet: { tone: "amber", icon: "grid", blurb: "Every prop in the level picture, drawn once on one sheet. One image instead of one per prop; Glob cuts it up for free." },
   rig: { tone: "sky", icon: "bones", blurb: "Add a skeleton to a humanoid model so it can be animated. Includes walk and run clips." },
   animate: { tone: "violet", icon: "play", blurb: "Put preset animations on the rigged model: idle, attack, death and more." },
@@ -2642,7 +2649,7 @@ async function makeAsset() {
 
 // The current page and the pages before it survive a refresh, per project.
 const viewKey = () => `forge.view.${state.project}`;
-const PLAIN_VIEWS = ["home", "vault"];
+const PLAIN_VIEWS = ["home", "vault", "levels"];
 const plainView = (v) => (PLAIN_VIEWS.includes(v.type) ? { type: v.type } : { type: v.type, path: v.path });
 
 function saveView() {
@@ -2652,7 +2659,7 @@ function saveView() {
 }
 
 function restoreView() {
-  if (location.hash === "#vault") { state.view = { type: location.hash.slice(1) }; return; }
+  if (location.hash === "#vault" || location.hash === "#levels") { state.view = { type: location.hash.slice(1) }; return; }
   const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
   if (hash) {
     state.view = { type: hash[1], path: decodeURIComponent(hash[2]), restored: true };
@@ -2701,7 +2708,7 @@ function go(view) {
 window.addEventListener("hashchange", () => {
   const hash = location.hash.match(/^#(folder|doc)=(.+)$/);
   if (hash) go({ type: hash[1], path: decodeURIComponent(hash[2]) });
-  else if (location.hash === "#vault") go({ type: location.hash.slice(1) });
+  else if (location.hash === "#vault" || location.hash === "#levels") go({ type: location.hash.slice(1) });
 });
 
 function openPath(path) {
@@ -2728,17 +2735,144 @@ const MODEL_RE = /\.(glb|gltf|obj|fbx)$/i;
 // A 2D project (Settings → New art, or chosen when the project was made) hides the 3D tools; models already made still show.
 const is2d = () => state.overview?.dimension === "2d";
 
-function levelKit(a) {
-  const sheet = (a.outputs.sheets || []).find((o) => o.type === "image");
-  const props = `${dirOf(a.path) ? `${dirOf(a.path)}/` : ""}${a.path.split("/").pop().replace(/\.md$/, "")}-props`;
-  const step = (n, done, title, text, button, wait = "") => `<li class="${done ? "done" : wait ? "wait" : ""}"><b>${done ? "✓" : n}</b><div><strong>${title}</strong><small>${wait || text}</small></div>${button}</li>`;
-  return `<div class="level-kit"><div class="field-label">${icon("map")} Level kit</div><ol>
-    ${step(1, a.winner, "Picture the level", "Describe the section above, generate, pick the one you like.", `<button class="mini" data-action="candidates">Generate</button>`)}
-    ${step(2, sheet, "All its props on one sheet", "One image, not one per prop.", `<button class="mini" data-action="prop_sheet" ${a.winner ? "" : "disabled"}>Make sheet</button>`, a.winner ? "" : "Waiting for step 1: pick a level picture.")}
-    ${step(3, a.meta.props_cut, "Cut into props", "Free, on this computer. Each prop gets its own asset.", `<button class="mini" ${sheet ? `data-sheet-cut="${esc(sheet.path)}"` : "disabled"}>Cut</button>`, sheet ? "" : "Waiting for step 2: make the sheet.")}
-    ${step(4, false, is2d() ? "Use the props" : "Make them 3D", is2d() ? "Open the props: each is a cut-out sprite, ready for your game." : "Open the props and make 3D for the ones you want.", `<button class="mini" ${a.meta.props_cut ? `data-folder="${esc(props)}"` : "disabled"}>Open props</button>`, a.meta.props_cut ? "" : "Waiting for step 3: cut the sheet.")}
-  </ol></div>`;
+function levelPanel(a) {
+  const pack = state.pack;
+  const items = pack?.items || [];
+  const left = items.filter((i) => !i.done).length;
+  const started = items.some((i) => i.done);
+  const step = (n, done, title, text, button) => `<li class="${done ? "done" : ""}"><b>${done ? "✓" : n}</b><div><strong>${title}</strong><small>${text}</small></div>${button}</li>`;
+  const label = started ? "Finish pack" : "Turn into asset pack";
+  const kit = pack?.kit ? `<button class="mini" data-open="${esc(pack.kit)}">Open kit</button>` : "";
+  const packText = pack?.running ? "Glob is making it now. You can leave this page."
+    : !a.winner ? "Pick a level picture first."
+    : is2d() ? "Every prop in the picture, cut out and named."
+    : !started ? "Matching walls, floors, ceiling, pillars and props, all made from this picture, ready for modular or procedural levels."
+    : left ? `${plural(items.length - left, "part")} of ${items.length} done. Finishing only makes what's missing.`
+    : "Walls, floors, trim and props are made, and your coding agent can find them in ASSETS.md.";
+  return `<div class="level-kit"><div class="field-label">${icon("map")} Level</div><ol>
+    ${step(1, a.winner, "Picture the level", "Describe the place above, generate, and pick the one you like.", `<button class="mini" data-action="candidates">Generate</button>`)}
+    ${step(2, started && !left, is2d() ? "Cut out its props" : "Make its asset pack", packText, pack?.running ? `<span class="spinner"></span>` : `<span class="pack-btns">${kit}${started && !left ? "" : `<button class="mini${started ? "" : " pack-go"}" data-level-pack="${esc(a.path)}" ${a.winner ? "" : "disabled"}>${label}</button>`}</span>`)}
+  </ol>${pack?.note ? `<p class="pack-note">${esc(pack.note)}</p>` : ""}</div>`;
 }
+
+// Below the level: what the pack made, and the props and trim to tick for 3D, with the total before anything is spent.
+function packPicks() {
+  const pack = state.pack;
+  if (!pack) return "";
+  const ready = (pack.surfaces || []).filter((s) => s.image);
+  const picks = pack.pickable || [];
+  if (!ready.length && !picks.length) return "";
+  const groups = {};
+  for (const p of picks) (groups[p.group] ||= []).push(p);
+  const wants3d = picks.some((p) => !p.model) && !is2d();
+  return `${ready.length ? `<h2 class="block-title">Walls and floors <span class="block-count">${ready.length}</span></h2>
+    <div class="pack-tiles">${ready.map((s) => `<button type="button" class="pack-tile" data-open="${esc(s.asset)}" title="Open ${esc(s.title)}"><img src="${esc(fileUrl(s.image))}" alt="" loading="lazy"><span>${esc(s.title)}</span></button>`).join("")}</div>` : ""}
+  ${Object.entries(groups).map(([group, list]) => `<h2 class="block-title">${esc(group)} <span class="block-count">${list.length}</span></h2>
+    <div class="pack-tiles">${list.map((p) => `<label class="pack-tile${p.model ? " has-3d" : ""}">
+      <img src="${esc(fileUrl(p.image))}" alt="" loading="lazy"><span>${esc(p.title)}</span>
+      ${p.model ? `<em>${icon("cube")}3D</em>` : is2d() ? "" : `<input type="checkbox" data-pack-pick="${esc(p.asset)}" aria-label="Make ${esc(p.title)} 3D">`}</label>`).join("")}</div>`).join("")}
+  ${wants3d ? `<div class="pack-3d"><span id="packTotal">Tick the ones you want in 3D. Everything else stays a free cut-out.</span><button type="button" class="primary" id="packMake3d" disabled>Make 3D</button></div>` : ""}`;
+}
+
+function packDialog(path) {
+  const items = state.pack?.items || [];
+  const model = state.studio?.models?.find((m) => m.id === state.studio.selected);
+  const row = (i) => `<label><input type="checkbox" name="item" value="${esc(i.id)}" ${i.done ? "disabled" : "checked"}><span>${esc(i.label)}</span><small>${i.done ? "Done" : esc(i.hint || "")}</small></label>`;
+  const total = () => {
+    const n = [...document.querySelectorAll("#packForm input[name=item]:checked")].length;
+    const price = model?.price && !state.agentCfg?.demo_mode ? ` · ≈ $${(model.price * n).toFixed(2)}` : "";
+    $("#packCost").textContent = `${plural(n, "image")}${price}. The cutting, tiling and kit building after that are free.`;
+  };
+  openDialog(`<form class="dlg" id="packForm">
+    <h2>${icon("box")} ${items.some((i) => i.done) ? "Finish the asset pack" : "Turn into an asset pack"}</h2>
+    <p>Glob redraws each surface from your level picture, flat-on and evenly lit, then builds pieces that always line up. They'll match the picture's look, but they won't be exact copies of it.</p>
+    <div class="batch-list">${items.map(row).join("")}</div>
+    <p class="st-note" id="packCost"></p>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">${icon("sparkle")} Make pack</button></div></form>`);
+  total();
+  $("#packForm").addEventListener("change", total);
+  $("#packForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const wanted = [...event.target.querySelectorAll("input[name=item]:checked")].map((i) => i.value);
+    if (!wanted.length) return toast("Tick at least one thing to make.", true);
+    try {
+      await api("/api/studio/level-pack", { method: "POST", body: { asset: path, items: wanted } });
+      closeDialog();
+      state.dockOpen = true;
+      renderJobDock();
+      await renderView();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function renderLevels() {
+  const content = $("#content");
+  let data;
+  try { data = await api("/api/studio/levels"); } catch (err) { content.innerHTML = `<p class="hint-line">${esc(err.message)}</p>`; return; }
+  state.levelFolder = data.folder;
+  content.innerHTML = `
+    <div class="kicker">Project / Levels</div>
+    <div class="asset-head"><h1 class="title">Levels</h1></div>
+    <p class="levels-lead">${is2d() ? "Describe a place, pick the picture you like, and Glob cuts out every prop in it." : "Describe a place, pick the picture you like, and Glob turns it into a matching asset pack: walls, floors, pillars and props that fit together, for hand-built or procedural levels."}</p>
+    <div class="action-row"><button class="primary" data-new-level>${icon("sparkle")} New level</button></div>
+    ${data.levels.length ? `<div class="level-cards">${data.levels.map((l) => `<button type="button" class="level-card" data-open="${esc(l.path)}">
+      ${l.image ? `<img src="${esc(fileUrl(l.image))}" alt="" loading="lazy">` : `<span class="level-blank">${icon("map")}</span>`}
+      <strong>${esc(l.title)}</strong><small>${!l.image ? "No picture yet" : l.kit ? `Asset pack${l.props ? ` · ${plural(l.props, "prop")}` : ""}` : l.props ? plural(l.props, "prop") : "Picture picked"}</small></button>`).join("")}</div>` : `<p class="hint-line levels-empty">Your levels will show up here. Make your first one to see how it works.</p>`}`;
+}
+
+function newLevelDialog() {
+  openDialog(`<form class="dlg" id="newLevelForm">
+    <h2>${icon("map")} New level</h2>
+    <p>Describe one place in your game. You'll get a picture to approve before anything else is made.</p>
+    <label>Name<input name="title" maxlength="80" placeholder="Cold storage plant" autofocus></label>
+    <label>What's it like?<textarea name="prompt" rows="3" placeholder="An abandoned cold-storage plant: rusted pipes, frosted concrete walls, flickering strip lights, seen from eye level"></textarea></label>
+    <p class="form-why" id="nlWhy" hidden>Give it a name first.</p>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">Create</button></div></form>`);
+  $("#newLevelForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target));
+    const name = String(data.title || "").trim();
+    if (!name) { $("#nlWhy").hidden = false; return event.target.title.focus(); }
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "level";
+    const path = `${state.levelFolder || "levels"}/${slug}.md`;
+    const content = `---\nkind: "level"\nprompt: ${JSON.stringify(String(data.prompt || name).trim())}\n---\n\n# ${name}\n`;
+    try {
+      await api("/api/overview/file", { method: "PUT", body: { path, content } });
+      closeDialog();
+      await loadOverview();
+      go({ type: "doc", path });
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+document.addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-level-pack],[data-new-level],#packMake3d");
+  if (!t || t.disabled) return;
+  if (t.dataset.levelPack) {
+    await studioOptions().catch(() => null);
+    return packDialog(t.dataset.levelPack);
+  }
+  if (t.dataset.newLevel !== undefined) return newLevelDialog();
+  const assets = [...document.querySelectorAll("[data-pack-pick]:checked")].map((i) => i.dataset.packPick);
+  if (!assets.length) return;
+  t.disabled = true;
+  try {
+    const res = await api("/api/studio/level-pack/make-3d", { method: "POST", body: { assets } });
+    res.jobs.forEach((j) => { state.jobs[j.id] ||= j; });
+    state.dockOpen = true;
+    renderJobDock();
+    toast(`Making ${plural(res.jobs.length, "3D model")}${res.skipped.length ? ` · ${res.skipped.length} skipped: ${res.skipped[0].reason}` : ""}`, Boolean(res.skipped.length));
+    await renderView();
+  } catch (err) { toast(err.message, true); t.disabled = false; }
+});
+
+document.addEventListener("change", (event) => {
+  if (!event.target.matches?.("[data-pack-pick]")) return;
+  const n = document.querySelectorAll("[data-pack-pick]:checked").length;
+  const usd = (state.pack?.mesh_usd || 0.3) * n;
+  $("#packTotal").textContent = n ? `${plural(n, "3D model")} · ≈ $${usd.toFixed(2)} at Glob's Meshy estimate` : "Tick the ones you want in 3D. Everything else stays a free cut-out.";
+  $("#packMake3d").disabled = !n;
+});
 
 // A material: the picked image made seamless, with its maps, shown repeating so a visible seam or grid is easy to spot.
 function materialPanel(a) {
@@ -2771,16 +2905,16 @@ function renderKitAsset(a, title) {
       <div class="asset-side">
         <p class="hint-line">Floors, walls, doorways, corners and stairs at exact sizes, so they always line up. Glob builds them on this computer, and your coding agent gets a map of how they fit for procedural levels.</p>
         <div class="field-label">Grid</div>
-        <div class="kit-form">${field("kit_cell", "Cell size", 2, 0.5, 20, 0.5)}${field("kit_height", "Wall height", 3, 0.5, 30, 0.5)}${field("kit_thickness", "Wall thickness", 0.2, 0.02, 2, 0.05)}</div>
+        <div class="kit-form">${field("kit_cell", "Cell size", 2, 0.5, 20, 0.5)}${field("kit_height", "Wall height", 3, 0.5, 30, 0.5)}${field("kit_thickness", "Wall thickness", 0.2, 0.02, 2, 0.05)}${field("kit_relief", "Surface depth", 0.05, 0, 0.5, 0.01)}</div>
         <div class="field-label">Materials</div>
-        <div class="kit-form">${slot("wall", "Walls")}${slot("floor", "Floors")}${slot("ceiling", "Ceilings")}</div>
+        <div class="kit-form">${slot("wall", "Walls")}${slot("wall_2", "Walls, variant")}${slot("wall_3", "Walls, variant 2")}${slot("floor", "Floors")}${slot("floor_2", "Floors, variant")}${slot("ceiling", "Ceilings")}</div>
         ${known.length ? "" : `<p class="hint-line">No materials yet. Make an asset of kind Material for each surface, or build in plain grey to try the layout first.</p>`}
         <div class="action-row"><button class="primary" data-kit-build="${esc(a.path)}">${room ? "Rebuild kit" : "Build kit"}</button>
           ${room ? `<a class="ghost btn-link" href="${esc(fileUrl(`${dirOf(room.path)}/kit.json`))}" download>${icon("download")}kit.json</a>` : ""}
           <button type="button" class="ghost" data-export="${esc(a.path)}">${icon("box")}Export</button></div>
       </div>
     </div>
-    ${models.length ? `<h2 class="block-title" id="out-3d">3D models</h2>${outputGrid(models, "", "3d")}` : ""}
+    ${models.length ? `<h2 class="block-title" id="out-3d">3D models</h2>${outputGrid(models, "", "kit")}` : ""}
     <h2 class="block-title">Notes</h2>
     <div class="doc-bar"><span class="path"><bdi>${esc(a.path)}</bdi></span><button class="ghost" data-edit>Edit document</button></div>
     <div class="md">${renderMarkdown(a.body.replace(/^#\s+.+$/m, ""), dirOf(a.path))}</div>`;
@@ -2827,7 +2961,7 @@ function gameTools(a) {
   const winner = esc(a.winner || "");
   const tool = (attrs, name, label, enabled, tip) => `<button type="button" class="tool" ${attrs}${enabled ? "" : " disabled"} title="${esc(tip)}">${icon(name)}${label}</button>`;
   const three = !is2d() || glb;
-  if (a.kind === "material") return `<div class="tool-row"><div class="field-label">Game tools</div><div class="tool-btns">${tool(`data-export="${esc(a.path)}"`, "box", "Export", true, "ZIP for Godot, Unity or Unreal")}</div></div>`;
+  if (a.kind === "material" || a.kind === "level") return `<div class="tool-row"><div class="field-label">Game tools</div><div class="tool-btns">${tool(`data-export="${esc(a.path)}"`, "box", "Export", true, "ZIP for Godot, Unity or Unreal")}</div></div>`;
   return `<div class="tool-row"><div class="field-label">Game tools</div><div class="tool-btns">
     ${three ? `${tool(`data-action="rig"`, "bones", "Rig", glb, glb ? "Add a skeleton to the GLB model. Works on textured humanoid characters facing forward" : "Make a GLB model, or drop one on this page, first")}
     ${tool(`data-action="animate"`, "play", "Animate", rigged, rigged ? "Preset animations for the rigged model" : "Rig the model first")}` : ""}
@@ -3373,7 +3507,7 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-cli-logout],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-cli-logout],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-levels],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
@@ -3524,6 +3658,7 @@ document.addEventListener("click", async (event) => {
   if (t.dataset.folder !== undefined) return go({ type: "folder", path: t.dataset.folder });
   if (t.dataset.home !== undefined) return go({ type: "home" });
   if (t.dataset.vault !== undefined) return go({ type: "vault" });
+  if (t.dataset.levels !== undefined) return go({ type: "levels" });
   if (t.dataset.vaultFilter) { state.vaultHistory = !!$("#vaultHistory")?.checked; state.vaultFilter = t.dataset.vaultFilter; return renderVault(); }
   if (t.dataset.vaultZip !== undefined) return vaultZip(t.dataset.vaultZip);
   if (t.dataset.vaultFolder !== undefined) return vaultToFolder();
@@ -4841,7 +4976,7 @@ async function paletteItems() {
   const here = state.view.type === "folder" ? state.view.path : "";
   const actions = [
     ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ...(is2d() ? [] : [["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")], ["Add 3D model", "upload", pickModelFile]])] : []),
-    ["Overview", "layers", () => go({ type: "home" })], ["Final vault", "box", () => go({ type: "vault" })],
+    ["Overview", "layers", () => go({ type: "home" })], ["Final vault", "box", () => go({ type: "vault" })], ["Levels", "map", () => go({ type: "levels" })],
     [here ? `Generate missing in ${humanize(here.split("/").pop())}` : "Generate all missing", "sparkle", () => batchDialog(here)],
     ...(here ? [["New asset here", "sparkle", () => newAssetDialog(here)]] : []),
     ...(is2d() ? [] : [["3D lineup", "cube", openLineup]]), ["Download press kit", "download", downloadPressKit],

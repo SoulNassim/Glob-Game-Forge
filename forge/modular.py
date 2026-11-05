@@ -29,7 +29,13 @@ TEXTURE_SIZE = 1024
 MAP_NAMES = ("albedo", "normal", "roughness", "height", "orm")
 DEFAULT_TILE_M = 2.0
 SLOTS = ("wall", "floor", "ceiling")
+# Extra surfaces of the same size, so generated levels don't repeat one texture. They exist only when a material is set.
+VARIANT_SLOTS = ("wall_2", "wall_3", "floor_2")
 PLACEHOLDER_GREY = {"wall": 0.55, "floor": 0.4, "ceiling": 0.65}
+DEFAULT_RELIEF_M = 0.05
+RELIEF_STEP_M = 0.05  # one grid square of a relief surface, about a hand's width: enough for a close-up camera
+RELIEF_MAX_STEPS = 120
+FLOOR_RELIEF_SHARE = 0.4  # floors stay low, so feet and props sit level
 KIT_MANIFEST = "kit.json"
 SAMPLE_SUFFIX = "-sample-room"
 
@@ -206,21 +212,78 @@ _FACES = {
 }
 
 
+class _Relief:
+    """A material's height map, sampled by texture position, for surfaces that really have depth."""
+
+    def __init__(self, height_png: Path, depth: float) -> None:
+        image = Image.open(height_png).convert("L").resize((512, 512), Image.BOX)
+        self.values = _blur_wrapped(image, 1.5).tobytes()
+        self.size = 512
+        self.depth = depth
+
+    def at(self, u: float, v: float) -> float:
+        """How far below the surface's plane this spot sits, in metres: the highest parts touch the plane."""
+        x = int(u % 1 * self.size) % self.size
+        y = int(v % 1 * self.size) % self.size
+        return (1 - self.values[y * self.size + x] / 255) * self.depth
+
+
 class _Geometry:
     """Axis-aligned boxes, one vertex list per material slot. UVs come from position, so a surface runs on across
-    neighbouring pieces when the cell is a whole number of texture repeats."""
+    neighbouring pieces when the cell is a whole number of texture repeats.
 
-    def __init__(self, tiles: dict[str, float]) -> None:
+    A relief face is a grid pushed into the box and never out of it: the piece keeps its exact size, and the height map
+    tiles, so neighbouring walls still meet. Its open edges end against the box's own side faces."""
+
+    def __init__(self, tiles: dict[str, float], reliefs: dict[str, _Relief] | None = None) -> None:
         self.tiles = tiles
+        self.reliefs = reliefs or {}
         self.slots: dict[str, dict[str, list]] = {}
 
-    def box(self, slot: str, x: tuple[float, float], y: tuple[float, float], z: tuple[float, float], skip: tuple[str, ...] = ()) -> None:
+    def _relief_face(self, slot: str, face: tuple, centre: tuple, half: tuple) -> None:
+        normal, across, up = face
+        data = self.slots.setdefault(slot, {"p": [], "n": [], "t": [], "uv": [], "i": []})
+        relief, tile = self.reliefs[slot], self.tiles[slot]
+        width = 2 * sum(abs(across[i]) * half[i] for i in range(3))
+        height = 2 * sum(abs(up[i]) * half[i] for i in range(3))
+        columns = max(1, min(RELIEF_MAX_STEPS, round(width / RELIEF_STEP_M)))
+        rows = max(1, min(RELIEF_MAX_STEPS, round(height / RELIEF_STEP_M)))
+        start = len(data["p"])
+        plane = tuple(centre[i] + normal[i] * half[i] for i in range(3))
+        nudge = 1 / relief.size
+        for row in range(rows + 1):
+            for column in range(columns + 1):
+                a = (column / columns - 0.5) * width
+                b = (row / rows - 0.5) * height
+                flat = tuple(plane[i] + across[i] * a + up[i] * b for i in range(3))
+                u = sum(flat[i] * across[i] for i in range(3)) / tile
+                v = -sum(flat[i] * up[i] for i in range(3)) / tile
+                sink = relief.at(u, v)
+                # The slope of the surface, from the heights either side, tilts the normal.
+                slope_a = (relief.at(u - nudge, v) - relief.at(u + nudge, v)) / (2 * nudge * tile)
+                slope_b = (relief.at(u, v + nudge) - relief.at(u, v - nudge)) / (2 * nudge * tile)
+                raw = tuple(normal[i] - across[i] * slope_a - up[i] * slope_b for i in range(3))
+                length = math.sqrt(sum(value * value for value in raw))
+                data["p"].append(tuple(flat[i] - normal[i] * sink for i in range(3)))
+                data["n"].append(tuple(value / length for value in raw))
+                data["t"].append((*across, 1))
+                data["uv"].append((u, v))
+        stride = columns + 1
+        for row in range(rows):
+            for column in range(columns):
+                a = start + row * stride + column
+                data["i"] += [a, a + 1, a + stride + 1, a, a + stride + 1, a + stride]
+
+    def box(self, slot: str, x: tuple[float, float], y: tuple[float, float], z: tuple[float, float], skip: tuple[str, ...] = (), relief: tuple[str, ...] = ()) -> None:
         data = self.slots.setdefault(slot, {"p": [], "n": [], "t": [], "uv": [], "i": []})
         centre = ((x[0] + x[1]) / 2, (y[0] + y[1]) / 2, (z[0] + z[1]) / 2)
         half = ((x[1] - x[0]) / 2, (y[1] - y[0]) / 2, (z[1] - z[0]) / 2)
         tile = self.tiles[slot]
         for name, (normal, across, up) in _FACES.items():
             if name in skip:
+                continue
+            if name in relief and slot in self.reliefs:
+                self._relief_face(slot, (normal, across, up), centre, half)
                 continue
             start = len(data["p"])
             for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
@@ -239,7 +302,7 @@ class _Geometry:
         return {"min": [round(min(p[i] for p in points), 4) for i in range(3)], "max": [round(max(p[i] for p in points), 4) for i in range(3)]}
 
 
-def _pieces(cell: float, height: float, thick: float, tiles: dict[str, float]) -> list[dict[str, Any]]:
+def _pieces(cell: float, height: float, thick: float, tiles: dict[str, float], reliefs: dict[str, _Relief] | None = None) -> list[dict[str, Any]]:
     edge = cell / 2
     north = (-edge, -edge + thick)  # a wall's depth: inside the cell, on its north edge
     door_w, door_h = min(1.2, cell * 0.6), min(2.2, height * 0.8)
@@ -247,34 +310,41 @@ def _pieces(cell: float, height: float, thick: float, tiles: dict[str, float]) -
     post = max(0.4, thick * 2) / 2
     open_sides = {"north": "open", "east": "open", "south": "open", "west": "open"}
 
-    def piece(name: str, layer: str, sides: dict[str, str] | None = None, footprint: tuple[int, int] = (1, 1)) -> dict[str, Any]:
-        entry = {"name": name, "layer": layer, "sides": {**open_sides, **(sides or {})}, "footprint": list(footprint), "geo": _Geometry(tiles)}
+    def piece(name: str, layer: str, sides: dict[str, str] | None = None, footprint: tuple[int, int] = (1, 1), variant_of: str = "") -> dict[str, Any]:
+        entry = {"name": name, "layer": layer, "sides": {**open_sides, **(sides or {})}, "footprint": list(footprint), "geo": _Geometry(tiles, reliefs), "variant_of": variant_of}
         made.append(entry)
         return entry["geo"]
 
     made: list[dict[str, Any]] = []
-    piece("floor", "floor").box("floor", (-edge, edge), (-thick, 0), (-edge, edge))
+    room_face = ("+z",)  # the side of a north wall that faces into the room
+    piece("floor", "floor").box("floor", (-edge, edge), (-thick, 0), (-edge, edge), relief=("+y",))
+    if "floor_2" in tiles:
+        piece("floor_2", "floor", variant_of="floor").box("floor_2", (-edge, edge), (-thick, 0), (-edge, edge), relief=("+y",))
     piece("ceiling", "ceiling").box("ceiling", (-edge, edge), (height, height + thick), (-edge, edge))
-    piece("wall", "wall", {"north": "wall"}).box("wall", (-edge, edge), (0, height), north, skip=("-y",))
-    piece("wall_low", "wall", {"north": "low"}).box("wall", (-edge, edge), (0, min(1.0, height / 2)), north, skip=("-y",))
+    piece("wall", "wall", {"north": "wall"}).box("wall", (-edge, edge), (0, height), north, skip=("-y",), relief=room_face)
+    for variant in ("wall_2", "wall_3"):
+        if variant in tiles:
+            piece(variant, "wall", {"north": "wall"}, variant_of="wall").box(variant, (-edge, edge), (0, height), north, skip=("-y",), relief=room_face)
+    piece("wall_low", "wall", {"north": "low"}).box("wall", (-edge, edge), (0, min(1.0, height / 2)), north, skip=("-y",), relief=room_face)
 
     door = piece("doorway", "wall", {"north": "door"})
-    door.box("wall", (-edge, -door_w / 2), (0, height), north, skip=("-y",))
-    door.box("wall", (door_w / 2, edge), (0, height), north, skip=("-y",))
-    door.box("wall", (-door_w / 2, door_w / 2), (door_h, height), north, skip=("+x", "-x"))
+    door.box("wall", (-edge, -door_w / 2), (0, height), north, skip=("-y",), relief=room_face)
+    door.box("wall", (door_w / 2, edge), (0, height), north, skip=("-y",), relief=room_face)
+    door.box("wall", (-door_w / 2, door_w / 2), (door_h, height), north, skip=("+x", "-x"), relief=room_face)
 
     window = piece("window", "wall", {"north": "window"})
-    window.box("wall", (-edge, -window_w / 2), (0, height), north, skip=("-y",))
-    window.box("wall", (window_w / 2, edge), (0, height), north, skip=("-y",))
-    window.box("wall", (-window_w / 2, window_w / 2), (0, sill), north, skip=("+x", "-x", "-y"))
-    window.box("wall", (-window_w / 2, window_w / 2), (window_top, height), north, skip=("+x", "-x"))
+    window.box("wall", (-edge, -window_w / 2), (0, height), north, skip=("-y",), relief=room_face)
+    window.box("wall", (window_w / 2, edge), (0, height), north, skip=("-y",), relief=room_face)
+    window.box("wall", (-window_w / 2, window_w / 2), (0, sill), north, skip=("+x", "-x", "-y"), relief=room_face)
+    window.box("wall", (-window_w / 2, window_w / 2), (window_top, height), north, skip=("+x", "-x"), relief=room_face)
 
+    # The two walls of a corner overlap, so a relief hollow in one never opens a slit beside the other.
     inner = piece("corner_inner", "wall", {"north": "wall", "east": "wall"})
-    inner.box("wall", (-edge, edge), (0, height), north, skip=("-y",))
-    inner.box("wall", (edge - thick, edge), (0, height), (-edge + thick, edge), skip=("-y", "-z"))
+    inner.box("wall", (-edge, edge), (0, height), north, skip=("-y",), relief=room_face)
+    inner.box("wall", (edge - thick, edge), (0, height), (-edge, edge), skip=("-y",), relief=("-x",))
 
     piece("corner_outer", "wall").box("wall", (edge - thick, edge), (0, height), north, skip=("-y",))
-    piece("pillar", "decor").box("wall", (-post, post), (0, height), (-post, post), skip=("-y",))
+    piece("pillar", "decor").box("wall", (-post, post), (0, height), (-post, post), skip=("-y",), relief=("+x", "-x", "+z", "-z"))
 
     # Stairs climb one storey towards the north, across this cell and the one north of it.
     stairs = piece("stairs", "floor", {"north": "stairs_top", "south": "stairs_bottom", "east": "wall", "west": "wall"}, footprint=(1, 2))
@@ -358,7 +428,7 @@ def _write_glb(pieces: list[dict[str, Any]], materials: dict[str, dict[str, Any]
                     "occlusionTexture": texture(maps["orm"]),
                 }
             else:
-                grey = PLACEHOLDER_GREY[slot]
+                grey = PLACEHOLDER_GREY[slot.split("_")[0]]
                 entry = {"name": material["name"], "pbrMetallicRoughness": {"baseColorFactor": [grey, grey, grey, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.9}}
             gltf_materials.append(entry)
             index_of[key] = len(gltf_materials) - 1
@@ -445,6 +515,8 @@ KIT_RULES = (
     "`stairs` covers its own cell and the one north of it: leave the ceiling out above them, and walk off at the north end one storey up.",
     "For wave function collapse: `open`, `door` and `stairs_*` can be walked through; `wall`, `window` and `low` block the way.",
     "`sample` is a working room: match it to check your placement code.",
+    "A piece with `variant_of` fits anywhere the named piece does: swap at random so walls and floors don't repeat.",
+    "`lod1` is the same piece without relief, in the same file: use it far from the camera, and as the collision shape.",
 )
 
 
@@ -459,14 +531,23 @@ def build_kit(ws_dir: Path, asset_rel: str) -> dict[str, Any]:
     if thick > cell / 4:
         raise ValueError("Walls can be at most a quarter of the cell thick.")
 
-    materials, tiles, assets = {}, {}, {}
-    for slot in SLOTS:
+    depth = _number(meta, "kit_relief", DEFAULT_RELIEF_M, 0, 0.5, "Relief depth")
+    materials, tiles, assets, reliefs = {}, {}, {}, {}
+    wanted = list(SLOTS) + [slot for slot in VARIANT_SLOTS if meta.get(f"kit_{slot}")]
+    for slot in wanted:
         materials[slot], tiles[slot], assets[slot] = _kit_material(ws_dir, str(meta.get(f"kit_{slot}") or ""), slot, cell)
-    pieces = _pieces(cell, height, thick, tiles)
+        maps = materials[slot].get("maps")
+        if maps and depth and not slot.startswith("ceiling"):
+            reliefs[slot] = _Relief(maps["height"], depth * (FLOOR_RELIEF_SHARE if slot.startswith("floor") else 1))
+    pieces = _pieces(cell, height, thick, tiles, reliefs)
     by_name = {item["name"]: item for item in pieces}
+    # A plain version of any piece with relief, for distance and collision.
+    plain = {item["name"]: item for item in _pieces(cell, height, thick, tiles)} if reliefs else {}
+    lods = [{**plain[item["name"]], "name": f"{item['name']}_lod1"} for item in pieces if item["geo"].triangles() != plain.get(item["name"], item)["geo"].triangles()]
 
     spacing = cell * 1.5
     row = [{"name": item["name"], "piece": item["name"], "position": [(i - (len(pieces) - 1) / 2) * spacing, 0.0, 0.0]} for i, item in enumerate(pieces)]
+    row += [{"name": item["name"], "piece": item["name"], "position": [(i - (len(lods) - 1) / 2) * spacing, 0.0, height + spacing]} for i, item in enumerate(lods)]
     sample = _sample_room()
     room = [{"name": f"{p['piece']}_{i}", "piece": p["piece"], "rotation": p["rotation"], "position": [(p["cell"][0] - 1) * cell, 0.0, (p["cell"][1] - 1) * cell]} for i, p in enumerate(sample)]
 
@@ -476,24 +557,27 @@ def build_kit(ws_dir: Path, asset_rel: str) -> dict[str, Any]:
     room_file = folder / f"{asset_path.stem}{SAMPLE_SUFFIX}.glb"
     for model in (kit_file, room_file):
         model.with_name(f"{model.stem}_thumb.png").unlink(missing_ok=True)  # it shows the kit as it was
-    kit_file.write_bytes(_write_glb(pieces, materials, row))
+    kit_file.write_bytes(_write_glb(pieces + lods, materials, row))
     room_file.write_bytes(_write_glb([by_name[name] for name in sorted({p["piece"] for p in sample})], materials, room))
 
     manifest = {
         "format": "glob-modular-kit", "version": 1, "name": asset_path.stem, "file": kit_file.name, "sample_file": room_file.name,
         "units": "metres", "up": "+Y",
-        "grid": {"cell": cell, "height": height, "wall_thickness": thick},
+        "grid": {"cell": cell, "height": height, "wall_thickness": thick, "relief_depth": depth if reliefs else 0},
         "directions": {"north": "-Z", "east": "+X", "south": "+Z", "west": "-X"},
         "pivot": "centre of the piece's first cell, on the floor plane",
         "rotation_y": "degrees about +Y; 90 turns north to west",
-        "materials": {slot: {"asset": assets[slot] or None, "tile_metres": round(tiles[slot], 4)} for slot in SLOTS},
+        "materials": {slot: {"asset": assets[slot] or None, "tile_metres": round(tiles[slot], 4)} for slot in wanted},
         "rules": list(KIT_RULES),
         "pieces": [{
             "name": item["name"], "layer": item["layer"], "footprint_cells": item["footprint"], "sides": item["sides"],
             "bounds": item["geo"].bounds(), "triangles": item["geo"].triangles(), "materials": sorted(item["geo"].slots),
             "rotations": [0, 90, 180, 270],
+            **({"variant_of": item["variant_of"]} if item["variant_of"] else {}),
+            **({"lod1": f"{item['name']}_lod1"} if any(lod["name"] == f"{item['name']}_lod1" for lod in lods) else {}),
         } for item in pieces],
         "sample": [{"piece": p["piece"], "cell": p["cell"], "rotation_y": p["rotation"]} for p in sample],
+        **({"also_in_this_pack": {"props": str(meta["kit_props"]), "trim": str(meta["kit_trim"]), "note": "Find these folders' assets in ASSETS.md. Put trim over wall joins and in corners to hide them."}} if meta.get("kit_props") else {}),
     }
     manifest_file = folder / KIT_MANIFEST
     manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

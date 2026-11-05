@@ -1,6 +1,6 @@
 [project]
 name = "forge-assets"
-version = "3.2.0"
+version = "3.3.0"
 description = "Glob: a local, agent-friendly game-asset forge (prompts to consistent 2D art and 3D models)"
 readme = "README.md"
 license = "MIT"

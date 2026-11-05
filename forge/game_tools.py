@@ -22,7 +22,7 @@ import httpx
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from forge.asset_studio import ASSET_KINDS, _ws_rel, output_dir, read_asset, update_asset
-from forge.blueprint_contract import serialize_frontmatter
+from forge.blueprint_contract import serialize_frontmatter, split_frontmatter
 from forge.config import load_config
 from forge.overview import IMAGE_SUFFIXES, MODEL_SUFFIXES, resolve_rel, slugify
 
@@ -325,6 +325,11 @@ async def name_sheet_items(ws_dir: Path, image_rel: str, boxes: list[dict[str, A
     return {"names": [f"Prop {i}" for i in range(1, len(boxes) + 1)], "source": "numbers", "note": note}
 
 
+def is_trim_sheet(name: str) -> bool:
+    """A level's trim sheet, as named when it was made. Its pieces go with the level's pack, not its props."""
+    return "-trim-" in name
+
+
 def split_image(ws_dir: Path, asset_rel: str, image_rel: str, boxes: list[dict[str, Any]], as_assets: bool = False) -> list[str]:
     """Cut boxes out of an image. Parts go to ``<asset>/parts/``; with ``as_assets`` every part becomes
     its own asset next to this one, with the cut-out as its winner image.
@@ -333,9 +338,10 @@ def split_image(ws_dir: Path, asset_rel: str, image_rel: str, boxes: list[dict[s
     asset_path, meta, _ = read_asset(ws_dir, asset_rel)
     image = Image.open(_asset_image(ws_dir, image_rel))
     level_sheet = meta.get("kind") == "level"
+    trim_sheet = level_sheet and is_trim_sheet(Path(image_rel).name)
     if level_sheet and as_assets:
-        props_dir = asset_path.parent / f"{asset_path.stem}-props"
-        props_dir.mkdir(exist_ok=True)
+        props_dir = asset_path.parent / f"{asset_path.stem}-pack" / "trim" if trim_sheet else asset_path.parent / f"{asset_path.stem}-props"
+        props_dir.mkdir(parents=True, exist_ok=True)
     if not boxes:
         raise ValueError("Draw at least one box.")
     created = []
@@ -370,7 +376,7 @@ def split_image(ws_dir: Path, asset_rel: str, image_rel: str, boxes: list[dict[s
     if not created:
         raise ValueError("The boxes were too small to cut.")
     if level_sheet and as_assets:
-        update_asset(ws_dir, asset_rel, {"props_cut": len(created)})  # the level kit's step 3 is done
+        update_asset(ws_dir, asset_rel, {"trim_cut" if trim_sheet else "props_cut": len(created)})  # that part of the pack is done
     return created
 
 
@@ -612,6 +618,11 @@ def export_zip(ws_dir: Path, rel: str, engine: str) -> tuple[bytes, str]:
     target = resolve_rel(ws_dir, rel) if rel else ws_dir.resolve()
     if target.is_file():
         assets = [target]
+        # A level takes its whole asset pack along.
+        if split_frontmatter(target.read_text(encoding="utf-8", errors="ignore"))[0].get("kind") == "level":
+            for folder in (target.parent / f"{target.stem}-props", target.parent / f"{target.stem}-pack"):
+                if folder.is_dir():
+                    assets += sorted(folder.rglob("*.md"))
     elif target.is_dir():
         assets = sorted(p for p in target.rglob("*.md") if "pillars" not in p.parts and ".trash" not in p.parts)
     else:

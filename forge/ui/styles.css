@@ -1831,3 +1831,24 @@ button:disabled, button[disabled] { opacity: .38; cursor: not-allowed; filter: g
 .kit-form span { display: flex; align-items: center; gap: 6px; }
 .kit-form input, .kit-form select { width: 100%; min-width: 0; }
 .btn-link { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+
+/* levels and asset packs */
+.pack-btns { display: inline-flex; gap: 6px; }
+.level-kit .pack-go { background: var(--sakura); color: #17090e; border-color: var(--sakura); font-weight: 600; }
+.pack-note { margin: 10px 0 0; font-size: 12px; color: var(--sakura-soft); }
+.pack-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 8px 0 18px; }
+.pack-tile { position: relative; display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 12px; background: none; color: inherit; text-align: left; font-size: 12px; cursor: pointer; min-width: 0; }
+.pack-tile img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: rgba(255, 255, 255, .04); }
+.pack-tile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pack-tile input { position: absolute; top: 12px; left: 12px; width: 18px; height: 18px; }
+.pack-tile em { position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 999px; background: rgba(9, 9, 11, .8); font-style: normal; font-size: 11px; }
+.pack-tile em svg { width: 12px; height: 12px; }
+.pack-3d { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 22px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 12px; font-size: 13px; color: var(--muted); }
+.levels-lead { max-width: 62ch; margin: 0 0 14px; color: var(--muted); }
+.levels-empty { margin-top: 18px; }
+.level-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
+.level-card { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 14px; background: none; color: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.level-card:hover { border-color: var(--sakura); }
+.level-card img, .level-blank { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 9px; background: rgba(255, 255, 255, .04); }
+.level-blank { display: grid; place-items: center; color: var(--faint); }
+.level-card small { color: var(--faint); font-size: 12px; }

@@ -66,26 +66,22 @@ The flow:
 </tr>
 </table>
 
-### Level kits
+### Levels
 
 ![A crypt room picture, its prop sheet, and the ten props Glob cut out of it](docs/screenshots/level-kit.webp)
 
-Make an asset of kind **Level kit** and describe one section of your level. Its page walks you through four steps:
+Open **Levels** in the sidebar and press **New level**.
 
-1. **Picture the level**: generate it and pick the one you like.
-2. **Make sheet**: one image with every prop from that picture, drawn once each on a plain background.
-3. **Cut**: free, on your computer. Glob finds each prop, its chat names them ("Wooden Barrel", "Iron Brazier"), and each becomes its own asset with the background removed, in `<level>-props/`.
-4. **Use the props**: make 3D for the ones you want, or use them as 2D sprites.
+1. **Describe the place and pick a picture.** Nothing else is made until you approve one.
+2. **Press Turn into asset pack.** Tick what you want and see the cost first. Walls, floors and ceilings can't be cut out of a picture because its perspective and lighting are baked in, so Glob redraws each one from your picture, flat-on. They match the look but aren't exact copies. The default is three walls, two floors, a ceiling, a prop sheet and a trim sheet of pillars, arches and door frames: eight images.
+3. **Glob does the rest for free.** It cuts and names the props and trim, makes each surface seamless with normal, roughness and height maps, and builds the modular kit. If an image fails, the rest still finishes, and pressing **Finish pack** only makes what's missing.
+4. **Tick which props go 3D.** The total shows before anything is spent, and the rest stay free cut-outs.
 
-### Modular kits
+Your coding agent finds it all in `glob/ASSETS.md`. The kit is one GLB with every piece as a named node (floor, ceiling, wall and its variants, low wall, doorway, window, inner and outer corners, pillar, stairs), a sample room, and `kit.json`, which lists each piece's size, pivot, rotations and what each side connects to, so it can write a level generator without guessing.
 
-For levels built from pieces, including procedural ones. AI meshes never line up, so Glob builds the shapes itself and AI only paints them. It's free and runs on your computer, apart from the images you generate for materials.
+**Walls with real depth:** AI meshes never line up, so Glob builds the pieces itself at exact sizes and presses the surface's height map into them. Cracks and bricks are real geometry, and each piece stays inside its cell, so neighbours still meet. Every piece with relief also has a plain `_lod1` version for distance and collision.
 
-1. **Materials:** make an asset of kind **Material** for each surface ("wet flagstone"), generate an image and pick it, then press **Make tileable**. Glob makes it seamless, adds normal, roughness and height maps, and shows it repeating so you can check it.
-2. **Kit:** make an asset of kind **Modular kit**, set the cell size and wall height, choose materials for walls, floors and ceilings (or stay in plain grey), and press **Build kit**. Change a material and the kit reskins.
-3. **Your coding agent** finds the kit in `glob/ASSETS.md`: one GLB with every piece as a named node (floor, ceiling, wall, low wall, doorway, window, inner and outer corners, pillar, stairs), a sample room, and `kit.json`, which lists each piece's size, pivot, rotations and what each side connects to, so it can write a level generator without guessing.
-
-Materials are also useful alone, for any surface in your game. Very regular patterns such as bricks work best when the generated image already tiles; on other images a cut can show where the two sides were joined, so check the repeating preview.
+You can also make a **Material** or **Modular kit** asset by hand and pick your own surfaces. Regular patterns such as bricks work best when the generated image already tiles; on other images a cut can show where the two sides were joined, so check the repeating preview.
 
 ## Get started
 
