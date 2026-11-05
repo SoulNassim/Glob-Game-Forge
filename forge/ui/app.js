@@ -1398,7 +1398,7 @@ async function saveEndpoint() {
   } catch (err) { toast(err.message, true); }
 }
 
-const KIND_PLURAL = { character: "Characters", creature: "Creatures", item: "Items", weapon: "Weapons", prop: "Props", vehicle: "Vehicles", environment: "Places", level: "Level kits", ui: "UI", vfx: "Effects" };
+const KIND_PLURAL = { character: "Characters", creature: "Creatures", item: "Items", weapon: "Weapons", prop: "Props", vehicle: "Vehicles", environment: "Places", level: "Level kits", material: "Materials", kit: "Modular kits", ui: "UI", vfx: "Effects" };
 
 async function testModel(id) {
   const out = $(`#test-${id.replace(/[^a-z0-9]/gi, "_")}`);
@@ -1629,7 +1629,7 @@ async function addCandidateImages(files) {
 
 const KIND_ICON = new Proxy({}, { get: (_, k) => (ICON[k] ? icon(k) : AUDIO_KINDS.includes(k) ? icon("sound") : "") });
 
-const KIND_LABEL = { environment: "Place", level: "Level kit", ui: "UI", vfx: "Effect", sfx: "Sound effect", voice: "Voice line", music: "Music" };
+const KIND_LABEL = { environment: "Place", level: "Level kit", kit: "Modular kit", ui: "UI", vfx: "Effect", sfx: "Sound effect", voice: "Voice line", music: "Music" };
 
 function kindTags(kinds, selected) {
   return `<div class="kind-tags" role="radiogroup" aria-label="Kind">${kinds.map((k) => `<label class="kind-chip"><input type="radio" name="kind" value="${esc(k)}" ${k === selected ? "checked" : ""}><span>${KIND_ICON[k] || "•"} ${esc(KIND_LABEL[k] || humanize(k))}</span></label>`).join("")}</div>`;
@@ -1650,10 +1650,13 @@ const KIND_EXAMPLE = {
   sfx: ["Coin Pickup", "A short bright metallic coin chime, under half a second"],
   voice: ["Shopkeeper Greeting", "Welcome, traveller! Take a look, everything's on sale."],
   music: ["Forest Theme", "Calm looping flute and harp melody, gentle and mysterious"],
+  material: ["Wet Flagstone", "Worn dark flagstones with moss in the cracks"],
+  kit: ["Crypt Kit", "Walls, floors and doorways for the sunken crypt"],
 };
+const askFor = (kind) => (kind === "voice" ? "What does the character say?" : AUDIO_KINDS.includes(kind) ? "What does it sound like?" : kind === "kit" ? "What is it for?" : "What does it look like?");
 
 async function newAssetDialog(folder) {
-  const { kinds } = await studioOptions();
+  const kinds = (await studioOptions()).kinds.filter((k) => k !== "kit" || !is2d());  // kits are 3D pieces
   // Suggest the kind from the folder name (creatures → creature) when it matches one.
   const guess = kinds.find((k) => (folder || "").toLowerCase().split("/").some((part) => part.replace(/^\d+[-_ ]*/, "").replace(/s$/, "").includes(k))) || "";
   openDialog(`
@@ -1662,7 +1665,7 @@ async function newAssetDialog(folder) {
       <p>Creates a document in <code>${esc(folder || "the project root")}</code> that you can generate images and 3D for.</p>
       <label>Name<input name="title" maxlength="80" placeholder="${esc(KIND_EXAMPLE[guess]?.[0] || KIND_EXAMPLE.character[0])}" autofocus></label>
       <div class="dlg-field"><span>Kind</span>${kindTags(kinds, guess)}</div>
-      <label><span id="naWhat">${AUDIO_KINDS.includes(guess) ? "What does it sound like?" : "What does it look like?"}</span><textarea name="prompt" rows="3" placeholder="${esc(KIND_EXAMPLE[guess]?.[1] || KIND_EXAMPLE.character[1])}"></textarea></label>
+      <label><span id="naWhat">${askFor(guess)}</span><textarea name="prompt" rows="3" placeholder="${esc(KIND_EXAMPLE[guess]?.[1] || KIND_EXAMPLE.character[1])}"></textarea></label>
       <p class="form-why" id="naWhy" hidden>Give it a name first.</p>
       <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">Create</button></div>
     </form>`);
@@ -1673,7 +1676,7 @@ async function newAssetDialog(folder) {
     const form = event.target.form;
     form.title.placeholder = name;
     form.prompt.placeholder = prompt;
-    $("#naWhat").textContent = event.target.value === "voice" ? "What does the character say?" : AUDIO_KINDS.includes(event.target.value) ? "What does it sound like?" : "What does it look like?";
+    $("#naWhat").textContent = askFor(event.target.value);
   });
   $("#newAssetForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1832,6 +1835,7 @@ async function renderViewBody() {
     const isMd = view.path.toLowerCase().endsWith(".md");
     if (isMd && !view.editing) {
       const asset = await api(`/api/studio/asset?path=${encodeURIComponent(view.path)}`).catch(() => null);
+      if (asset?.kind === "kit") state.materials = (await api("/api/studio/materials").catch(() => ({ materials: [] }))).materials;
       if (asset?.is_asset) { content.innerHTML = renderAssetPage(asset); content.dataset.dropAsset = ""; queueThumbs(asset); return; }
     }
     content.innerHTML = `
@@ -1857,7 +1861,7 @@ function vaultRow(e) {
   const formats = Object.keys(e.model?.formats || {});
   const files = [e.winner ? e.winner.split(".").pop().toUpperCase() : "", ...formats.map((f) => f.toUpperCase())].filter(Boolean);
   const exportPath = [e.folder, e.name].filter(Boolean).join("/");
-  const meshBtn = AUDIO_KINDS.includes(e.kind) || (is2d() && !e.model) ? "" : e.model
+  const meshBtn = AUDIO_KINDS.includes(e.kind) || e.kind === "material" || (is2d() && !e.model) ? "" : e.model
     ? `<button class="vault-thumb mesh" data-view-model="${esc(e.model.path)}" title="Open in the 3D viewer">${e.model.thumb ? `<img src="${esc(fileUrl(e.model.thumb))}" alt="" loading="lazy">` : icon("cube")}</button>`
     : `<button class="vault-thumb mesh missing" data-open="${esc(e.path)}" title="Make 3D"><span>No 3D</span></button>`;
   return `<div class="vault-row${e.ready ? " ready" : ""}">
@@ -1948,6 +1952,8 @@ function runningJobs(path) {
 }
 
 const ICON = {
+  material: `<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9.5h16M4 15h16M9 4v5.5M15 9.5V15M9 15v5"/>`,
+  kit: `<path d="M4 20V9l4-2v13M8 20h12V11h-5v-3h-3v3H8"/><path d="M4 20h16"/>`,
   folder: `<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>`,
   sparkle: `<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16v4M17 18h4"/>`,
   variant: `<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/>`,
@@ -2138,17 +2144,18 @@ function renderAssetPage(a) {
   // animation counts only as a GLB (Glob's own, with the mesh): an imported FBX clip is usually bones alone.
   const heroModel = [...(o.animations || []).filter((m) => /\.glb$/i.test(m.path)), ...(o.rig || []), ...(o["3d"] || [])].find((m) => m.type === "model");
   if (AUDIO_KINDS.includes(a.kind)) return renderAudioAsset(a, title, jobs);
+  if (a.kind === "kit") return renderKitAsset(a, title);
   return `
     <div class="kicker">Asset / ${esc(a.path)}</div>
     <div class="asset-head"><h1 class="title">${esc(title)}</h1><span class="kind-tag">${esc(a.kind)}</span></div>
     ${problemJobs(a.path).map((j) => `<div class="job-banner bad"><span class="bad-dot">!</span><span class="grow">${esc(ACTION_LABEL[j.action] || j.action)} ${j.status === "interrupted" ? "was interrupted" : "failed"}: ${esc(j.error || "no details")}</span><button type="button" class="mini" data-action="${esc(j.action)}">Try again</button><button type="button" class="mini" data-dismiss-job="${esc(j.id)}">Dismiss</button></div>`).join("")}
     ${jobs.length ? `<div class="job-banner"><span class="spinner"></span>${jobs.map((j) => esc(ACTION_LABEL[j.action] || j.action)).join(", ")} running… results appear here automatically.</div>` : ""}
     <div class="asset-top">
-      <div class="winner-box drop-zone${heroModel && !a.winner ? " hero-3d" : ""}" data-drop-winner${heroModel && !a.winner ? ` data-hero-model="${esc(heroModel.path)}"` : ""} title="Drop an image here to use it as the winner">${a.winner ? `<img src="${esc(fileUrl(a.winner))}" alt="Winner"><span class="drop-hint">Drop an image to replace</span>` : heroModel ? `
+      <div class="winner-box drop-zone${heroModel && !a.winner ? " hero-3d" : ""}" data-drop-winner${heroModel && !a.winner ? ` data-hero-model="${esc(heroModel.path)}"` : ""} title="${is2d() ? "Drop an image here to use it as the winner" : "Drop an image to use it as the winner, or a 3D model to add it"}">${a.winner ? `<img src="${esc(fileUrl(a.winner))}" alt="Winner"><span class="drop-hint">${is2d() ? "Drop an image to replace" : "Drop an image to replace, or a 3D model to add"}</span>` : heroModel ? `
         ${heroModel.thumb ? `<img class="hero-poster" src="${esc(fileUrl(heroModel.thumb))}" alt="">` : ""}<div class="hero-stage"></div>
         <span class="out-badge mesh hero-badge">${icon("cube")}3D · drag to turn</span>
         <button type="button" class="mini hero-open" data-view-model="${esc(heroModel.path)}">${icon("eye")}Open viewer</button>
-        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy">${kindArt(a.kind, "")}No picture yet.<br>${(o.candidates || []).length ? `<button type="button" class="link-btn" data-scroll-candidates>Pick ${(o.candidates || []).length === 1 ? "the candidate" : `one of the ${(o.candidates || []).length} candidates`} below</button>, <b>drop or paste an image here</b>` : "Generate 2D candidates, <b>drop or paste an image here</b>"}<br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
+        <span class="drop-hint">Drop an image to make it the winner</span>` : `<div class="no-thumb big"><p class="drop-copy">${kindArt(a.kind, "")}No picture yet.<br>${(o.candidates || []).length ? `<button type="button" class="link-btn" data-scroll-candidates>Pick ${(o.candidates || []).length === 1 ? "the candidate" : `one of the ${(o.candidates || []).length} candidates`} below</button>, <b>drop or paste an image${is2d() ? "" : " or 3D model"} here</b>` : `Generate 2D candidates, <b>drop or paste an image${is2d() ? "" : " or 3D model"} here</b>`}<br>or <button type="button" class="link-btn" data-pick-winner-file>choose a file</button>.</p></div>`}</div>
       <div class="asset-side">
         <label class="field-label" for="assetPrompt">Prompt: what this ${esc(a.kind)} looks like</label>
         <textarea id="assetPrompt" class="prompt-box" rows="6" data-asset="${esc(a.path)}">${esc(a.prompt)}</textarea>
@@ -2156,9 +2163,10 @@ function renderAssetPage(a) {
           <button class="primary" data-action="candidates">Generate 2D</button>
           <button class="ghost" data-action="variant"${a.winner ? "" : " disabled"}>Variant</button>
           <button class="ghost" data-action="edit"${a.winner ? "" : " disabled"}>Edit image</button>
-          ${is2d() ? "" : `<button class="ghost sem-mesh" data-action="make_3d"${a.winner ? "" : " disabled"}>Make 3D</button>`}
+          ${is2d() || a.kind === "material" ? "" : `<button class="ghost sem-mesh" data-action="make_3d"${a.winner ? "" : " disabled"}>Make 3D</button>`}
         </div>
         ${a.kind === "level" ? levelKit(a) : ""}
+        ${a.kind === "material" ? materialPanel(a) : ""}
         ${gameTools(a)}
         <div class="applied">
           <div class="field-label pillar-head">Pillars sent with every generation
@@ -2732,19 +2740,98 @@ function levelKit(a) {
   </ol></div>`;
 }
 
+// A material: the picked image made seamless, with its maps, shown repeating so a visible seam or grid is easy to spot.
+function materialPanel(a) {
+  const albedo = (a.outputs.textures || []).find((o) => /-albedo\.png$/.test(o.path));
+  const label = !albedo ? "Make tileable" : a.meta.material_source === a.winner ? "Make tileable again" : "Update from the new picture";
+  const url = albedo ? `${fileUrl(albedo.path)}?v=${encodeURIComponent(a.meta.material_built || "")}` : "";
+  return `<div class="level-kit mat-panel"><div class="field-label">${icon("material")} Tiling material</div>
+    ${albedo ? `<div class="mat-tiles" role="img" aria-label="The texture repeated three times each way" style="background-image:url(&quot;${esc(url)}&quot;)"></div>` : `<p class="hint-line">${a.winner ? "Free, on this computer: makes the picture seamless and adds normal, roughness and height maps." : "Generate an image and pick it, then make it tile. That step is free."}</p>`}
+    <div class="mat-actions"><button type="button" class="mini" data-material-build="${esc(a.path)}" ${a.winner ? "" : "disabled"}>${label}</button>
+      <label>One tile covers <input type="number" data-kit-field="tile_m" data-kit-asset="${esc(a.path)}" min="0.1" max="50" step="0.1" value="${esc(a.meta.tile_m || 2)}"> metres</label></div></div>`;
+}
+
+// A modular kit: exact-size pieces Glob builds itself, painted with the project's materials.
+function renderKitAsset(a, title) {
+  const models = a.outputs["3d"] || [];
+  const room = models.find((m) => /-sample-room\.glb$/.test(m.path));
+  const m = a.meta;
+  const field = (name, label, value, min, max, step) => `<label>${label}<span><input type="number" data-kit-field="${name}" data-kit-asset="${esc(a.path)}" min="${min}" max="${max}" step="${step}" value="${esc(m[name] ?? value)}"> m</span></label>`;
+  const known = state.materials || [];
+  const slot = (name, label) => `<label>${label}<select data-kit-field="kit_${name}" data-kit-asset="${esc(a.path)}"><option value="">Plain grey</option>
+    ${known.map((x) => `<option value="${esc(x.path)}" ${x.path === m[`kit_${name}`] ? "selected" : ""} ${x.built ? "" : "disabled"}>${esc(x.title)}${x.built ? "" : " (press Make tileable on it first)"}</option>`).join("")}</select></label>`;
+  return `
+    <div class="kicker">Asset / ${esc(a.path)}</div>
+    <div class="asset-head"><h1 class="title">${esc(title)}</h1><span class="kind-tag">modular kit</span></div>
+    <div class="asset-top">
+      <div class="winner-box${room ? " hero-3d" : ""}"${room ? ` data-hero-model="${esc(room.path)}"` : ""}>${room ? `
+        ${room.thumb ? `<img class="hero-poster" src="${esc(fileUrl(room.thumb))}" alt="">` : ""}<div class="hero-stage"></div>
+        <span class="out-badge mesh hero-badge">${icon("cube")}Sample room · drag to turn</span>
+        <button type="button" class="mini hero-open" data-view-model="${esc(room.path)}">${icon("eye")}Open viewer</button>` : `<div class="no-thumb big"><p class="drop-copy">${kindArt(a.kind, "")}Nothing built yet.<br>Press <b>Build kit</b>: it's free and takes seconds.</p></div>`}</div>
+      <div class="asset-side">
+        <p class="hint-line">Floors, walls, doorways, corners and stairs at exact sizes, so they always line up. Glob builds them on this computer, and your coding agent gets a map of how they fit for procedural levels.</p>
+        <div class="field-label">Grid</div>
+        <div class="kit-form">${field("kit_cell", "Cell size", 2, 0.5, 20, 0.5)}${field("kit_height", "Wall height", 3, 0.5, 30, 0.5)}${field("kit_thickness", "Wall thickness", 0.2, 0.02, 2, 0.05)}</div>
+        <div class="field-label">Materials</div>
+        <div class="kit-form">${slot("wall", "Walls")}${slot("floor", "Floors")}${slot("ceiling", "Ceilings")}</div>
+        ${known.length ? "" : `<p class="hint-line">No materials yet. Make an asset of kind Material for each surface, or build in plain grey to try the layout first.</p>`}
+        <div class="action-row"><button class="primary" data-kit-build="${esc(a.path)}">${room ? "Rebuild kit" : "Build kit"}</button>
+          ${room ? `<a class="ghost btn-link" href="${esc(fileUrl(`${dirOf(room.path)}/kit.json`))}" download>${icon("download")}kit.json</a>` : ""}
+          <button type="button" class="ghost" data-export="${esc(a.path)}">${icon("box")}Export</button></div>
+      </div>
+    </div>
+    ${models.length ? `<h2 class="block-title" id="out-3d">3D models</h2>${outputGrid(models, "", "3d")}` : ""}
+    <h2 class="block-title">Notes</h2>
+    <div class="doc-bar"><span class="path"><bdi>${esc(a.path)}</bdi></span><button class="ghost" data-edit>Edit document</button></div>
+    <div class="md">${renderMarkdown(a.body.replace(/^#\s+.+$/m, ""), dirOf(a.path))}</div>`;
+}
+
+// The hero viewer keeps its model for the same path, so a rebuilt file needs a new one.
+function resetHero() {
+  if (hero) { hero.view?.dispose(); hero.host.remove(); hero = null; }
+}
+
+async function buildKit(path, quiet = false) {
+  await api("/api/studio/kit/build", { method: "POST", body: { asset: path } });
+  resetHero();
+  if (!quiet) toast("Kit built");
+  await renderView();
+}
+
+document.addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-material-build],[data-kit-build]");
+  if (!t || t.disabled) return;
+  t.disabled = true;
+  try {
+    if (t.dataset.kitBuild) return await buildKit(t.dataset.kitBuild);
+    await api("/api/studio/material/build", { method: "POST", body: { asset: t.dataset.materialBuild } });
+    toast("Material ready: seamless, with its maps");
+    await renderView();
+  } catch (err) { toast(err.message, true); t.disabled = false; }
+});
+
+// Settings save as they change; a kit already built follows them, so swapping a material reskins it.
+document.addEventListener("change", async (event) => {
+  const t = event.target.closest("[data-kit-field]");
+  if (!t) return;
+  const path = t.dataset.kitAsset;
+  try {
+    await api("/api/studio/asset", { method: "PATCH", body: { path, fields: { [t.dataset.kitField]: t.type === "number" ? Number(t.value) : t.value } } });
+    if (t.dataset.kitField.startsWith("kit_") && $("#content [data-hero-model]")) await buildKit(path, true);
+  } catch (err) { toast(err.message, true); }
+});
+
 function gameTools(a) {
   const glb = a.outputs["3d"].some((o) => /\.glb$/i.test(o.path));
   const rigged = Boolean(a.meta?.rig_task);
   const winner = esc(a.winner || "");
   const tool = (attrs, name, label, enabled, tip) => `<button type="button" class="tool" ${attrs}${enabled ? "" : " disabled"} title="${esc(tip)}">${icon(name)}${label}</button>`;
   const three = !is2d() || glb;
+  if (a.kind === "material") return `<div class="tool-row"><div class="field-label">Game tools</div><div class="tool-btns">${tool(`data-export="${esc(a.path)}"`, "box", "Export", true, "ZIP for Godot, Unity or Unreal")}</div></div>`;
   return `<div class="tool-row"><div class="field-label">Game tools</div><div class="tool-btns">
-    ${three && a.winner ? tool(`data-action="views"`, "turn", "Turnaround", true, "Side and back views of the winner, for a better 3D model") : ""}
-    ${glb ? tool(`data-action="rig"`, "bones", "Rig", true, "Add a skeleton to the GLB model") : ""}
-    ${rigged ? tool(`data-action="animate"`, "play", "Animate", true, "Preset animations for the rigged model") : ""}
-    ${a.winner ? tool(`data-split="${winner}"`, "scissors", "Split", true, "Cut the winner into separate figures or body parts") : ""}
-    ${a.winner ? tool(`data-icons="${winner}"`, "grid", "Icons", true, "Square inventory icons from the winner") : ""}
-    ${three ? tool(`data-add-model`, "upload", "Add 3D model", true, "GLB, glTF, OBJ or FBX — or drop the file anywhere on this page") : ""}
+    ${three ? `${tool(`data-action="rig"`, "bones", "Rig", glb, glb ? "Add a skeleton to the GLB model. Works on textured humanoid characters facing forward" : "Make a GLB model, or drop one on this page, first")}
+    ${tool(`data-action="animate"`, "play", "Animate", rigged, rigged ? "Preset animations for the rigged model" : "Rig the model first")}` : ""}
+    ${tool(`data-icons="${winner}"`, "grid", "Icons", a.winner, a.winner ? "Square inventory icons from the winner" : "Pick a winner first")}
     ${tool(`data-export="${esc(a.path)}"`, "box", "Export", true, "ZIP for Godot, Unity or Unreal")}
   </div></div>`;
 }
@@ -2820,9 +2907,8 @@ function prepareGameRun() {
 
 // ---- split an image into parts ----
 
-async function splitDialog(image, body = false, sheet = false) {
+async function splitDialog(image, sheet = false) {
   state.split = { image, boxes: [], asAssets: sheet, sheet, note: "" };
-  if (body) return guessBodyParts();
   renderSplit();
   try {
     const { boxes } = await api(`/api/studio/detect-parts?path=${encodeURIComponent(image)}${sheet ? "&sheet=1" : ""}`);
@@ -2988,11 +3074,14 @@ function exportDialog(path) {
 
 // ---- 3D models: drop, thumbnails, viewer, sprite sheets ----
 
+// A model's own files (glTF buffers, OBJ materials, textures) travel with it, so they stay next to it.
+const MODEL_SIDECAR_RE = /\.(bin|mtl|png|jpe?g|webp|tga|bmp)$/i;
+
 async function uploadModels(files) {
   const models = [...files].filter((f) => MODEL_RE.test(f.name));
   if (!models.length) return;
   const form = new FormData();
-  models.forEach((f) => form.append("files", f));
+  [...files].filter((f) => MODEL_RE.test(f.name) || MODEL_SIDECAR_RE.test(f.name)).forEach((f) => form.append("files", f));
   try {
     const res = await fetch(`/api/studio/model-upload?project=${encodeURIComponent(state.project)}&path=${encodeURIComponent(state.view.path)}`, { method: "POST", body: form });
     const data = await res.json();
@@ -3003,7 +3092,7 @@ async function uploadModels(files) {
 }
 
 function pickModelFile() {
-  const input = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf,.obj,.fbx", multiple: true });
+  const input = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf,.obj,.fbx,.bin,.mtl,.png,.jpg,.jpeg,.webp,.tga,.bmp", multiple: true });
   input.onchange = () => uploadModels(input.files);
   input.click();
 }
@@ -3213,7 +3302,7 @@ async function saveViewerThumb() {
 }
 
 document.addEventListener("click", (event) => {
-  const t = event.target.closest("[data-remove-output],[data-copy-request],[data-dismiss-job],[data-view-model],[data-sprites],[data-split],[data-sheet-cut],[data-split-body],[data-body-parts],[data-split-remove],[data-split-auto],[data-split-run],[data-icons],[data-export],[data-add-model],[data-anim],[data-viewer-thumb],[data-sprite-render],[data-sprite-save]");
+  const t = event.target.closest("[data-remove-output],[data-copy-request],[data-dismiss-job],[data-view-model],[data-sprites],[data-split],[data-sheet-cut],[data-split-body],[data-split-remove],[data-split-auto],[data-split-run],[data-icons],[data-export],[data-anim],[data-viewer-thumb],[data-sprite-render],[data-sprite-save]");
   if (!t || t.disabled) return;
   if (t.dataset.removeOutput) { event.preventDefault(); event.stopPropagation(); return removeOutput(t.dataset.removeOutput, t.closest(".out, .file-chip-wrap")); }
   if (t.dataset.copyRequest !== undefined) return copyRequest(t);
@@ -3221,15 +3310,13 @@ document.addEventListener("click", (event) => {
   if (t.dataset.viewModel) return viewModel(t.dataset.viewModel);
   if (t.dataset.sprites) return viewModel(t.dataset.sprites, true);
   if (t.dataset.split) return splitDialog(t.dataset.split);
-  if (t.dataset.sheetCut) return splitDialog(t.dataset.sheetCut, false, true);
+  if (t.dataset.sheetCut) return splitDialog(t.dataset.sheetCut, true);
   if (t.dataset.splitRemove) { syncSplitNames(); state.split.boxes.splice(Number(t.dataset.splitRemove), 1); return renderSplit(); }
   if (t.dataset.splitAuto !== undefined) { state.split.boxes = []; return splitDialog(state.split.image); }
   if (t.dataset.splitRun !== undefined) return runSplit();
   if (t.dataset.splitBody !== undefined) return guessBodyParts();
-  if (t.dataset.bodyParts) return splitDialog(t.dataset.bodyParts, true);
   if (t.dataset.icons) return iconsDialog(t.dataset.icons);
   if (t.dataset.export !== undefined) return exportDialog(t.dataset.export);
-  if (t.dataset.addModel !== undefined) return pickModelFile();
   if (t.dataset.anim) {
     const p = state.preview;
     const id = Number(t.dataset.anim);
@@ -3541,9 +3628,9 @@ document.addEventListener("drop", (event) => {
   }
   const sounds = files.filter((f) => AUDIO_RE.test(f.name));
   if (sounds.length) uploadAudio(sounds);
-  const models = files.filter((f) => MODEL_RE.test(f.name));
-  const images = files.filter((f) => !MODEL_RE.test(f.name) && !AUDIO_RE.test(f.name));
-  if (models.length) uploadModels(models);
+  // Images dropped together with a model are its textures, not new winners.
+  if (files.some((f) => MODEL_RE.test(f.name))) return uploadModels(files);
+  const images = files.filter((f) => !AUDIO_RE.test(f.name));
   if (images.length) addCandidateImages(images);
 });
 $("#settingsView").addEventListener("input", (event) => {
@@ -4753,7 +4840,7 @@ async function paletteItems() {
   const onAsset = state.view.type === "doc" && $("#content #assetPrompt");
   const here = state.view.type === "folder" ? state.view.path : "";
   const actions = [
-    ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ...(is2d() ? [] : [["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")]])] : []),
+    ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ...(is2d() ? [] : [["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")], ["Add 3D model", "upload", pickModelFile]])] : []),
     ["Overview", "layers", () => go({ type: "home" })], ["Final vault", "box", () => go({ type: "vault" })],
     [here ? `Generate missing in ${humanize(here.split("/").pop())}` : "Generate all missing", "sparkle", () => batchDialog(here)],
     ...(here ? [["New asset here", "sparkle", () => newAssetDialog(here)]] : []),

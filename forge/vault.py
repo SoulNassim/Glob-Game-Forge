@@ -67,7 +67,9 @@ def vault_entry(ws_dir: Path, rel: str, dimension: str = "3d") -> dict[str, Any]
     if not asset["winner"] and not model:
         return None
     # A sound's winner is its take; a 2D image is final once picked; a 3D image also needs its model.
-    if asset["kind"] in AUDIO_KINDS or dimension == "2d":
+    if asset["kind"] == "kit":
+        ready = bool(model)
+    elif asset["kind"] in AUDIO_KINDS or asset["kind"] == "material" or dimension == "2d":
         ready = bool(asset["winner"])
     else:
         ready = bool(asset["winner"] and model)

@@ -82,6 +82,40 @@ def test_icons_are_square_and_transparent(tmp_path):
     assert [o["path"] for o in asset_studio.describe_asset(ws, "chars/duo.md")["outputs"]["icons"]]
 
 
+def test_project_files_are_revalidated_after_a_rebuild():
+    """A rebuilt kit or material keeps its file name, so the browser must ask before reusing its copy."""
+    source = (Path(__file__).parent.parent / "forge" / "server" / "app.py").read_text(encoding="utf-8")
+    assert 'return FileResponse(abs_path, media_type=media_type, headers={"Cache-Control": "no-cache"})' in source
+
+
+def test_icons_keep_light_parts_inside_the_subject(tmp_path):
+    ws = _workspace(tmp_path)
+    picture = Image.new("RGB", (200, 200), (255, 255, 255))
+    draw = ImageDraw.Draw(picture)
+    draw.ellipse((40, 40, 160, 160), fill=(120, 30, 30))
+    draw.ellipse((85, 85, 115, 115), fill=(255, 255, 255))  # a white belly, the same colour as the background
+    picture.save(ws / "chars" / "duo" / "candidates" / "belly.png")
+    icon = Image.open(ws / game_tools.make_icons(ws, "chars/duo.md", "chars/duo/candidates/belly.png", [64])[0])
+    assert icon.getpixel((32, 32))[3] == 255 and icon.getpixel((0, 0))[3] == 0
+
+
+def test_dropped_model_keeps_its_own_files(tmp_path):
+    ws = _workspace(tmp_path)
+    saved = game_tools.save_model_files(ws, "chars/duo.md", [
+        ("Hero Mesh.gltf", b"{}"), ("Hero Mesh.bin", b"buffers"), ("Hero_albedo.png", b"png"), ("notes.txt", b"skip"), ("..\\evil.bin", b"x"),
+    ])
+    folder = ws / "chars" / "duo" / "3d"
+    assert saved == ["chars/duo/3d/Hero-Mesh.gltf"]
+    assert (folder / "Hero Mesh.bin").is_file() and (folder / "Hero_albedo.png").is_file()
+    assert (folder / "evil.bin").is_file() and not (ws / "chars" / "duo" / "evil.bin").exists() and not (folder / "notes.txt").exists()
+    described = asset_studio.describe_asset(ws, "chars/duo.md")
+    assert not described["winner"] and [o["type"] for o in described["outputs"]["3d"]] == ["model"]
+    names = zipfile.ZipFile(io.BytesIO(game_tools.export_zip(ws, "chars/duo.md", "godot")[0])).namelist()
+    assert "assets/chars/duo/models/Hero Mesh.bin" in names
+    with pytest.raises(ValueError):
+        game_tools.save_model_files(ws, "chars/duo.md", [("Hero_albedo.png", b"png")])
+
+
 def test_dropped_model_and_engine_export(tmp_path):
     ws = _workspace(tmp_path)
     with pytest.raises(ValueError):

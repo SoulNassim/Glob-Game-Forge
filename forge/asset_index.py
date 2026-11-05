@@ -34,7 +34,10 @@ def _rows(ws_dir: Path) -> list[dict[str, Any]]:
             "title": str(meta.get("title") or path.stem.replace("-", " ").replace("_", " ").title()),
             "kind": str(meta.get("kind") or ""),
             "winner": str(meta.get("winner") or ""),
-            "model": first("3d"),
+            "model": (next((o["path"] for o in outputs["3d"] if o["type"] == "model" and Path(o["path"]).stem == path.stem), "")
+                      if meta.get("kind") == "kit" else first("3d")),
+            "kit_dir": f"{Path(rel).with_suffix('').as_posix()}/3d/" if meta.get("kind") == "kit" and outputs["3d"] else "",
+            "maps_dir": f"{Path(rel).with_suffix('').as_posix()}/textures/" if meta.get("kind") == "material" and outputs["textures"] else "",
             "rig": first("rig"),
             "animations": len(outputs["animations"]),
             "anim_dir": f"{Path(rel).with_suffix('').as_posix()}/animations/",
@@ -64,13 +67,20 @@ def render(ws_dir: Path, title: str = "") -> str:
         top = row["rel"].split("/")[0] if "/" in row["rel"] else ""
         sections.setdefault(top, []).append(row)
     for top, items in sections.items():
-        lines += ["", f"## {humanize(top) if top else 'Project'}", "", "| Asset | Kind | Picked image or sound | 3D model | Rig and animations |", "|---|---|---|---|---|"]
+        lines += ["", f"## {humanize(top) if top else 'Project'}", "", "| Asset | Kind | Picked image or sound | 3D model | Other files |", "|---|---|---|---|---|"]
         for r in items:
             cell = lambda p: f"`{prefix}{p}`" if p else "not made yet"  # noqa: E731
             extra = [f"rig `{prefix}{r['rig']}`"] if r["rig"] else []
             if r["animations"]:
                 extra.append(f"{r['animations']} clip{'s' if r['animations'] != 1 else ''} in `{prefix}{r['anim_dir']}`")
-            lines.append(f"| {r['title']} | {r['kind']} | {cell(r['winner'])} | {cell(r['model'])} | {', '.join(extra) or '—'} |")
+            if r["kit_dir"]:
+                extra.append(f"modular kit: read `{prefix}{r['kit_dir']}kit.json` for how the pieces fit")
+            if r["maps_dir"]:
+                extra.append(f"tiling maps (albedo, normal, roughness, height, orm) in `{prefix}{r['maps_dir']}`")
+            # A kit has no picture and a material no model: "not made yet" would send the reader after art that never comes.
+            picture = "—" if r["kind"] == "kit" else cell(r["winner"])
+            model = "—" if r["kind"] == "material" else cell(r["model"])
+            lines.append(f"| {r['title']} | {r['kind']} | {picture} | {model} | {', '.join(extra) or '—'} |")
     return "\n".join(lines) + "\n"
 
 

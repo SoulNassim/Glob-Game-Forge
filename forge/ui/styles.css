@@ -1821,3 +1821,13 @@ button:disabled, button[disabled] { opacity: .38; cursor: not-allowed; filter: g
 .sheet-foot .cost .short { display: block; margin-top: 3px; color: #fca5a5; font-weight: 500; }
 .sheet-foot .cost .short a { color: inherit; }
 .palette-btn kbd { white-space: nowrap; }
+
+/* materials and modular kits */
+.mat-tiles { margin-top: 10px; aspect-ratio: 1; max-width: 280px; border-radius: 10px; border: 1px solid var(--line-strong); background-size: 33.333%; }
+.mat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.mat-actions input { width: 64px; }
+.kit-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 6px 0 14px; }
+.kit-form label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); min-width: 0; }
+.kit-form span { display: flex; align-items: center; gap: 6px; }
+.kit-form input, .kit-form select { width: 100%; min-width: 0; }
+.btn-link { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }

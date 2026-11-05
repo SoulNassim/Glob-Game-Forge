@@ -55,7 +55,7 @@ MESH_CHOICES: dict[str, list[Any]] = {
 }
 POLYCOUNT_PRESETS = (1500, 3000, 6000, 12000, 30000, 100000)
 # The fixed set of asset kinds; the UI offers these as tags so nobody has to type them.
-ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "level", "vehicle", "ui", "vfx", "sfx", "voice", "music")
+ASSET_KINDS = ("character", "creature", "item", "weapon", "prop", "environment", "level", "vehicle", "ui", "vfx", "sfx", "voice", "music", "material", "kit")
 # The shape and background each kind of image gets unless Settings → Generators or the asset itself says otherwise.
 # "cutout": the subject alone, background removed. "scene": a whole picture, background kept.
 KIND_DEFAULTS: dict[str, dict[str, str]] = {
@@ -69,6 +69,7 @@ KIND_DEFAULTS: dict[str, dict[str, str]] = {
     "level": {"aspect": "16:9", "background": "scene"},
     "ui": {"aspect": "3:4", "background": "cutout"},
     "vfx": {"aspect": "16:9", "background": "cutout"},
+    "material": {"aspect": "1:1", "background": "scene"},
 }
 KIND_ASPECT = {kind: d["aspect"] for kind, d in KIND_DEFAULTS.items()}
 # Kinds that are a whole picture by default: their background is part of the image, so it is never cut out.
@@ -109,6 +110,12 @@ VARIANT_RULE = (
 VIEWS_RULE = (
     "Draw the exact same subject as the first attached image from a different angle: {view}. Keep the identity, "
     "outfit, colours, proportions, pose and art style identical; full body, centred, plain background."
+)
+MATERIAL_RULE = (
+    "Show this surface as a seamless, tileable flat game texture: the camera looks straight at it and it fills the whole "
+    "image, edge to edge, with what leaves one side carrying on at the opposite side. "
+    "Even, shadowless light. No perspective, horizon, objects, frame, vignette or text, and no single feature that stands "
+    "out: the pattern is spread evenly, so it can repeat."
 )
 EDIT_RULE = "Edit the first attached image. Change only what is described above and keep everything else identical."
 # Level kit: one picture of a level section, then every prop in it on one sheet that Glob cuts up on this computer,
@@ -421,6 +428,8 @@ def missing_assets(ws_dir: Path, folder: str = "") -> list[str]:
     missing = []
     for rel in assets_under(ws_dir, folder):
         asset = describe_asset(ws_dir, rel)
+        if asset["kind"] == "kit":
+            continue  # built for free on its page, never generated
         made = asset["outputs"]["audio"] if asset["kind"] in AUDIO_KINDS else asset["outputs"]["candidates"]
         described = asset["prompt"].strip() or re.sub(r"^#.*$", "", asset["body"], flags=re.M).strip()  # a title alone says too little
         if not asset["winner"] and not made and described:
@@ -537,6 +546,8 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
         raise ValueError(f"Unknown action '{action}'.")
     asset = describe_asset(ws_dir, rel)
     cfg = load_config()
+    if asset["kind"] == "kit":
+        raise ValueError("A modular kit isn't generated: press Build kit on its page.")
     if asset["kind"] in AUDIO_KINDS:
         return _audio_request(asset, action, model)
     if action in ("rig", "animate"):
@@ -611,6 +622,8 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
         pillars = asset["pillars"][-2:] if strength == "light" else asset["pillars"]  # the closest folder's come last
         references += [{**pillar, "role": "pillar"} for pillar in pillars]
     rule = {"candidates": {"light": PILLAR_RULE_LIGHT, "strong": PILLAR_RULE_STRONG}.get(strength, PILLAR_RULE), "variant": VARIANT_RULE, "edit": EDIT_RULE}[action]
+    if asset["kind"] == "material" and action in ("candidates", "variant"):
+        parts.append({"source": "Material", "text": MATERIAL_RULE, "role": "rule"})
     if action != "candidates" or any(ref["role"] == "pillar" for ref in references):
         parts.append({"source": "Reference rule", "text": rule, "role": "rule"})
     aspect = asset_aspect(asset, cfg) if action == "candidates" else cfg.image_aspect_ratio

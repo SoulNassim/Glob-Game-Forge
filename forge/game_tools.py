@@ -28,6 +28,7 @@ from forge.overview import IMAGE_SUFFIXES, MODEL_SUFFIXES, resolve_rel, slugify
 
 MESHY_BASE_URL = "https://api.meshy.ai"
 MAX_MODEL_BYTES = 200 * 1024 * 1024
+MODEL_SIDECAR_SUFFIXES = {".bin", ".mtl", ".png", ".jpg", ".jpeg", ".webp", ".tga", ".bmp"}
 ICON_SIZES = (32, 64, 128, 256, 512)
 ENGINES = ("godot", "unity", "unreal")
 # Meshy credits are about one US cent each (Make 3D: 30 credits ≈ $0.30).
@@ -70,6 +71,26 @@ def save_model(ws_dir: Path, asset_rel: str, filename: str, data: bytes) -> str:
     target = _unique(folder / f"{_clean_stem(filename, 'model')}{suffix}")
     target.write_bytes(data)
     return _ws_rel(ws_dir, target)
+
+
+def save_model_files(ws_dir: Path, asset_rel: str, files: list[tuple[str, bytes]]) -> list[str]:
+    """Store dropped models with the files they point at (glTF buffers, OBJ materials, textures). Those keep their
+    exact names, since the model refers to them by name, and are left out of the returned list of models."""
+    if not any(Path(name).suffix.lower() in MODEL_SUFFIXES for name, _ in files):
+        raise ValueError("Drop at least one 3D model (GLB, glTF, OBJ or FBX).")
+    asset_path, _, _ = read_asset(ws_dir, asset_rel)
+    folder = output_dir(asset_path) / "3d"
+    saved = []
+    for filename, data in files:
+        name = re.split(r"[\\/]", filename)[-1]
+        if Path(name).suffix.lower() in MODEL_SUFFIXES:
+            saved.append(save_model(ws_dir, asset_rel, name, data))
+        elif Path(name).suffix.lower() in MODEL_SIDECAR_SUFFIXES:
+            if len(data) > MAX_MODEL_BYTES:
+                raise ValueError(f"'{name}' is larger than 200 MB.")
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(data)
+    return saved
 
 
 def save_thumb(ws_dir: Path, model_rel: str, png: bytes) -> str:
@@ -359,10 +380,9 @@ def make_icons(ws_dir: Path, asset_rel: str, image_rel: str, sizes: list[int] | 
     """Square, transparent inventory icons: trimmed to the subject, padded and scaled to each size."""
     asset_path, _, _ = read_asset(ws_dir, asset_rel)
     image = Image.open(_asset_image(ws_dir, image_rel)).convert("RGBA")
-    mask = _foreground_mask(image)
     if image.getchannel("A").getextrema()[0] >= 250:
-        image.putalpha(mask)  # knock out a flat background so icons sit on any UI
-    bbox = mask.getbbox() or (0, 0, image.width, image.height)
+        image = _knock_out_background(image)  # a flat background goes, so icons sit on any UI; light parts of the subject stay
+    bbox = _foreground_mask(image).getbbox() or (0, 0, image.width, image.height)
     subject = image.crop(bbox)
     side = int(max(subject.size) * (1 + 2 * max(0.0, min(padding, 0.4))))
     canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
@@ -557,7 +577,7 @@ async def animate(ws_dir: Path, asset_rel: str, action_ids: list[int], names: li
 
 ENGINE_ROOT = {"godot": "assets", "unity": "Assets/Art", "unreal": "Content/Art"}
 ENGINE_MODELS = {"godot": (".glb", ".gltf", ".obj"), "unity": (".fbx", ".glb", ".obj"), "unreal": (".fbx", ".glb", ".obj")}
-EXPORT_KINDS = ("3d", "rig", "animations", "icons", "sprites", "parts", "views")
+EXPORT_KINDS = ("3d", "rig", "animations", "textures", "icons", "sprites", "parts", "views")
 
 
 def _asset_files(ws_dir: Path, asset_path: Path, meta: dict[str, Any], engine: str) -> list[tuple[Path, str]]:
@@ -579,7 +599,7 @@ def _asset_files(ws_dir: Path, asset_path: Path, meta: dict[str, Any], engine: s
                 continue
             if suffix in MODEL_SUFFIXES and suffix not in ENGINE_MODELS[engine]:
                 continue
-            if suffix in MODEL_SUFFIXES or suffix in IMAGE_SUFFIXES or suffix == ".json":
+            if suffix in MODEL_SUFFIXES or suffix in IMAGE_SUFFIXES or suffix in MODEL_SIDECAR_SUFFIXES or suffix == ".json":
                 sub = {"3d": "models", "rig": "models"}.get(kind, kind)
                 files.append((file, f"{sub}/{file.name}"))
     return files

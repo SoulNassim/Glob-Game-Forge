@@ -77,6 +77,16 @@ Make an asset of kind **Level kit** and describe one section of your level. Its 
 3. **Cut**: free, on your computer. Glob finds each prop, its chat names them ("Wooden Barrel", "Iron Brazier"), and each becomes its own asset with the background removed, in `<level>-props/`.
 4. **Use the props**: make 3D for the ones you want, or use them as 2D sprites.
 
+### Modular kits
+
+For levels built from pieces, including procedural ones. AI meshes never line up, so Glob builds the shapes itself and AI only paints them. It's free and runs on your computer, apart from the images you generate for materials.
+
+1. **Materials:** make an asset of kind **Material** for each surface ("wet flagstone"), generate an image and pick it, then press **Make tileable**. Glob makes it seamless, adds normal, roughness and height maps, and shows it repeating so you can check it.
+2. **Kit:** make an asset of kind **Modular kit**, set the cell size and wall height, choose materials for walls, floors and ceilings (or stay in plain grey), and press **Build kit**. Change a material and the kit reskins.
+3. **Your coding agent** finds the kit in `glob/ASSETS.md`: one GLB with every piece as a named node (floor, ceiling, wall, low wall, doorway, window, inner and outer corners, pillar, stairs), a sample room, and `kit.json`, which lists each piece's size, pivot, rotations and what each side connects to, so it can write a level generator without guessing.
+
+Materials are also useful alone, for any surface in your game. Very regular patterns such as bricks work best when the generated image already tiles; on other images a cut can show where the two sides were joined, so check the repeating preview.
+
 ## Get started
 
 ### 1. Download Glob

@@ -18,6 +18,10 @@ Glob's project for this game is in `glob/` in the game folder. Its index, `glob/
 
 When a winner changes in Glob, copy it again.
 
+## Levels from modular kits
+
+A `kit` asset in `glob/ASSETS.md` comes with a `kit.json` next to its GLB. Read it before writing level code: it gives the grid, how to place and turn each piece, what each side connects to, and a sample room to check your placement against. Copy the GLB and `kit.json` together. A `material` asset has tiling maps (albedo, normal, roughness, height, orm) for any surface in the game.
+
 ## Rules
 
 - Never edit, move or delete anything inside `glob/`. Glob owns that folder.

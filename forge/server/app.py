@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from forge import access, asset_studio, game_import, game_tools, overview as project_overview, showcase, updater, vault
+from forge import access, asset_studio, game_import, game_tools, modular, overview as project_overview, showcase, updater, vault
 from forge.agent.action_layer import ForgeActionLayer
 from forge.agent.autonomous import execute_agent_brief
 from forge.agent import cli_models, endpoints as model_endpoints
@@ -1906,7 +1906,7 @@ def api_studio_asset(path: str, project: str = "default") -> dict[str, Any]:
 @app.patch("/api/studio/asset")
 async def api_studio_update_asset(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
     # The voice sheet remembers its pick; pillars, aspect and height are set from the asset page and the viewer.
-    allowed = {"kind", "prompt", "winner", "style", "title", "voice", "voice_name", "pillars", "aspect", "height_m"}
+    allowed = {"kind", "prompt", "winner", "style", "title", "voice", "voice_name", "pillars", "aspect", "height_m", "tile_m", "kit_cell", "kit_height", "kit_thickness", "kit_wall", "kit_floor", "kit_ceiling"}
     fields = {key: value for key, value in dict(payload.get("fields") or {}).items() if key in allowed}
     result = _overview_call(asset_studio.update_asset, _ws_dir(project), str(payload.get("path") or ""), fields)
     await workspace_changed(project)
@@ -2302,7 +2302,8 @@ def _png_bytes(value: str) -> bytes:
 @app.post("/api/studio/model-upload")
 async def api_studio_model_upload(project: str = "default", path: str = "", files: list[UploadFile] = File(...)) -> dict[str, Any]:
     ws_dir = _ws_dir(project)
-    saved = [_overview_call(game_tools.save_model, ws_dir, path, upload.filename or "model.glb", await upload.read()) for upload in files[:10]]
+    uploads = [(upload.filename or "model.glb", await upload.read()) for upload in files[:40]]  # a model plus its texture maps
+    saved = _overview_call(game_tools.save_model_files, ws_dir, path, uploads)
     await workspace_changed(project)
     return {"saved": saved}
 
@@ -2340,6 +2341,25 @@ async def api_studio_split(payload: dict[str, Any], project: str = "default") ->
     )
     await workspace_changed(project)
     return {"created": created}
+
+
+@app.get("/api/studio/materials")
+def api_studio_materials(project: str = "default") -> dict[str, Any]:
+    return {"materials": modular.list_materials(_ws_dir(project))}
+
+
+@app.post("/api/studio/material/build")
+async def api_studio_material_build(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    created = await asyncio.to_thread(_overview_call, modular.build_material, _ws_dir(project), str(payload.get("asset") or ""))
+    await workspace_changed(project)
+    return {"created": created}
+
+
+@app.post("/api/studio/kit/build")
+async def api_studio_kit_build(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    built = await asyncio.to_thread(_overview_call, modular.build_kit, _ws_dir(project), str(payload.get("asset") or ""))
+    await workspace_changed(project)
+    return built
 
 
 @app.post("/api/studio/icons")
@@ -2651,7 +2671,7 @@ async def api_safe_proxy(url: str = Query(...)) -> Response:
 
 # --- Project Asset & Export File Serving ---
 
-@app.get("/projects/{project}/{file_path:path}")
+@app.api_route("/projects/{project}/{file_path:path}", methods=["GET", "HEAD"])  # the 3D viewer asks HEAD for a file's size
 def serve_project_file(project: str, file_path: str) -> FileResponse:
     store = actions.get_store(project)
     try:
@@ -2665,7 +2685,8 @@ def serve_project_file(project: str, file_path: str) -> FileResponse:
         media_type = "model/gltf-binary"
     elif abs_path.suffix.lower() == ".obj":
         media_type = "text/plain"
-    return FileResponse(abs_path, media_type=media_type)
+    # Tools replace files under the same name (a rebuilt kit, material maps): always ask whether it changed.
+    return FileResponse(abs_path, media_type=media_type, headers={"Cache-Control": "no-cache"})
 
 
 @app.websocket("/ws")
