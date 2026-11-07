@@ -38,6 +38,7 @@ A coding agent works on a game with placeholders. The user runs `glob connect` o
 | `forge/providers/` | Gemini, Meshy, Tripo, ElevenLabs (images, audio), Stability (audio). `service_mcp.py` runs signed-in services (images, 3D, sounds) via `forge/service_gen.py`. |
 | `forge/tripo.py` | Tripo v3 API client, shared by `providers/tripo_3d.py` and `game_tools.py`: key check + balance (`/api/tripo`, `/api/tripo/connect`; Tripo has no OAuth, only keys), generation settings per model, rig, retarget, retopo, re-texture, convert. `game_tools.rig_engine()` picks Tripo or Meshy for rig/animate; the asset's `rig_provider:` keeps animations with the rig's maker. |
 | `forge/game_import.py` | Game scan and import. Skips Glob's own dirs. |
+| `forge/model_inbox.py` | Watched folder (Settings → Accounts): models downloaded from a website, such as Tripo Studio, become assets in `studio-downloads/`. Only copies, never spends credits. Not `forge/watcher/folder_watcher.py`, which moves files and runs a recipe. |
 | `forge/watcher/workspace_watcher.py` | Pushes live updates when workspace files change. |
 | `forge/server/app.py` | FastAPI routes. `forge/server/security.py` is the local-only request guard. |
 | `forge/modular.py` | Modular kits, made locally: seamless material maps (`kind: material`), exact-size pieces in one GLB, a sample room and `kit.json` (`kind: kit`). No dependencies beyond Pillow. |

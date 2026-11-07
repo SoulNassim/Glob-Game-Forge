@@ -1143,7 +1143,13 @@ $("#settingsView").addEventListener("submit", async (event) => {
     state.studio = null;
     toast(`✓ Tripo connected · ${Math.round(state.tripo.balance.balance).toLocaleString()} credits`);
     await renderSettings();
-  } catch (err) { toast(err.message, true); button.disabled = false; button.textContent = "Connect"; }
+  } catch (err) {
+    toast(err.message, true);
+    // Also on the card itself, where it stays until the next try (a toast is easy to miss).
+    const status = form.closest(".acct")?.querySelector(".acct-status");
+    if (status) { status.textContent = `Couldn't connect: ${err.message}`; status.classList.add("bad"); }
+    button.disabled = false; button.textContent = "Connect";
+  }
 });
 
 $("#settingsView").addEventListener("change", async (event) => {
@@ -1183,6 +1189,57 @@ function accountCard(p, cfg) {
       : p.service ? `<button class="primary" data-service-connect="${p.id}">${waiting ? "Waiting…" : "Sign in"}</button>` : ""}</div></div>`;
 }
 
+// Models made by hand on a website (Tripo Studio's credits can't be used by Glob): download them, and they arrive here.
+function modelInboxCard() {
+  const box = state.modelInbox;
+  if (!box) return "";
+  const other = box.enabled && state.project && box.project !== state.project;
+  const status = box.error ? `<span class="acct-status bad">${esc(box.error)}</span>`
+    : box.enabled ? `<span class="acct-status">✓ Watching · new models go to ${esc(humanize(box.project))}${box.recent.length ? ` · last: ${esc(humanize(box.recent[0].split("/").pop().replace(/\.md$/, "")))}` : ""}</span>` : `<span class="acct-status">Off</span>`;
+  return `<div class="acct${box.enabled && !box.error ? " on" : ""}" data-acct="model-inbox">
+    <span class="acct-logo">${icon("cube")}</span>
+    <div class="acct-text"><strong>Watched folder for 3D models</strong>
+      <small>Made a model in Tripo Studio or on another site? Download it as GLB, FBX or OBJ and it becomes an asset here. GLB keeps its textures in one file. Glob only copies new files and spends no credits.</small>
+      ${status}
+      ${box.enabled ? `<div class="path-row"><code>${esc(box.folder)}</code></div>`
+        : `<form class="model-inbox-form path-row"><input name="folder" value="${esc(box.default_folder)}" autocomplete="off" aria-label="Folder to watch" spellcheck="false"></form>`}</div>
+    <div class="acct-act">${box.enabled ? `${other ? `<button class="primary" data-inbox-here>Send to ${esc(humanize(state.project))}</button>` : ""}<button class="ghost" data-inbox-off>Turn off</button>`
+      : `<button class="primary" data-inbox-on ${state.project ? "" : "disabled"}>Turn on</button>`}</div></div>`;
+}
+
+async function setModelInbox(body) {
+  try {
+    state.modelInbox = await api("/api/model-inbox", { method: "PUT", body });
+    toast(body.enabled ? `Watching for new models · they go to ${humanize(body.project)}` : "Stopped watching");
+    await renderSettings();
+  } catch (err) { toast(err.message, true); }
+}
+
+$("#settingsView").addEventListener("submit", (event) => {
+  if (!event.target.closest(".model-inbox-form")) return;
+  event.preventDefault();
+  setModelInbox({ enabled: true, folder: event.target.folder.value.trim(), project: state.project });
+});
+
+$("#settingsView").addEventListener("click", (event) => {
+  if (event.target.closest("[data-inbox-on]")) setModelInbox({ enabled: true, folder: $("#settingsView .model-inbox-form input").value.trim(), project: state.project });
+  if (event.target.closest("[data-inbox-off]")) setModelInbox({ enabled: false });
+  if (event.target.closest("[data-inbox-here]")) setModelInbox({ enabled: true, folder: state.modelInbox.folder, project: state.project });
+});
+
+// Previews for 3D models that have none yet, rendered here in the browser and saved beside the model.
+async function renderMissingThumbs(project) {
+  const { models } = await api(`/api/import/models?project=${encodeURIComponent(project)}`);
+  if (!models.length) return;
+  const viewer = await viewerModule();
+  for (const model of models) {
+    try {
+      const png = await viewer.renderThumb(projectFileUrl(project, model), 384);
+      await api(`/api/studio/thumb?project=${encodeURIComponent(project)}`, { method: "POST", body: { model, png } });
+    } catch { /* keep the placeholder */ }
+  }
+}
+
 function accountsBody(cfg, budget) {
   const caps = capabilities(cfg);
   const missing = caps.filter((c) => !c.ok);
@@ -1191,7 +1248,7 @@ function accountsBody(cfg, budget) {
     <div class="caps">${caps.map((c) => `<button class="cap ${c.ok ? "ok" : "no"}" ${c.tab ? `data-settings-tab="${c.tab}"` : `data-cap-jump="${c.id}"`}>
       <span class="cap-icon">${icon(c.icon)}</span><span><strong>${c.label}</strong><small>${c.ok ? `✓ ${esc(c.via || "ready")}` : "Not set up yet"}</small></span></button>`).join("")}</div>
     ${missing.length ? `<p class="st-hint">${missing.length === caps.length ? "Start with <b>ElevenLabs</b>: one sign-in gives you images and sounds." : `To make ${missing.map((c) => c.label.toLowerCase()).join(" and ")}, connect a service below that says so.`}</p>` : ""}
-    <div class="acct-list" id="acctList">${PROVIDERS.map((p) => accountCard(p, cfg)).join("")}</div>
+    <div class="acct-list" id="acctList">${PROVIDERS.map((p) => accountCard(p, cfg)).join("")}${modelInboxCard()}</div>
     <div class="fistbump" id="serviceFistbump" hidden></div>
     ${budgetCard(budget)}`;
 }
@@ -1324,6 +1381,7 @@ async function renderSettings() {
     if (state.serviceModels?.loading) state.serviceModelsReady.then(() => draw(body()));
     // Tripo's credits come from Tripo itself, so they fill in after the page is up.
     if (tab === "accounts" && cfg.tripo_configured) api("/api/tripo").then((t) => { state.tripo = t; draw(body()); }).catch(() => {});
+    if (tab === "accounts") api("/api/model-inbox").then((box) => { state.modelInbox = box; draw(body()); }).catch(() => {});
   } else if (tab === "models") {
     const [cfg] = await Promise.all([api("/api/config"), state.modelInfo ? null : loadModels()]);
     draw(chatBody(state.modelInfo || { presets: {}, clis: [] }, cfg));
@@ -4006,6 +4064,11 @@ function connectSocket() {
     try { msg = JSON.parse(event.data); } catch { return; }
     if (msg.type === "agent_progress" && msg.project === state.project) chatProgress(msg);
     if (msg.type === "models_changed") loadModels().then(refreshModelViews);
+    if (msg.type === "model_inbox") {
+      toast(`✓ Added ${msg.assets.map((a) => humanize(a.split("/").pop().replace(/\.md$/, ""))).join(", ")} to ${humanize(msg.project)}`);
+      if (msg.project === state.project) renderMissingThumbs(msg.project).catch(() => {});
+      if (!$("#settingsView").hidden && state.settings?.tab === "accounts") renderSettings();
+    }
     if (msg.type === "service_connected") loadServices().then(() => serviceConnected(msg.service));
     // A cover being painted for another project shows on its card as soon as it lands.
     if (msg.type === "studio_job" && msg.job.status === "done" && !$("#projectsView").hidden) openProjects();
@@ -4548,7 +4611,7 @@ async function runImport() {
     await loadGrants();
     state.project = project;
     storeSet("forge.project", project);
-    // Previews for the 3D models, rendered here in the browser.
+    // Previews for the 3D models, rendered here in the browser (with progress in the import log).
     const { models } = await api(`/api/import/models?project=${encodeURIComponent(project)}`);
     if (models.length) {
       imp.phase = "Rendering previews";

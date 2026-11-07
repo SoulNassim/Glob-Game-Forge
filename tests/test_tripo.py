@@ -59,7 +59,7 @@ def _no_ambient_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_connect_checks_the_key_and_reads_the_balance(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeTripo(monkeypatch)
-    assert (await tripo.connect("good"))["balance"] == 812.5
+    assert (await tripo.connect("good"))[0]["balance"] == 812.5
     with pytest.raises(ProviderError, match="not valid"):
         await tripo.connect("bad")
     with pytest.raises(ProviderError, match="Paste your Tripo"):
@@ -213,3 +213,19 @@ def test_connect_route_saves_only_a_working_key(monkeypatch: pytest.MonkeyPatch)
     assert client.get("/api/tripo").json()["connected"] is True
     gone = client.delete("/api/tripo").json()
     assert gone["connected"] is False and load_config().default_3d_provider == "meshy"
+
+
+async def test_connect_falls_back_to_the_other_tripo_region(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A key from platform.tripo3d.ai is refused by the .com host and accepted by the .ai one."""
+    seen: list[str] = []
+
+    async def get(self, url, **kwargs):  # noqa: ANN001
+        seen.append(url)
+        if url.startswith("https://openapi.tripo3d.com"):
+            return httpx.Response(401, json={"code": 2, "message": "Invalid API key"})
+        return httpx.Response(200, json={"code": 0, "data": {"balance": 5, "frozen": 0}})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+    balance, host = await tripo.connect("ai-key")
+    assert balance["balance"] == 5 and host == "https://openapi.tripo3d.ai/v3"
+    assert len(seen) == 2

@@ -1199,6 +1199,8 @@ select option:disabled { color: var(--faint); }
 
 /* ---------- storage & access ---------- */
 .path-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.model-inbox-form { margin-top: 8px; }
+.model-inbox-form input { flex: 1 1 280px; min-width: 0; }
 .path-row code { flex: 1 1 280px; min-width: 0; padding: 8px 12px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line); font: 12.5px var(--mono); word-break: break-all; }
 .row.wrap { flex-wrap: wrap; margin-top: 14px; }
 .grant-list { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
@@ -1919,3 +1921,4 @@ a.ghost.btn { display: inline-flex; align-items: center; text-decoration: none; 
 .select-bar { position: sticky; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 10px; margin-top: 20px; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel, #18181b); box-shadow: 0 8px 30px rgba(0, 0, 0, .45); }
 .select-bar .grow { flex: 1; }
 .ghost.on, .mini.on { border-color: var(--accent, #ff7eb6); color: var(--accent, #ff7eb6); }
+.acct-status.bad { color: #ff6b6b; white-space: normal; }

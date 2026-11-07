@@ -84,6 +84,7 @@ class ForgeConfig(BaseModel):
     elevenlabs_api_key: str = ""
     stability_api_key: str = ""
     tripo_api_key: str = ""
+    tripo_base_url: str = ""  # the Tripo region the key was connected on (forge/tripo.py HOSTS)
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
@@ -103,6 +104,10 @@ class ForgeConfig(BaseModel):
     tripo_auto_size: bool = True
     # A signed-in service's 3D model (svc:<service>/<model>) for Make 3D; empty uses default_3d_provider.
     default_3d_service_model: str = ""
+    # Watched folder for models made by hand on a website (forge/model_inbox.py). An empty folder means off.
+    model_inbox_dir: str = ""
+    model_inbox_project: str = ""
+    model_inbox_since: float = 0.0  # only files newer than the moment it was switched on
     default_critic_provider: str = "gemini"
     default_critic_model: str = "gemini-2.5-flash"
 

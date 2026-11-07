@@ -19,7 +19,10 @@ import httpx
 
 from forge.providers.base import ProviderError
 
-BASE_URL = "https://openapi.tripo3d.com/v3"
+# Tripo runs two regions that each issue their own keys: keys made on platform.tripo3d.ai belong to the .ai host,
+# the others to .com. A key is only valid on its own region, so Connect tries both and remembers the one that answered.
+HOSTS = ("https://openapi.tripo3d.com/v3", "https://openapi.tripo3d.ai/v3")
+BASE_URL = HOSTS[0]
 PROVIDER = "tripo"
 USD_PER_CREDIT = 0.01  # Tripo's price for credits on a plan runs 1-1.2 cents; used only for estimates
 
@@ -98,19 +101,38 @@ def _body(resp: httpx.Response, what: str) -> dict[str, Any]:
 
 # ---------- account ----------
 
-async def balance(key: str) -> dict[str, float]:
+def base_url() -> str:
+    """The region this key was connected on (saved by Connect), else the default."""
+    from forge.config import load_config
+
+    saved = str(getattr(load_config(), "tripo_base_url", "") or "")
+    return saved if saved in HOSTS else BASE_URL
+
+
+async def balance(key: str, base: str = "") -> dict[str, float]:
     """`{"balance": credits you can spend, "frozen": credits held by running tasks}`."""
     async with httpx.AsyncClient(timeout=15.0) as client:
-        data = _body(await client.get(f"{BASE_URL}/account/balance", headers=headers(key)), "balance")
+        data = _body(await client.get(f"{base or base_url()}/account/balance", headers=headers(key)), "balance")
     return {"balance": float(data.get("balance") or 0), "frozen": float(data.get("frozen") or 0)}
 
 
-async def connect(key: str) -> dict[str, float]:
-    """Check a pasted key. Returns the balance; raises ProviderError when Tripo does not accept the key."""
+async def connect(key: str) -> tuple[dict[str, float], str]:
+    """Check a pasted key on each Tripo region. Returns the balance and the host that accepted it; raises
+    ProviderError when neither does."""
     key = key.strip()
     if not key:
         raise ProviderError("Paste your Tripo API key first.", provider=PROVIDER, status_code=400)
-    return await balance(key)
+    first: ProviderError | None = None
+    for host in HOSTS:
+        try:
+            return await balance(key, host), host
+        except ProviderError as exc:
+            if exc.status_code != 401:
+                raise
+            first = first or exc
+        except httpx.HTTPError:
+            continue  # this region is unreachable from here: the other may not be
+    raise first or ProviderError("Could not reach Tripo.", provider=PROVIDER, status_code=502)
 
 
 # ---------- files ----------
@@ -123,7 +145,7 @@ def _mime(path: Path) -> str:
 
 async def upload(client: httpx.AsyncClient, key: str, path: Path) -> str:
     """Upload an image (up to 20 MB) or a model (up to 150 MB); returns its `file_token`."""
-    resp = await client.post(f"{BASE_URL}/files", headers=headers(key), files={"file": (path.name, path.read_bytes(), _mime(path))})
+    resp = await client.post(f"{base_url()}/files", headers=headers(key), files={"file": (path.name, path.read_bytes(), _mime(path))})
     token = _body(resp, "upload").get("file_token")
     if not token:
         raise ProviderError("Tripo upload returned no file token.", provider=PROVIDER, status_code=502)
@@ -136,7 +158,7 @@ Notify = Callable[[int, str], Awaitable[None]]
 
 
 async def create(client: httpx.AsyncClient, key: str, endpoint: str, body: dict[str, Any]) -> str:
-    data = _body(await client.post(f"{BASE_URL}{endpoint}", headers=headers(key), json=body), "task")
+    data = _body(await client.post(f"{base_url()}{endpoint}", headers=headers(key), json=body), "task")
     task_id = data.get("task_id")
     if not task_id:
         raise ProviderError("Tripo did not create a task.", provider=PROVIDER, status_code=502)
@@ -147,7 +169,7 @@ async def wait(client: httpx.AsyncClient, key: str, task_id: str, notify: Notify
                poll_interval: float = 2.5, max_polls: int = 360) -> dict[str, Any]:
     """Poll a task until it succeeds; returns the task's `data` (with `output`, `credits_consumed`)."""
     for _ in range(max_polls):
-        resp = await client.get(f"{BASE_URL}/tasks/{task_id}", headers=headers(key))
+        resp = await client.get(f"{base_url()}/tasks/{task_id}", headers=headers(key))
         if resp.status_code < 400:
             data = (resp.json() or {}).get("data") or {}
             status = str(data.get("status", "queued")).lower()

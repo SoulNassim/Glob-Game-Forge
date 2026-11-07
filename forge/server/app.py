@@ -59,7 +59,7 @@ from forge.stylepacks.builtins import VARIANT_CHIP_PRESETS, save_custom_style_pa
 from forge.models import StylePack
 from forge.watcher.folder_watcher import WatchFolderService
 from forge.watcher.workspace_watcher import WorkspaceWatcher
-from forge import game_link, service_gen, services
+from forge import game_link, model_inbox, service_gen, services
 from forge import tripo as tripo_client
 from forge.agent import connect as connect_agent
 
@@ -125,6 +125,14 @@ def write_asset_index(project: str) -> None:
 workspace_watcher = WorkspaceWatcher(lambda project: actions.get_workspace(project).ws_dir, workspace_changed)
 
 
+async def model_inbox_arrived(project: str, assets: list[str]) -> None:
+    await ws_manager.broadcast({"type": "model_inbox", "project": project, "assets": assets})
+    await workspace_changed(project)
+
+
+model_inbox_service = model_inbox.ModelInbox(lambda project: actions.get_workspace(project).ws_dir, model_inbox_arrived)
+
+
 async def _watcher_run_verb(
     project: str, verb: str, parent_ids: list[str], inputs: dict[str, Any], initiated_by: str
 ) -> dict[str, Any]:
@@ -157,11 +165,14 @@ async def lifespan(app: FastAPI):
             pass
     watch_task = asyncio.create_task(watcher_service.loop(3.0))
     workspace_task = asyncio.create_task(workspace_watcher.loop(2.0))
+    inbox_task = asyncio.create_task(model_inbox_service.loop(3.0))
     yield
     watcher_service.stop()
     workspace_watcher.stop()
+    model_inbox_service.stop()
     watch_task.cancel()
     workspace_task.cancel()
+    inbox_task.cancel()
 
 
 app = FastAPI(
@@ -2547,6 +2558,36 @@ async def api_studio_animations(search: str = "", engine: str = "") -> dict[str,
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# --- Watched folder: models downloaded from a website (Tripo Studio) become assets; nothing is spent ---
+
+def _model_inbox_status() -> dict[str, Any]:
+    cfg = load_config()
+    return {"enabled": bool(cfg.model_inbox_dir), "folder": cfg.model_inbox_dir, "project": cfg.model_inbox_project,
+            "default_folder": str(model_inbox.default_folder()), "recent": model_inbox_service.recent, "error": model_inbox_service.error}
+
+
+@app.get("/api/model-inbox")
+def api_model_inbox() -> dict[str, Any]:
+    return _model_inbox_status()
+
+
+@app.put("/api/model-inbox")
+def api_set_model_inbox(payload: dict[str, Any]) -> dict[str, Any]:
+    """Switch the watched folder on or off. Only files newer than this moment are taken."""
+    model_inbox_service.reset()
+    if not payload.get("enabled"):
+        save_config({"model_inbox_dir": "", "model_inbox_project": "", "model_inbox_since": 0.0})
+        return _model_inbox_status()
+    folder = Path(str(payload.get("folder") or model_inbox.default_folder())).expanduser()
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"Can't find the folder {folder}.")
+    project = str(payload.get("project") or "")
+    if project not in list_all_projects(actions.root_dir):
+        raise HTTPException(status_code=400, detail="Open a project first: models need a project to go to.")
+    save_config({"model_inbox_dir": str(folder), "model_inbox_project": project, "model_inbox_since": time.time()})
+    return _model_inbox_status()
+
+
 # --- Tripo: connect with an API key (Tripo has no OAuth), balance, and its model tools ---
 
 def _tripo_status(balance: dict[str, float] | None = None, error: str = "") -> dict[str, Any]:
@@ -2573,12 +2614,12 @@ async def api_tripo_connect(payload: dict[str, Any]) -> dict[str, Any]:
     """Check a pasted key with Tripo, and only then save it. Makes Tripo the 3D engine when `make_default` is set."""
     key = str(payload.get("api_key") or "").strip()
     try:
-        balance = await tripo_client.connect(key)
+        balance, host = await tripo_client.connect(key)
     except ProviderError as exc:
         raise HTTPException(status_code=exc.status_code if 400 <= exc.status_code < 500 else 400, detail=exc.message) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Could not reach Tripo: {exc}") from exc
-    updates: dict[str, Any] = {"tripo_api_key": key}
+    updates: dict[str, Any] = {"tripo_api_key": key, "tripo_base_url": host}
     if payload.get("make_default"):
         updates |= {"default_3d_provider": "tripo", "default_3d_service_model": ""}
     save_config(updates)
