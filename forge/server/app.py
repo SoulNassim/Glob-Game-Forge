@@ -1774,6 +1774,69 @@ def _ws_dir(project: str) -> Path:
     return actions.get_workspace(project).ws_dir
 
 
+def _prototype_items(project: str) -> list[dict[str, Any]]:
+    """Every playable sketch in the workspace's prototype/ folder: prototype/<name>/index.html (and an older prototype/index.html)."""
+    import re
+
+    root = _ws_dir(project) / "prototype"
+    found: list[tuple[str, Path]] = []
+    if (root / "index.html").is_file():
+        found.append(("", root / "index.html"))
+    if root.is_dir():
+        for sub in sorted(root.iterdir()):
+            if sub.is_dir() and not sub.name.startswith(".") and (sub / "index.html").is_file():
+                found.append((sub.name, sub / "index.html"))
+    items = []
+    for slug, path in found:
+        try:
+            head = path.read_text(encoding="utf-8", errors="ignore")[:6000]
+            stat = path.stat()
+        except OSError:
+            continue
+        title = re.search(r"<title>(.*?)</title>", head, re.I | re.S)
+        desc = re.search(r"""<meta[^>]+name=["']description["'][^>]+content=["'](.*?)["']""", head, re.I | re.S)
+        items.append({
+            "slug": slug,
+            "title": (title.group(1).strip() if title and title.group(1).strip() else (slug.replace("-", " ").title() or "First prototype"))[:80],
+            "description": (desc.group(1).strip() if desc else "")[:200],
+            "path": f"prototype/{slug + '/' if slug else ''}index.html",
+            "updated": stat.st_mtime,
+            "size": stat.st_size,
+        })
+    items.sort(key=lambda i: i["updated"], reverse=True)
+    return items
+
+
+@app.get("/api/prototypes")
+def api_prototypes(project: str = "default") -> dict[str, Any]:
+    return {"prototypes": _prototype_items(project)}
+
+
+@app.delete("/api/prototypes")
+def api_delete_prototype(project: str, slug: str = "") -> dict[str, Any]:
+    """Moves one prototype to the workspace's .trash so it can be restored."""
+    import shutil
+    import time
+
+    if slug and (slug != Path(slug).name or slug.startswith(".")):
+        raise HTTPException(status_code=400, detail="Bad prototype name")
+    root = _ws_dir(project) / "prototype"
+    trash = _ws_dir(project) / ".trash"
+    trash.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    if slug:
+        src = root / slug
+        if not src.is_dir():
+            raise HTTPException(status_code=404, detail="No such prototype")
+        shutil.move(str(src), str(trash / f"prototype-{slug}-{stamp}"))
+    else:
+        src = root / "index.html"
+        if not src.is_file():
+            raise HTTPException(status_code=404, detail="No such prototype")
+        shutil.move(str(src), str(trash / f"prototype-first-{stamp}.html"))
+    return {"ok": True}
+
+
 @app.get("/api/overview")
 def api_overview(project: str = "default") -> dict[str, Any]:
     workspace_watcher.touch(project)
@@ -2620,6 +2683,31 @@ def api_agent_delete_session(session_id: str, project: str = "default") -> dict[
 
 @app.post("/api/agent/sessions/{session_id}/messages")
 async def api_agent_send(session_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    # While the model works, tell the chat what it is doing (thinking, or writing and how much), so the wait isn't blind.
+    loop = asyncio.get_running_loop()
+    started = time.time()
+    steps: list[dict[str, Any]] = []
+    latest: dict[str, Any] = {}
+    finished = asyncio.Event()
+
+    async def deliver(message: dict[str, Any]) -> None:
+        # Reports are queued: one still waiting when "done" goes out must not switch the chat back to "working".
+        if not finished.is_set():
+            await ws_manager.broadcast(message)
+
+    def report(info: dict[str, Any]) -> None:
+        # Every message carries the steps so far, so a chat opened or reloaded mid-run catches up at once.
+        info = dict(info)
+        step, step_done = info.pop("step", None), info.pop("step_done", None)
+        if step:
+            steps.append(dict(step))
+        if step_done and steps:
+            steps[-1].update(step_done)
+        latest.update(info)
+        message = {"type": "agent_progress", "project": project, "session": session_id, "started": started, **latest, "steps": [dict(s) for s in steps[-40:]]}
+        asyncio.run_coroutine_threadsafe(deliver(message), loop)
+
+    token = cli_models.progress_hook.set(report)
     try:
         session = await workspace_agent.send(
             project,
@@ -2635,6 +2723,10 @@ async def api_agent_send(session_id: str, payload: dict[str, Any], project: str 
         raise HTTPException(status_code=404, detail=str(exc).strip("'\"")) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        cli_models.progress_hook.reset(token)
+        finished.set()
+        await ws_manager.broadcast({"type": "agent_progress", "project": project, "session": session_id, "done": True})
     if any(action.get("changed") for action in session["messages"][-1].get("actions") or []):
         await workspace_changed(project)
     return session
@@ -2739,7 +2831,7 @@ async def api_safe_proxy(url: str = Query(...)) -> Response:
 # --- Project Asset & Export File Serving ---
 
 @app.api_route("/projects/{project}/{file_path:path}", methods=["GET", "HEAD"])  # the 3D viewer asks HEAD for a file's size
-def serve_project_file(project: str, file_path: str) -> FileResponse:
+def serve_project_file(request: Request, project: str, file_path: str) -> Response:
     store = actions.get_store(project)
     try:
         abs_path = store.resolve_safe_path(file_path)
@@ -2753,6 +2845,16 @@ def serve_project_file(project: str, file_path: str) -> FileResponse:
     elif abs_path.suffix.lower() == ".obj":
         media_type = "text/plain"
     # Tools replace files under the same name (a rebuilt kit, material maps): always ask whether it changed.
+    sandbox = {"Content-Security-Policy": "sandbox allow-scripts allow-pointer-lock allow-popups"}
+    if abs_path.suffix.lower() in (".html", ".htm") and "prototype" in Path(file_path).parts[:-1] and request.method == "GET":
+        # The Prototype: its pictures and sounds are put into the page, so the sandboxed page needs no further requests.
+        from forge import prototype as _prototype
+
+        body = _prototype.inline_assets(abs_path, _ws_dir(project))
+        return Response(body, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache", **sandbox})
+    if abs_path.suffix.lower() in (".html", ".htm", ".svg"):
+        # A page an agent wrote runs with no access to Glob's own pages or API, even if opened in its own tab.
+        return FileResponse(abs_path, media_type=media_type, headers={"Cache-Control": "no-cache", **sandbox})
     return FileResponse(abs_path, media_type=media_type, headers={"Cache-Control": "no-cache"})
 
 

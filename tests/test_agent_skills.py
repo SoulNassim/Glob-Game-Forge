@@ -49,3 +49,30 @@ def test_context_names_the_default_model_and_the_skills(agent) -> None:
     context, _ = bot._context_block("p", {}, {}, [])
     assert "## Generation setup" in context and "Default image model" in context
     assert "svc:elevenlabs/<id>): gemini-nano-banana-2.1" in context and "- generating:" in context
+
+
+def test_edit_changes_one_place_and_read_pages_big_files(tmp_path) -> None:
+    from forge.agent import workspace_agent as wa
+
+    class Ws:
+        ws_dir = tmp_path
+
+        def sync_game_md_to_bible(self) -> None: ...
+
+    class Actions:
+        def get_workspace(self, project):  # noqa: ANN001
+            return Ws()
+
+    bot = wa.WorkspaceAgent(Actions(), model_call=None)  # type: ignore[arg-type]
+    (tmp_path / "big.html").write_text("A" * 9000 + "MARK" + "B" * 100 + "x=1;x=1;", encoding="utf-8")
+    first = bot.run_tool("p", {"tool": "read", "path": "big.html"})["result"]
+    assert first.startswith("[characters 0-8000 of 9112;") and "larger offset" in first
+    assert "MARK" in bot.run_tool("p", {"tool": "read", "path": "big.html", "offset": 8500})["result"]
+    out = bot.run_tool("p", {"tool": "edit", "path": "big.html", "find": "MARK", "replace": "DONE"})
+    assert out["changed"] and "DONE" in (tmp_path / "big.html").read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="2 times"):
+        bot.run_tool("p", {"tool": "edit", "path": "big.html", "find": "x=1;", "replace": "x=2;"})
+    with pytest.raises(ValueError, match="isn't in the file"):
+        bot.run_tool("p", {"tool": "edit", "path": "big.html", "find": "nope", "replace": ""})
+    bot.run_tool("p", {"tool": "edit", "path": "big.html", "find": "x=1;", "replace": "x=2;", "all": True})
+    assert (tmp_path / "big.html").read_text(encoding="utf-8").endswith("x=2;x=2;")

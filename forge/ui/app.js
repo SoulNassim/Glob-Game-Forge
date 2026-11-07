@@ -250,7 +250,11 @@ async function openProjects() {
   try { state.cards = (await api("/api/projects/cards")).projects; } catch (err) { toast(err.message, true); state.cards = []; }
   renderProjectGrid();
   api("/api/storage").then((info) => {
-    $("#projectsFoot").innerHTML = `Projects are saved in <code>${esc(info.projects_dir)}</code> <button class="link-btn" data-st-open="projects">Open folder</button> · <button class="link-btn" data-st-move>Change</button>`;
+    const where = `Projects are saved in <code>${esc(info.projects_dir)}</code> <button class="link-btn" data-st-open="projects">Open folder</button> · <button class="link-btn" data-st-move>Change</button>`;
+    $("#projectsFoot").innerHTML = where;
+    // Also under the title, where it is seen: two Globs can read different folders, and this says which one this is.
+    const head = $("#projectsWhere") || $("#projectGrid").insertAdjacentElement("beforebegin", Object.assign(document.createElement("p"), { id: "projectsWhere", className: "pv-where" }));
+    if (head) head.innerHTML = `Showing <code>${esc(info.projects_dir)}</code>`;
   }).catch(() => {});
 }
 
@@ -380,6 +384,7 @@ function obFolders(ob) {
   return `<button type="button" class="ob-folder${ob.game ? " on" : ""}" data-ob-game>${ob.game ? `<strong>${esc(ob.game.split(/[\\/]/).filter(Boolean).pop())}</strong><small>${esc(ob.game)}</small>` : `<strong>Choose game folder…</strong><small>Godot, Unity, Unreal or anything else</small>`}</button>
     ${ob.picking ? `<p class="ob-picking"><span class="spinner"></span>A folder window opened. If you can't see it, it's behind this window.</p>` : ""}
     <div class="ob-path"><input id="obGamePath" spellcheck="false" placeholder="or paste the folder's path, e.g. D:\\Games\\MyGame" value="${esc(ob.typed || "")}"><button type="button" class="ob-back" data-ob-path>Use</button></div>
+    ${ob.game && ob.typed ? `<p class="ob-picking">Not there yet? Glob creates the folder when it makes the project.</p>` : ""}
     ${ob.game ? `<div class="ob-home"><span>Glob's workspace</span><code title="${esc(where)}"><bdi>${esc(where)}</bdi></code>
       <button type="button" class="link-btn" data-ob-home>${ob.home ? "Change…" : "Keep it somewhere else…"}</button>
       ${ob.home ? `<button type="button" class="link-btn" data-ob-home-reset>Back to the game folder</button>` : ""}</div>` : ""}
@@ -452,8 +457,15 @@ async function chooseGameFolder() {
   if (!folder) return renderOnboarding();
   state.ob.game = folder;
   state.ob.noGame = false;
-  if (!state.ob.name) state.ob.name = folder.split(/[\\/]/).filter(Boolean).pop().replace(/[-_]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+  applyAutoName(state.ob, folder);
   renderOnboarding();
+}
+
+// The project name follows the game folder until the user types their own: picking a different folder
+// replaces a name Glob filled in, but never one the user wrote.
+function applyAutoName(ob, folder) {
+  const guess = folder.split(/[\\/]/).filter(Boolean).pop().replace(/[-_]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+  if (!ob.name || ob.name === ob.autoName) { ob.name = guess; ob.autoName = guess; }
 }
 
 const OB_BLANK = 5;
@@ -592,7 +604,7 @@ async function openSession(id) {
   state.sessionId = id;
   state.session = await api(`/api/agent/sessions/${id}`);
   storeSet(`forge.session.${state.project}`, id);
-  if (state.session.model && state.models.some((m) => m.id === state.session.model && m.ready)) state.model = state.session.model;
+  if (state.session.model && modelUsable(state.session.model)) state.model = state.session.model;
   if (state.session.effort) state.effort = state.session.effort;
   renderModelPill();
   renderTabs();
@@ -672,7 +684,8 @@ function renderMessages() {
     </div>`;
     return;
   }
-  const thinking = state.sending ? `<div class="msg agent thinking"><img class="avatar forge" src="/ui/glob-forge.svg" alt=""><div class="bubble"><div class="who">Glob</div><span class="shimmer">Forging…</span></div></div>` : "";
+  const running = state.sending || state.progress?.session === state.sessionId;
+  const thinking = running ? `<div class="msg agent thinking"><img class="avatar forge" src="/ui/glob-forge.svg" alt=""><div class="bubble"><div class="who">Glob</div><div id="liveStatus">${liveStatusHtml()}</div></div></div>` : "";
   // Only messages that are new since the last draw animate in; redraws of the same chat stay still.
   const seen = state.drawn?.session === state.sessionId ? state.drawn.count : messages.length;
   state.drawn = { session: state.sessionId, count: messages.length };
@@ -723,10 +736,11 @@ function addFiles(files) {
   }
 }
 
-async function send() {
+async function send(override = {}) {
   const input = $("#input");
   const text = input.value.trim();
   if ((!text && !state.attachments.length) || state.sending) return;
+  if (state.progress?.session === state.sessionId) return toast("Glob is still working on the last message.", true);
   state.sending = true;
   $("#sendBtn").disabled = true;
   const attachments = state.attachments;
@@ -739,7 +753,7 @@ async function send() {
     renderAttachments();
     renderMessages();
     const page = state.view.path ? { viewing: state.view.path } : {};
-    state.session = await api(`/api/agent/sessions/${id}/messages`, { method: "POST", body: { text, attachments, page, model: state.model || undefined, effort: state.effort } });
+    state.session = await api(`/api/agent/sessions/${id}/messages`, { method: "POST", body: { text, attachments, page, model: override.model || state.model || undefined, effort: override.effort || state.effort } });
     const entry = state.sessions.find((s) => s.id === id);
     if (entry) entry.title = state.session.title;
     renderTabs();
@@ -756,7 +770,69 @@ async function send() {
   }
 }
 
+// What the chat model is doing right now, from the server's progress messages: thinking, or writing (and how much).
+function liveStatusHtml() {
+  const p = state.progress;
+  if (!p || p.session !== state.sessionId) return `<span class="shimmer">Forging…</span>`;
+  const secs = Math.max(0, Math.floor(Date.now() / 1000 - p.started));
+  const time = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+  const fileVerb = { write: "Writing", append: "Adding to", edit: "Editing" }[p.doing?.tool];
+  const label = p.phase === "thinking" ? "Thinking"
+    : p.phase === "writing" ? (fileVerb ? `${fileVerb} ${p.doing.path} · ${(p.chars / 1000).toFixed(1)}k characters` : "Writing its answer")
+    : p.phase === "acting" ? "Working"
+    : "Working out the next step…";
+  const readable = (p.tail || "").split("\\n").join("\n").split('\\"').join('"').slice(-240);  // the model's reply is JSON text: show its newlines and quotes plainly
+  const shown = p.phase === "thinking" ? (p.thought || "").trim() : p.phase === "writing" && fileVerb ? readable : "";
+  const tail = shown ? `<pre class="live-tail${p.phase === "thinking" ? " thought" : ""}">${esc(shown)}</pre>` : "";
+  return `${liveStepsHtml(p)}<span class="shimmer">${esc(label)}</span> <small class="live-time">${time}</small>${tail}`;
+}
+
+const STEP_VERB = { read: "Reading", list: "Looking in", write: "Writing", append: "Adding to", edit: "Editing", create_folder: "Making folder", move: "Moving", delete: "Removing", generate: "Generating", pick_winner: "Picking winner for", copy_in: "Copying", import_game: "Importing", save_url: "Saving", request_access: "Asking for access to", skill: "Opening guide", models: "Checking models", service_tools: "Looking at service tools", service_tool_info: "Looking at service tool", service_call: "Calling service tool" };
+
+// What this answer has done so far, oldest first, like a coding agent's log: what it said, then each tool it ran.
+function liveStepsHtml(p) {
+  const steps = p.steps || [];
+  if (!steps.length && !(p.say && p.phase === "writing")) return "";
+  const hidden = Math.max(0, steps.length - 14);
+  const rows = steps.slice(hidden).map((s) => {
+    if (s.say) return `<li class="say">${esc(s.say)}</li>`;
+    const mark = s.state === "failed" ? "!" : s.state === "done" ? "✓" : "…";
+    return `<li class="${s.state || "running"}"><i>${mark}</i><span>${esc(s.summary || `${STEP_VERB[s.tool] || s.tool} ${s.path}`.trim())}</span></li>`;
+  });
+  if (p.say && p.phase === "writing" && steps.at(-1)?.say !== p.say) rows.push(`<li class="say">${esc(p.say)}</li>`);
+  return `<ul class="live-steps">${hidden ? `<li class="more">${hidden} earlier steps</li>` : ""}${rows.join("")}</ul>`;
+}
+
+function updateLiveStatus() {
+  const el = $("#liveStatus");
+  if (!el) return;
+  const box = $("#messages");
+  const following = box.scrollHeight - box.scrollTop - box.clientHeight < 160;  // don't pull the view down if they scrolled up to read
+  el.innerHTML = liveStatusHtml();
+  if (following) box.scrollTo({ top: box.scrollHeight, behavior: "instant" });
+}
+
+// A run this page didn't start (it was reloaded mid-run, or another window asked): show it live, then its answer.
+function chatProgress(msg) {
+  const before = state.progress;
+  state.progress = msg.done ? null : msg;
+  if (msg.session === state.sessionId && !state.sending) {
+    if (msg.done && before) openSession(state.sessionId).catch(() => {});
+    else if (!msg.done && !before) renderMessages();
+  }
+  updateLiveStatus();
+}
+setInterval(updateLiveStatus, 1000);
+
 // ---------- models & settings ----------
+
+function modelUsable(id) {
+  const model = state.models.find((m) => m.id === id);
+  if (!model) return false;
+  if (model.ready) return true;
+  const cli = String(id).match(/^cli:([^/]+)/)?.[1];
+  return Boolean(cli && (state.modelInfo?.clis || []).some((c) => c.id === cli && c.installed && c.status === "unknown"));
+}
 
 async function loadModels() {
   try {
@@ -764,7 +840,9 @@ async function loadModels() {
     state.models = data.models || [];
     state.modelInfo = data;
     const ready = state.models.filter((m) => m.ready);
-    if (!ready.some((m) => m.id === state.model)) state.model = ready.some((m) => m.id === data.selected) ? data.selected : (ready[0]?.id || "");
+    // Just after a start the coding agents are still being checked. Their models aren't ready yet, but that's no
+    // reason to move the chat to another provider: keep the choice until the check has answered.
+    if (!modelUsable(state.model)) state.model = modelUsable(data.selected) ? data.selected : (ready[0]?.id || "");
     if (data.effort && !state.sessionId) state.effort = data.effort;
   } catch {
     state.models = [];
@@ -1450,12 +1528,13 @@ function renderSections() {
   const ov = state.overview;
   const active = PLAIN_VIEWS.includes(state.view.type) ? "" : (state.view.path || "").split("/")[0];
   const initials = projectTitle().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-  const sections = ov.sections.filter((s) => s.path !== "levels");  // the Levels button above is that folder's way in
+  const sections = ov.sections.filter((s) => s.path !== "levels" && s.path !== "prototype");  // the Levels button above is that folder's way in
   $("#sections").innerHTML = `
     <div class="proj-card"><span class="proj-badge">${esc(initials || "F")}</span><div><strong>${esc(projectTitle())}</strong><small>${esc(ov.excerpt || "Your game project")}</small></div></div>
     <button class="sec${state.view.type === "home" ? " active" : ""}" data-home><small>00</small>Overview</button>
     <button class="sec vault-sec${state.view.type === "vault" ? " active" : ""}" data-vault>${icon("box")}<span class="sec-name">Final Vault</span></button>
     <button class="sec vault-sec${state.view.type === "levels" || (state.view.path || "").startsWith("levels/") ? " active" : ""}" data-levels>${icon("map")}<span class="sec-name">Levels</span></button>
+    <button class="sec vault-sec${state.view.type === "prototype" ? " active" : ""}" data-prototype>${icon("play")}<span class="sec-name">Prototype</span></button>
     ${sections.length ? `<div class="sec-label">Sections</div>` : ""}
     ${sections.map((s) => `<button class="sec${s.path === active ? " active" : ""}" data-folder="${esc(s.path)}"><small>${s.number}</small><span class="sec-name">${esc(s.title)}</span>${s.children?.length ? `<span class="caret${s.path === active ? " open" : ""}"></span>` : ""}</button>${s.path === active ? subTree(s.children) : ""}`).join("")}
     <div class="spacer"></div>
@@ -1479,6 +1558,7 @@ function renderCrumbs() {
   if (state.view.type === "home") parts.push(`<strong>${esc(projectTitle())}</strong>`);
   else if (state.view.type === "vault") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Final Vault</strong>`);
   else if (state.view.type === "levels") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Levels</strong>`);
+  else if (state.view.type === "prototype") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Prototype</strong>`);
   else if (state.view.type === "board") parts.push(`<button data-home>${esc(projectTitle())}</button>`, `<span class="sep">/</span>`, `<strong>Board</strong>`);
   else {
     parts.push(`<button data-home>${esc(projectTitle())}</button>`);
@@ -1794,6 +1874,7 @@ async function renderViewBody() {
 
   if (view.type === "vault") return renderVault();
   if (view.type === "levels") return renderLevels();
+  if (view.type === "prototype") return renderPrototype();
   if (view.type === "board") return renderBoard();
 
   if (view.type === "folder") {
@@ -1883,6 +1964,190 @@ function vaultRow(e) {
       <button class="act" data-vault-zip="${esc(e.path)}" title="Download this asset as a ZIP">${icon("download")}ZIP</button>
     </div>
   </div>`;
+}
+
+// ---------- Prototype: a quick playable sketch of the game, made from the project's own art ----------
+// The Glob chat writes `prototype/index.html` (one self-contained file). It is shown here in a sandboxed frame
+// so it can't reach Glob's own pages or API, and it is only ever a feel for the gameplay, not the real game.
+
+const PROTO_IDEAS = [
+  ["Core loop", "The main thing you do in the game, boiled down to the most fun two minutes."],
+  ["Boss fight", "One big boss from this game's world with three phases and clear attack patterns."],
+  ["Survival mode", "Endless waves from this game's enemies; one life, and it gets nastier every 20 seconds."],
+  ["Cosy version", "No fail state: a relaxed take with happy combos and little rewards."],
+  ["Time attack", "The core action as many times as possible in 60 seconds, with bonus time pickups."],
+  ["Hard mode", "The same game but fast and unforgiving: tighter timing, more enemies, bigger scores."],
+  ["Co-op twist", "Two characters from the game at once on one keyboard (WASD and arrows), working together."],
+];
+const PROTO_QUICK = [
+  ["Faster", "make everything about 30% faster"], ["Easier", "make it more forgiving: slower enemies, more lives"],
+  ["Harder", "make it harder with quicker difficulty ramp-up"], ["More juice", "add more particles, screen shake, squash and stretch and bigger score pop-ups"],
+  ["Power-ups", "add three kinds of power-ups that drop sometimes"], ["Add a timer", "add a visible round timer and a bonus for finishing fast"],
+  ["Pause + mute", "add P to pause and M to mute"], ["Better sounds", "add punchier synthesized WebAudio sounds for hit, pickup, win and lose"],
+];
+
+function protoSlug(text, taken) {
+  const base = String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "prototype";
+  let slug = base, n = 2;
+  while (taken.includes(slug)) slug = `${base}-${n++}`;
+  return slug;
+}
+
+async function protoList() {
+  try { return (await api(`/api/prototypes?project=${encodeURIComponent(state.project)}`)).prototypes || []; } catch { return []; }
+}
+
+function protoPath(slug) { return `prototype/${slug ? `${slug}/` : ""}index.html`; }
+
+function prototypePrompt({ slug, title, idea, change }) {
+  const flat = is2d();
+  const dim = flat
+    ? "2D: draw each picked image as a sprite on a canvas"
+    : `3D: build a real 3D scene with three.js. Where an asset has a model (a .glb in the 3d folder next to its page; list that folder), load it with GLTFLoader. Where it has none, show its picked image as a camera-facing card standing on the ground. If a model fails to load, fall back to the card. Measure each loaded model with a bounding box, scale it to its size in the game and stand it on the ground, because models arrive at any scale. Keep one facing-angle constant per model so it can be corrected. Most models have no animations, so animate them in code: hops, squash and stretch, lean, spin`;
+  const tech = flat
+    ? "plain HTML, CSS and JavaScript on a canvas; no libraries, no downloads, no network"
+    : `HTML, CSS and JavaScript. three.js is the only library allowed: load it with exactly this in the head: <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>. Use <script type="module"> and import GLTFLoader from three/addons/loaders/GLTFLoader.js. No other downloads or network`;
+  const file = protoPath(slug);
+  if (change) {
+    return `Change the playable prototype (${file}): ${change}. The file is big: read it in parts (read with an offset), then change only what is needed with the edit tool (an exact snippet and its replacement). Do not rewrite the whole file. Keep everything that already works.`;
+  }
+  return `Make a playable prototype of this game that feels good to play, so I can judge the gameplay. It is called "${title}". ${idea ? `This is a prototype of THIS game (its pitch, characters, world and art), never a new or different game. The twist to try on it: ${idea} ` : "Use the core loop of this game's pitch, with this game's own characters and world. "}`
+    + `Write ONE self-contained file, ${file} (${tech}), with <title>${title}</title> and a <meta name="description" content="one short line about how it plays"> in the head. `
+    + `First read GAME.md, the asset pages and glob/ASSETS.md. Then, before you write any code, send one reply with "done": false and no actions that tells me your plan in three to five short lines: what I'll do in the game, what makes it fun and which art it uses. Write the file in the reply after that. Look at the angle the art is drawn from and choose the camera and layout that suit it; never default to top-down, where side-on art looks pasted on. Make that loop fun for about two minutes: a clear goal, a score, difficulty that ramps up, a win or lose state, a title screen with the controls, and a restart. Winning must take about two minutes of good play and there must be no quick shortcut to it, and a careless player must really be able to lose. `
+    + `Make it feel alive: sprites bob, squash or flash when hit, floating score numbers, small particle bursts, screen shake on mistakes, smooth movement, a readable HUD, a soft background and shadows under characters. Keep every sprite well proportioned and sharp (use the image's real aspect ratio). `
+    + `Art: ${dim}. Load the picked image of each asset by the path written in the asset page's winner line, relative to this file's folder (this file is two folders deep, so a path starts with ../../, for example ../../02-characters/hero/candidates/file.png). Write each path, models included, as one whole quoted string, never a shared prefix joined to a name, because Glob swaps these strings for the files when it serves the page. Where an asset has no picture yet, draw a clear placeholder shape with its name. `
+    + `Sounds: use a picked sound only if the asset has one (new Audio with that relative path); also add tiny synthesized beeps with WebAudio for feedback. Never generate anything and do not start any image, sound or 3D generation. `
+    + `Keep it small: 300 to 600 lines. Write the whole file in one write, never in parts. Don't draft the code or work out balance numbers in your thinking: pick simple values and write the code straight into the file, because I can tune it afterwards. When done, tell me in two sentences how to play it and which parts are placeholder.`;
+}
+
+async function askForPrototype(opts) {
+  if (state.sending) { toast("Glob is busy: wait for the current reply.", true); return false; }
+  const change = opts.change || "";
+  $("#input").value = prototypePrompt(opts);
+  toast(change ? "Asked Glob to change it. Watch the chat." : "Glob is building it with a stronger model. It takes a few minutes and shows up here when ready.");
+  // A whole game in one reply needs a strong model: the small default makes thin, plain sketches.
+  // Asked fresh: the page's own list may not have loaded yet, and then the small default would be used.
+  let list = state.models;
+  try { list = (await api("/api/agent/models")).models || list; } catch { /* use what the page has */ }
+  const strong = ["cli:claude/opus", "cli:claude/sonnet", "cli:claude/fable"].find((id) => list.some((m) => m.id === id && m.ready));
+  state.protoPending = change ? { slug: opts.slug, change: true } : { slug: opts.slug, title: opts.title };
+  send(strong ? { model: strong, effort: "medium" } : {}).finally(() => {
+    state.protoPending = null;
+    if (state.view.type === "prototype") renderPrototype(true);
+  });
+  if (state.view.type === "prototype" && !change) { state.protoOpen = null; renderPrototype(true); }
+  return true;
+}
+
+function newPrototypeDialog(preset) {
+  openDialog(`<form class="dlg" id="newProtoForm">
+    <h2>${icon("play")} New prototype</h2>
+    <p>A playable sketch of <b>your game</b>, with its characters, art and pitch. Pick a twist to try, or describe your own. Make a few and keep the one that's fun.</p>
+    <label>Name<input name="title" maxlength="50" placeholder="Boss fight" value="${esc(preset?.[0] || "")}" autofocus></label>
+    <label>What do you want to try in your game?<textarea name="idea" rows="3" placeholder="Leave empty for the core loop of your pitch. Or: a boss that throws the bakery's own dough at you…">${esc(preset?.[1] || "")}</textarea></label>
+    <div class="proto-ideas">${PROTO_IDEAS.map((p, i) => `<button type="button" class="chip proto-chip" data-proto-idea="${i}">${esc(p[0])}</button>`).join("")}</div>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">${icon("play")} Build it</button></div></form>`);
+  const form = $("#newProtoForm");
+  form.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-proto-idea]");
+    if (!b) return;
+    const [t, d] = PROTO_IDEAS[Number(b.dataset.protoIdea)];
+    form.title.value = t; form.idea.value = d;
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = String(form.title.value).trim() || "Prototype";
+    const idea = String(form.idea.value).trim();
+    const taken = (await protoList()).map((p) => p.slug);
+    closeDialog();
+    askForPrototype({ slug: protoSlug(title, taken), title, idea });
+  });
+}
+
+function protoHue(text) {
+  let h = 0;
+  for (const ch of String(text)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+
+function protoCard(p) {
+  const hue = protoHue(p.title);
+  return `<div class="proto-card" style="--h:${hue}">
+    <button type="button" class="proto-art" data-proto-open="${esc(p.slug)}" aria-label="Play ${esc(p.title)}"><span class="proto-play">${icon("play")}</span><b>${esc((p.title.match(/\p{L}/u) || ["?"])[0].toUpperCase())}</b></button>
+    <div class="proto-meta"><strong>${esc(p.title)}</strong><small>${esc(p.description || "Playable sketch")}</small><small class="when">${esc(timeAgo(p.updated))}</small></div>
+    <button type="button" class="pcard-del" data-proto-del="${esc(p.slug)}" title="Remove (moves to .trash)" aria-label="Remove ${esc(p.title)}">✕</button>
+  </div>`;
+}
+
+async function protoAssetsDialog() {
+  let vault;
+  try { vault = await api("/api/vault"); } catch (err) { return toast(err.message, true); }
+  const assets = vault.groups.flatMap((g) => g.assets).filter((a) => a.winner && !AUDIO_KINDS.includes(a.kind));
+  if (!assets.length) return toast("No picked images yet. Pick a winner on an asset first.", true);
+  openDialog(`<form class="dlg" id="protoAssetsForm">
+    <h2>${icon("box")} Use specific assets</h2>
+    <p>Tick the pictures that should appear in this prototype. Say below what each one should do.</p>
+    <div class="proto-picker">${assets.map((a, i) => `<label class="proto-pick"><input type="checkbox" name="a" value="${i}"><img src="${esc(fileUrl(a.winner))}" alt="" loading="lazy"><span>${esc(a.title)}</span></label>`).join("")}</div>
+    <label>What should they do?<input name="role" maxlength="200" placeholder="e.g. the hero is the player, the slime is the enemy"></label>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">Put them in</button></div></form>`);
+  $("#protoAssetsForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const picked = [...f.querySelectorAll("input[name=a]:checked")].map((c) => assets[Number(c.value)]);
+    if (!picked.length) return toast("Tick at least one asset.", true);
+    const slug = state.protoOpen;
+    const p = (await protoList()).find((x) => x.slug === slug);
+    closeDialog();
+    const list = picked.map((a) => `${a.title} (picture: ${a.winner})`).join("; ");
+    const role = String(f.role.value).trim();
+    askForPrototype({ slug, title: p?.title || "Prototype", change: `use these specific assets in the game, as real sprites instead of placeholders: ${list}.${role ? ` How they are used: ${role}.` : ""} Paths are relative to the workspace, so from this file they start with ../../` });
+  });
+}
+
+async function renderPrototype(force) {
+  const content = $("#content");
+  const items = await protoList();
+  const open = state.protoOpen != null ? items.find((p) => p.slug === state.protoOpen) : null;
+  if (state.protoOpen != null && !open) state.protoOpen = null;
+  const pending = state.protoPending;
+
+  if (open) {
+    const src = `${fileUrl(open.path)}?v=${Math.floor(open.updated)}`;
+    // The workspace refreshes after every change: leave a running game alone unless the file itself changed.
+    const frame = content.querySelector(".proto-frame iframe");
+    if (!force && frame && frame.getAttribute("src") === src) return;
+    content.innerHTML = `
+      <div class="kicker"><button class="link-btn" data-proto-back>Prototypes</button> / ${esc(open.title)}</div>
+      <div class="asset-head"><h1 class="title">${esc(open.title)}</h1></div>
+      ${open.description ? `<p class="lede">${esc(open.description)}</p>` : ""}
+      <div class="vault-bar">
+        <button class="ghost" data-proto-back>← All prototypes</button>
+        <button class="ghost" data-proto-restart>${icon("play")} Restart</button>
+        <button class="ghost" data-proto-full>Full screen</button>
+        <a class="ghost btn" href="${esc(src)}" target="_blank" rel="noopener">Open in its own tab</a>
+      </div>
+      <div class="proto-frame"><iframe title="${esc(open.title)}" src="${esc(src)}" sandbox="allow-scripts allow-pointer-lock" allow="autoplay"></iframe></div>
+      <p class="proto-hint">Click the game once so it gets your keys. ${pending?.change ? `<b>Glob is changing it now…</b>` : ""}</p>
+      <h2 class="block-title">Make it more fun</h2>
+      <div class="proto-quick">${PROTO_QUICK.map((q, i) => `<button type="button" class="chip proto-chip" data-proto-quick="${i}">${esc(q[0])}</button>`).join("")}</div>
+      <div class="proto-compose">
+        <textarea id="protoTweakText" rows="2" maxlength="400" placeholder="Tell Glob what to change: monsters twice as fast, add a boss, make the baker bigger…"></textarea>
+        <div class="proto-compose-bar"><button type="button" class="ghost" data-proto-assets>${icon("box")} Use specific assets</button><span class="grow"></span><button class="primary" data-proto-tweak>${icon("sparkle")} Change it</button></div>
+      </div>`;
+    return;
+  }
+
+  const building = pending && !pending.change;
+  content.innerHTML = `
+    <div class="kicker">Project / ${esc(projectTitle())}</div>
+    <div class="asset-head"><h1 class="title">Prototypes</h1></div>
+    <p class="levels-lead">Quick playable sketches made from your pitch and your picked art, to feel a gameplay idea before building the real game. Missing art shows as coloured placeholders. Nothing here costs credits.</p>
+    <div class="action-row"><button class="primary" data-proto-new>${icon("sparkle")} New prototype</button><button class="ghost" data-proto-surprise>🎲 Surprise me</button></div>
+    <div class="proto-grid">
+      ${building ? `<div class="proto-card building"><div class="proto-art"><i class="agent-spin"></i></div><div class="proto-meta"><strong>${esc(pending.title)}</strong><small>Glob is writing it… watch the chat for progress.</small></div></div>` : ""}
+      ${items.map(protoCard).join("")}
+    </div>
+    ${items.length || building ? "" : `<p class="hint-line levels-empty">No prototypes yet. Press <b>New prototype</b>, or <b>Surprise me</b> to let Glob pick a gameplay idea. A clear one-line pitch in <code>GAME.md</code> gives better results.</p>`}`;
 }
 
 async function renderVault() {
@@ -2154,7 +2419,7 @@ function renderAssetPage(a) {
     <div class="kicker">Asset / ${esc(a.path)}</div>
     <div class="asset-head"><h1 class="title">${esc(title)}</h1><span class="kind-tag">${esc(a.kind)}</span></div>
     ${problemJobs(a.path).map((j) => `<div class="job-banner bad"><span class="bad-dot">!</span><span class="grow">${esc(ACTION_LABEL[j.action] || j.action)} ${j.status === "interrupted" ? "was interrupted" : "failed"}: ${esc(j.error || "no details")}</span><button type="button" class="mini" data-action="${esc(j.action)}">Try again</button><button type="button" class="mini" data-dismiss-job="${esc(j.id)}">Dismiss</button></div>`).join("")}
-    ${jobs.length ? `<div class="job-banner"><span class="spinner"></span>${jobs.map((j) => esc(ACTION_LABEL[j.action] || j.action)).join(", ")} running… results appear here automatically.</div>` : ""}
+    ${jobs.length ? `<div class="job-banner"><span class="spinner"></span>${jobs.map((j) => esc(ACTION_LABEL[j.action] || j.action)).join(", ")} running${sinceTag(jobs[0])}… results appear here automatically. Images usually take one to two minutes.</div>` : ""}
     <div class="asset-top">
       <div class="winner-box drop-zone${heroModel && !a.winner ? " hero-3d" : ""}" data-drop-winner${heroModel && !a.winner ? ` data-hero-model="${esc(heroModel.path)}"` : ""} title="${is2d() ? "Drop an image here to use it as the winner" : "Drop an image to use it as the winner, or a 3D model to add it"}">${a.winner ? `<img src="${esc(fileUrl(a.winner))}" alt="Winner"><span class="drop-hint">${is2d() ? "Drop an image to replace" : "Drop an image to replace, or a 3D model to add"}</span>` : heroModel ? `
         ${heroModel.thumb ? `<img class="hero-poster" src="${esc(fileUrl(heroModel.thumb))}" alt="">` : ""}<div class="hero-stage"></div>
@@ -2649,7 +2914,7 @@ async function makeAsset() {
 
 // The current page and the pages before it survive a refresh, per project.
 const viewKey = () => `forge.view.${state.project}`;
-const PLAIN_VIEWS = ["home", "vault", "levels"];
+const PLAIN_VIEWS = ["home", "vault", "levels", "prototype"];
 const plainView = (v) => (PLAIN_VIEWS.includes(v.type) ? { type: v.type } : { type: v.type, path: v.path });
 
 function saveView() {
@@ -3480,6 +3745,7 @@ function connectSocket() {
   ws.onmessage = (event) => {
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
+    if (msg.type === "agent_progress" && msg.project === state.project) chatProgress(msg);
     if (msg.type === "models_changed") loadModels().then(refreshModelViews);
     if (msg.type === "service_connected") loadServices().then(() => serviceConnected(msg.service));
     // A cover being painted for another project shows on its card as soon as it lands.
@@ -3507,7 +3773,7 @@ function connectSocket() {
 // ---------- events ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-cli-logout],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-levels],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
+  const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-cli-logout],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-levels],[data-prototype],[data-proto-new],[data-proto-surprise],[data-proto-open],[data-proto-back],[data-proto-restart],[data-proto-full],[data-proto-del],[data-proto-quick],[data-proto-assets],[data-proto-tweak],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
@@ -3592,7 +3858,7 @@ document.addEventListener("click", async (event) => {
     if (!/^([a-z]:[\\/]|[\\/]|~)/i.test(ob.typed || "")) { toast("Paste the whole path, starting with the drive, like D:\\Games\\MyGame.", true); return $("#obGamePath")?.focus(); }
     ob.game = ob.typed;
     ob.noGame = false;
-    if (!ob.name) ob.name = ob.game.split(/[\\/]/).filter(Boolean).pop().replace(/[-_]+/g, " ");
+    applyAutoName(ob, ob.game);
     return renderOnboarding();
   }
   if (t.dataset.obNogame !== undefined) { syncOnboarding(); Object.assign(state.ob, { noGame: true, game: "", home: "" }); return renderOnboarding(); }
@@ -3658,6 +3924,28 @@ document.addEventListener("click", async (event) => {
   if (t.dataset.folder !== undefined) return go({ type: "folder", path: t.dataset.folder });
   if (t.dataset.home !== undefined) return go({ type: "home" });
   if (t.dataset.vault !== undefined) return go({ type: "vault" });
+  if (t.dataset.prototype !== undefined) { state.protoOpen = null; return go({ type: "prototype" }); }
+  if (t.dataset.protoNew !== undefined) return newPrototypeDialog();
+  if (t.dataset.protoSurprise !== undefined) return newPrototypeDialog(PROTO_IDEAS[Math.floor(Math.random() * PROTO_IDEAS.length)]);
+  if (t.dataset.protoOpen !== undefined) { state.protoOpen = t.dataset.protoOpen; return renderPrototype(true); }
+  if (t.dataset.protoBack !== undefined) { state.protoOpen = null; return renderPrototype(true); }
+  if (t.dataset.protoRestart !== undefined) { const f = $("#content .proto-frame iframe"); if (f) f.src = f.src; return; }
+  if (t.dataset.protoFull !== undefined) { const f = $("#content .proto-frame"); if (f?.requestFullscreen) f.requestFullscreen(); return; }
+  if (t.dataset.protoDel !== undefined) {
+    if (!confirm("Remove this prototype? It moves to the project's .trash folder.")) return;
+    try { await api(`/api/prototypes?project=${encodeURIComponent(state.project)}&slug=${encodeURIComponent(t.dataset.protoDel)}`, { method: "DELETE" }); } catch (err) { return toast(err.message, true); }
+    return renderPrototype(true);
+  }
+  if (t.dataset.protoAssets !== undefined) return protoAssetsDialog();
+  if (t.dataset.protoQuick !== undefined || t.dataset.protoTweak !== undefined) {
+    const quick = t.dataset.protoQuick !== undefined;
+    const change = quick ? PROTO_QUICK[Number(t.dataset.protoQuick)][1] : ($("#protoTweakText")?.value || "").trim();
+    if (!change) { toast("Say what to change first.", true); return $("#protoTweakText")?.focus(); }
+    const slug = state.protoOpen;
+    if (slug == null) return;
+    const p = (await protoList()).find((x) => x.slug === slug);
+    return askForPrototype({ slug, title: p?.title || "Prototype", change }).then((ok) => { if (ok && $("#protoTweakText")) $("#protoTweakText").value = ""; });
+  }
   if (t.dataset.levels !== undefined) return go({ type: "levels" });
   if (t.dataset.vaultFilter) { state.vaultHistory = !!$("#vaultHistory")?.checked; state.vaultFilter = t.dataset.vaultFilter; return renderVault(); }
   if (t.dataset.vaultZip !== undefined) return vaultZip(t.dataset.vaultZip);
@@ -4723,6 +5011,17 @@ function downloadPressKit() {
   toast("Press kit downloading: unzip and open index.html, or upload the folder to itch.io or any static host.");
 }
 
+// A running job's elapsed time ("1:05"), ticking once a second, so a long wait doesn't look like a hang.
+function fmtElapsed(sec) { sec = Math.max(0, Math.floor(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; }
+function sinceTag(j) {
+  if (!j?.started_at) return "";
+  return ` <span class="since" data-since="${Number(j.started_at)}">${fmtElapsed(Date.now() / 1000 - j.started_at)}</span>`;
+}
+setInterval(() => {
+  const now = Date.now() / 1000;
+  document.querySelectorAll("[data-since]").forEach((el) => { el.textContent = fmtElapsed(now - Number(el.dataset.since)); });
+}, 1000);
+
 // Live and waiting generation jobs, bottom right, on every page.
 function renderJobDock() {
   let dock = $("#jobDock");
@@ -4734,7 +5033,7 @@ function renderJobDock() {
   const waiting = live.length - running;
   dock.innerHTML = `<button type="button" class="dock-head" data-dock-toggle aria-expanded="${Boolean(state.dockOpen)}"><span class="spinner"></span>${running} running${waiting ? ` · ${waiting} waiting` : ""}<span class="caret${state.dockOpen ? " open" : ""}"></span></button>
     ${state.dockOpen ? `<ul>${live.map((j) => `<li><button type="button" class="link-btn" data-open="${esc(j.asset)}">${esc(humanize(String(j.asset).split("/").pop()))}</button>
-      <small>${j.status === "queued" ? "waiting" : esc(ACTION_LABEL[j.action] || j.action)}</small>${j.status === "queued" ? `<button type="button" class="chip-del" data-job-cancel="${esc(j.id)}" title="Don't run this one" aria-label="Cancel">×</button>` : ""}</li>`).join("")}</ul>` : ""}`;
+      <small>${j.status === "queued" ? "waiting" : `${esc(ACTION_LABEL[j.action] || j.action)}${sinceTag(j)}`}</small>${j.status === "queued" ? `<button type="button" class="chip-del" data-job-cancel="${esc(j.id)}" title="Don't run this one" aria-label="Cancel">×</button>` : ""}</li>`).join("")}</ul>` : ""}`;
 }
 
 // ---------- candidate lightbox: arrows to step, Enter to pick, the prompt each image came from ----------
@@ -4976,7 +5275,7 @@ async function paletteItems() {
   const here = state.view.type === "folder" ? state.view.path : "";
   const actions = [
     ...(onAsset ? [["Generate 2D", "sparkle", () => openPreview("candidates")], ...(is2d() ? [] : [["Make 3D", "cube", () => openPreview("make_3d")], ["Turnaround views", "turn", () => openPreview("views")], ["Add 3D model", "upload", pickModelFile]])] : []),
-    ["Overview", "layers", () => go({ type: "home" })], ["Final vault", "box", () => go({ type: "vault" })], ["Levels", "map", () => go({ type: "levels" })],
+    ["Overview", "layers", () => go({ type: "home" })], ["Final vault", "box", () => go({ type: "vault" })], ["Levels", "map", () => go({ type: "levels" })], ["Prototype", "play", () => go({ type: "prototype" })],
     [here ? `Generate missing in ${humanize(here.split("/").pop())}` : "Generate all missing", "sparkle", () => batchDialog(here)],
     ...(here ? [["New asset here", "sparkle", () => newAssetDialog(here)]] : []),
     ...(is2d() ? [] : [["3D lineup", "cube", openLineup]]), ["Download press kit", "download", downloadPressKit],

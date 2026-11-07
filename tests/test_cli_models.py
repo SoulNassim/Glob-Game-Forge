@@ -105,3 +105,66 @@ def test_gemini_logout_removes_its_login_files(fake_bin: Path, tmp_path: Path) -
     creds.write_text("{}")
     cli_models.logout("gemini")
     assert not creds.exists()
+
+
+def test_progress_follows_the_stream_of_partial_messages() -> None:
+    """The chat shows what the agent is doing: thinking, then writing and how much."""
+    import json
+    import subprocess
+    import sys
+
+    from forge.agent import cli_models
+
+    events = [
+        {"type": "stream_event", "event": {"type": "content_block_start", "content_block": {"type": "thinking"}}},
+        {"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "hmm" * 10}}},
+        {"type": "stream_event", "event": {"type": "content_block_start", "content_block": {"type": "text"}}},
+        {"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hello world"}}},
+        {"type": "result", "result": "done"},
+    ]
+    script = "import sys\nfor l in sys.stdin: pass\n" + "".join(f"print({json.dumps(json.dumps(e))}, flush=True)\n" for e in events)
+    seen: list[dict] = []
+    progress = cli_models._Progress(seen.append)
+    progress.last = -1e9  # no throttling in the test
+    done = cli_models._run_streaming([sys.executable, "-c", script], "x\n", ".", dict(__import__("os").environ), 30,
+                                     lambda line: (progress.feed(line), setattr(progress, "last", -1e9)))
+    assert done.returncode == 0 and '"result"' in done.stdout
+    assert [p["phase"] for p in seen] == ["thinking", "thinking", "writing", "writing"]
+    assert seen[-1]["chars"] == len("hello world") and seen[-1]["thinking"] == 30 and seen[-1]["tail"].endswith("hello world")
+
+
+def test_streaming_runner_still_times_out() -> None:
+    import subprocess
+    import sys
+
+    import pytest
+
+    from forge.agent import cli_models
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        cli_models._run_streaming([sys.executable, "-c", "import time; time.sleep(30)"], "", ".", dict(__import__("os").environ), 1, lambda line: None)
+
+
+_TICKER = "import time\nfor i in range(40):\n    print(i, flush=True)\n    time.sleep(0.1)\n"
+
+
+def test_streaming_runner_keeps_a_call_that_is_still_writing() -> None:
+    import sys
+
+    from forge.agent import cli_models
+
+    # Runs 4 seconds, longer than the 1.5 second silence limit, but never goes quiet.
+    done = cli_models._run_streaming([sys.executable, "-c", _TICKER], "", ".", dict(__import__("os").environ), 1.5, lambda line: None)
+    assert done.returncode == 0 and done.stdout.split()[-1] == "39"
+
+
+def test_streaming_runner_caps_the_whole_call() -> None:
+    import subprocess
+    import sys
+
+    import pytest
+
+    from forge.agent import cli_models
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        cli_models._run_streaming([sys.executable, "-c", _TICKER], "", ".", dict(__import__("os").environ), 1.5, lambda line: None, max_total=1.0)

@@ -12,13 +12,16 @@ import asyncio
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 CLIS: dict[str, dict[str, Any]] = {
     "claude": {"label": "Claude Code", "bin": "claude", "install": "curl -fsSL https://claude.ai/install.sh | bash", "login": "claude auth login", "site": "https://claude.com/claude-code"},
@@ -34,7 +37,9 @@ CLI_MODELS: dict[str, list[tuple[str, str]]] = {
     "opencode": [("", "Default")],
 }
 CLI_EFFORTS: dict[str, list[str]] = {"claude": ["low", "medium", "high", "max"], "codex": ["low", "medium", "high"]}
-TIMEOUT = 600
+TIMEOUT = 900  # seconds of silence before a CLI call is given up on
+MAX_CALL_SECONDS = 2400  # the longest one call may run, however much it is still writing
+_thinking_display = {"ok": True}  # switched off for this run if an older Claude Code refuses the flag
 _model_cache: dict[str, tuple[float, list[tuple[str, str]]]] = {}
 # What the last real call or check said about each CLI: "ok", "login" (needs a login) or "error" (didn't answer).
 # Nothing recorded = not checked yet.
@@ -141,7 +146,9 @@ def build_command(cli_id: str, exe: str, model: str, effort: str, system_prompt:
         # The system prompt goes in a file: on Windows `claude` is a .cmd, and cmd.exe stops at 8191 characters.
         (folder / "system.md").write_text(system_prompt, encoding="utf-8")
         cmd = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-               "--system-prompt-file", str(folder / "system.md"), "--tools", "", "--strict-mcp-config"]
+               "--include-partial-messages", "--system-prompt-file", str(folder / "system.md"), "--tools", "", "--strict-mcp-config"]
+        # Without this the model's thinking streams as empty text, and the chat has nothing to show for minutes.
+        cmd += ["--thinking-display", "summarized"] if _thinking_display["ok"] else []
         cmd += (["--model", model] if model else []) + (["--effort", effort] if effort else [])
         content: list[dict[str, Any]] = [{"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}} for mime, data in images[:4]]
         content.append({"type": "text", "text": prompt})
@@ -193,6 +200,117 @@ def parse_output(cli_id: str, stdout: str, folder: Path) -> tuple[str, str]:
     return "".join(texts).strip(), error
 
 
+# Set by the server around a chat message: called (from a worker thread) with {"phase", "chars", "thinking", "tail", "elapsed"}
+# while the agent works, so the chat can show what is happening instead of one long wait.
+progress_hook: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar("progress_hook", default=None)
+
+
+_REPLY_SO_FAR = re.compile(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)')
+_ACTION_SO_FAR = re.compile(r'"tool"\s*:\s*"(\w+)"\s*,\s*"(?:path|to)"\s*:\s*"((?:[^"\\]|\\.)+)"')
+
+
+class _Progress:
+    """Turns Claude Code's stream of partial messages into a small status the chat can show."""
+
+    def __init__(self, hook: Callable[[dict[str, Any]], None] | None) -> None:
+        self.hook, self.started, self.last = hook, time.time(), 0.0
+        self.phase, self.chars, self.thinking, self.text = "starting", 0, 0, ""
+        self.thought, self.head, self.say = "", "", ""
+        self.doing: dict[str, str] | None = None
+
+    def _read_reply(self, piece: str) -> None:
+        """Pick out of the JSON being written what the model is saying and which file it is working on."""
+        if len(self.head) < 2000:
+            self.head += piece
+            said = _REPLY_SO_FAR.search(self.head)
+            if said:
+                self.say = said.group(1).replace("\\n", " ").replace('\\"', '"')[:400]
+        actions = _ACTION_SO_FAR.findall(self.text)
+        if actions:
+            self.doing = {"tool": actions[-1][0], "path": actions[-1][1].replace("\\\\", "\\")}
+
+    def feed(self, line: str) -> None:
+        if not self.hook or '"stream_event"' not in line:
+            return
+        try:
+            event = (json.loads(line) or {}).get("event") or {}
+        except ValueError:
+            return
+        kind = event.get("type")
+        if kind == "content_block_start":
+            self.phase = "thinking" if (event.get("content_block") or {}).get("type") == "thinking" else "writing"
+        elif kind == "content_block_delta":
+            delta = event.get("delta") or {}
+            if delta.get("type") == "thinking_delta":
+                piece = delta.get("thinking") or ""
+                self.phase, self.thinking = "thinking", self.thinking + len(piece)
+                self.thought = (self.thought + piece)[-600:]
+            elif delta.get("type") == "text_delta":
+                piece = delta.get("text") or ""
+                self.phase, self.chars = "writing", self.chars + len(piece)
+                self.text = (self.text + piece)[-600:]
+                self._read_reply(piece)
+        else:
+            return
+        self.emit()
+
+    def emit(self, force: bool = False) -> None:
+        now = time.time()
+        if not self.hook or (not force and now - self.last < 0.7):
+            return
+        self.last = now
+        try:
+            self.hook({"phase": self.phase, "chars": self.chars, "thinking": self.thinking, "tail": self.text[-280:], "thought": self.thought[-360:],
+                       "say": self.say, "doing": self.doing, "elapsed": int(now - self.started)})
+        except Exception:  # noqa: BLE001 — progress is a courtesy, never a reason to fail the call
+            pass
+
+
+def _run_streaming(cmd: list[str], stdin_text: str, cwd: str, env: dict[str, str], timeout: int, on_line: Callable[[str], None],
+                   max_total: float = MAX_CALL_SECONDS) -> subprocess.CompletedProcess[str]:
+    """subprocess.run, but each line of output is handed to `on_line` as it arrives.
+
+    `timeout` counts silence, so a model that is still streaming isn't killed mid-answer; `max_total` caps the whole call.
+    """
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, env=env, text=True,
+                            encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    out: list[str] = []
+    err: list[str] = []
+    expired = threading.Event()
+    finished = threading.Event()
+    started = time.monotonic()
+    last_output = [started]
+
+    def watch() -> None:
+        while not finished.wait(min(1.0, timeout)):
+            now = time.monotonic()
+            if now - last_output[0] > timeout or now - started > max_total:
+                expired.set()
+                proc.kill()
+                return
+
+    threading.Thread(target=watch, daemon=True).start()
+    reader = threading.Thread(target=lambda: err.append(proc.stderr.read()), daemon=True)
+    reader.start()
+    try:
+        try:
+            proc.stdin.write(stdin_text)
+            proc.stdin.close()
+        except OSError:
+            pass
+        for line in proc.stdout:
+            last_output[0] = time.monotonic()
+            out.append(line)
+            on_line(line)
+        proc.wait()
+        reader.join(timeout=2)
+    finally:
+        finished.set()
+    if expired.is_set():
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    return subprocess.CompletedProcess(cmd, proc.returncode, "".join(out), "".join(err))
+
+
 async def call(model_id: str, prompt: str, system_prompt: str, images: list[tuple[str, str]], effort: str) -> dict[str, Any]:
     cli_id, _, model = model_id.removeprefix("cli:").partition("/")
     if cli_id not in CLIS:
@@ -205,16 +323,21 @@ async def call(model_id: str, prompt: str, system_prompt: str, images: list[tupl
     with tempfile.TemporaryDirectory(prefix="glob-chat-") as tmp:
         folder = Path(tmp)
         cmd, stdin_text = build_command(cli_id, exe, model, effort, system_prompt, prompt, images, folder)
+        progress = _Progress(progress_hook.get())
+        progress.emit(force=True)
         try:
             proc = await asyncio.to_thread(
-                subprocess.run, cmd, input=stdin_text, cwd=tmp, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=TIMEOUT, env={**child_env(), "NO_COLOR": "1"},
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                _run_streaming, cmd, stdin_text, tmp, {**child_env(), "NO_COLOR": "1"}, TIMEOUT, progress.feed,
             )
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"{label} did not answer within {TIMEOUT // 60} minutes.") from exc
+            raise RuntimeError(f"{label} stopped: it went {TIMEOUT // 60} minutes without output, or passed the {MAX_CALL_SECONDS // 60}-minute limit for one answer.") from exc
         except OSError as exc:
             raise RuntimeError(f"Could not start {label}: {exc}") from exc
+        if cli_id == "claude" and proc.returncode and _thinking_display["ok"] and "thinking-display" in (proc.stderr or ""):
+            # An older Claude Code without the flag: it refused at once, so nothing was spent. Go on without it.
+            _thinking_display["ok"] = False
+            cmd, stdin_text = build_command(cli_id, exe, model, effort, system_prompt, prompt, images, folder)
+            proc = await asyncio.to_thread(_run_streaming, cmd, stdin_text, tmp, {**child_env(), "NO_COLOR": "1"}, TIMEOUT, progress.feed)
         text, error = parse_output(cli_id, proc.stdout, folder)
     if not text:
         tail = (error or proc.stderr.strip() or proc.stdout.strip())[-600:]

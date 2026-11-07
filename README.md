@@ -49,6 +49,7 @@ The flow:
 | 🗂️ **Game icons** | Turn any image into square, transparent inventory icons (32 to 512 px) in one click |
 | 🗺️ **Level kits** | Picture a level section, get every prop in it on **one** sheet, and Glob finds, names and cuts out each prop on your computer. Two image calls instead of one per prop |
 | ✂️ **Sprites and parts** | Cut a sheet into parts or new assets, render sprite sheets from a 3D model |
+| 🎮 **Prototypes** | A rough, playable sketch built from your art, to test if the idea is fun. It runs sandboxed, and you can ask for changes |
 | 📦 **Press kit** | One ZIP with a web page of your key art, winners, turning 3D models and sounds |
 
 <table>

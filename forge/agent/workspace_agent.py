@@ -21,6 +21,7 @@ from forge.models import new_id
 import httpx
 
 from forge import access, asset_studio, game_import, meshy_login, service_gen, services
+from forge.agent.cli_models import progress_hook
 from forge.blueprint_contract import split_frontmatter
 from forge.config import load_config
 from forge.overview import FRONT_PAGES, HIDDEN_NAMES, move_to_trash
@@ -31,6 +32,8 @@ CHATS_DIR = Path("inbox") / "chats"
 ATTACHMENTS_DIR = Path("inbox") / "attachments"
 HANDOFFS_DIR = Path("inbox") / "handoffs"
 MAX_TOOL_ROUNDS = 8
+# Most generations (images, sounds, 3D) one chat message may start. A wrong guess can't drain the user's credits.
+MAX_GENERATIONS_PER_TURN = 8
 MAX_FILE_CHARS = 8000
 MAX_COPY_BYTES = 2 * 1024 * 1024 * 1024
 MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024
@@ -111,7 +114,8 @@ Reply with ONLY one JSON object, no prose outside it:
 
 Tools (paths relative to the workspace):
 - {"tool": "list", "path": ""}                      list a folder ("" = workspace root)
-- {"tool": "read", "path": "README.md"}
+- {"tool": "read", "path": "README.md", "offset": 0}   up to 8000 characters from `offset`; the result says how long the file is, so read big files in parts
+- {"tool": "edit", "path": "prototype/index.html", "find": "exact old text", "replace": "new text"}  change one place in a big file (the text must occur exactly once; add "all": true to change every one)
 - {"tool": "write", "path": "02-characters/hero.md", "content": "..."}  create or overwrite; parent folders are created
 - {"tool": "append", "path": "04-development/tasks.md", "content": "..."}
 - {"tool": "create_folder", "path": "03-locations/islands"}
@@ -152,7 +156,8 @@ the matching skill (listed under "Skills" in the context) unless you already rea
 how something was generated: the "Generation setup" block and each generate result name the exact model.
 
 You may put many actions in one reply. Set "done": false only when you need list/read results before
-continuing; you will get the results back."""
+continuing; you will get the results back. With "done": false the user sees your "reply" right away, so make it
+one short sentence about what you are doing now."""
 
 
 def chat_system_prompt(project: str) -> str:
@@ -181,6 +186,15 @@ def _is_absolute(path: str) -> bool:
     return bool(re.match(r"^(?:[A-Za-z]:[\\/]|/|~[\\/])", path))
 
 
+MAX_STRAY_REPLIES = 2
+_STRAY_TOOL_SYNTAX = re.compile(r"</?(?:\w+:)?(?:invoke|parameter|function_calls)\b")
+
+
+def _is_stray_tool_syntax(text: str) -> bool:
+    """A model that wants a native tool sometimes writes the call out as text: that isn't an answer for the user."""
+    return bool(_STRAY_TOOL_SYNTAX.search(text))
+
+
 def _extract_json(text: str) -> dict[str, Any] | None:
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(text or "").strip(), flags=re.IGNORECASE)
     start = cleaned.find("{")
@@ -189,9 +203,42 @@ def _extract_json(text: str) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(cleaned[start : end + 1])
+        return data if isinstance(data, dict) else None
     except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
+        pass
+    # Stray text or a second answer around the JSON (models do "...}\n\nWait, let me correct that: {...}"):
+    # the last object shaped like a reply is what the model settled on.
+    decoder = json.JSONDecoder()
+    found: dict[str, Any] | None = None
+    pos = start
+    while pos >= 0:
+        try:
+            value, stop = decoder.raw_decode(cleaned, pos)
+        except json.JSONDecodeError:
+            pos = cleaned.find("{", pos + 1)
+            continue
+        if isinstance(value, dict) and ("reply" in value or "actions" in value):
+            found = value
+        pos = cleaned.find("{", stop)
+    return found
+
+
+def _report(info: dict[str, Any]) -> None:
+    """Tell the chat what is happening right now. Only a courtesy: it can never stop the work."""
+    hook = progress_hook.get()
+    if hook:
+        try:
+            hook(info)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _report_step(step: dict[str, Any]) -> None:
+    _report({"phase": "acting", "step": step})
+
+
+def _report_step_done(summary: str, ok: bool) -> None:
+    _report({"step_done": {"summary": summary, "state": "done" if ok else "failed"}})
 
 
 class WorkspaceAgent:
@@ -400,7 +447,27 @@ class WorkspaceAgent:
             if not target.is_file():
                 raise FileNotFoundError(f"No file '{call.get('path')}'.")
             text = target.read_text(encoding="utf-8", errors="ignore")
-            return {"tool": tool, "path": rel(target), "result": text[:MAX_FILE_CHARS], "summary": f"Read {rel(target)}"}
+            start = max(0, int(call.get("offset") or 0))
+            part = text[start:start + MAX_FILE_CHARS]
+            note = f"[characters {start}-{start + len(part)} of {len(text)}{'; read again with a larger offset for the rest' if start + len(part) < len(text) else ''}]\n" if len(text) > MAX_FILE_CHARS else ""
+            return {"tool": tool, "path": rel(target), "result": note + part, "summary": f"Read {rel(target)}"}
+        if tool == "edit":
+            target = self._resolve(project, call.get("path"))
+            if not target.is_file():
+                raise FileNotFoundError(f"No file '{call.get('path')}'.")
+            find, replace = str(call.get("find") or ""), str(call.get("replace") or "")
+            if not find:
+                raise ValueError("edit needs the exact text to find.")
+            text = target.read_text(encoding="utf-8", errors="ignore")
+            count = text.count(find)
+            if count == 0:
+                raise ValueError("That text isn't in the file (it must match exactly, including spaces). Read the part you want to change first.")
+            if count > 1 and not call.get("all"):
+                raise ValueError(f"That text occurs {count} times. Add more surrounding text so it occurs once, or set \"all\": true.")
+            target.write_text(text.replace(find, replace), encoding="utf-8")
+            if target.name.upper() == "GAME.MD":
+                self.actions.get_workspace(project).sync_game_md_to_bible()
+            return {"tool": tool, "path": rel(target), "summary": f"Edited {rel(target)} ({count} place{'s' if count != 1 else ''})", "changed": True}
         if tool in ("write", "append"):
             target = self._resolve(project, call.get("path"))
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -674,6 +741,8 @@ class WorkspaceAgent:
         performed: list[dict[str, Any]] = []
         reply_text = ""
         used_model = ""
+        spent_jobs = 0
+        stray_replies = 0
         for _round in range(max(1, load_config().agent_max_tool_rounds or MAX_TOOL_ROUNDS)):
             prompt = f"# Context\n{context}\n\n# Conversation\n{transcript}"
             if tool_log:
@@ -683,19 +752,41 @@ class WorkspaceAgent:
                 result = await self.model_call(prompt=prompt, system_prompt=system, model_selector=session.get("model") or None, images_b64=images or None, effort=session.get("effort", "medium"))
             except Exception as exc:  # noqa: BLE001 — surface any provider failure in the chat
                 detail = str(exc).split("For more information check:")[0].strip()
-                reply_text = f"I couldn't reach the model ({detail[:240]}). Open Settings to connect a model."
+                reply_text = f"The model stopped before it finished: {detail[:240]} Anything listed below is done; ask again to continue."
                 break
             used_model = str(result.get("model") or "")
             data = _extract_json(result.get("text", ""))
             if data is None:
                 reply_text = str(result.get("text") or "").strip()
-                break
+                if not _is_stray_tool_syntax(reply_text):
+                    break
+                # The model wrote out a tool call instead of the JSON: nothing ran, so say so and let it try again.
+                stray_replies += 1
+                if stray_replies > MAX_STRAY_REPLIES:
+                    reply_text = "The model kept answering in the wrong format, so nothing was done. Ask again, or try another model."
+                    break
+                reply_text = ""
+                tool_log.append("(Your last reply was tool-call text, so nothing ran. You have no native tools here. Actions only run from the JSON object's \"actions\" list.)")
+                continue
             reply_text = str(data.get("reply") or "").strip()
             calls = [call for call in data.get("actions") or [] if isinstance(call, dict)]
             needs_results = False
             waiting = False
+            more_to_come = data.get("done", True) is False
+            if reply_text and (calls or more_to_come):
+                _report_step({"say": reply_text[:2000]})
+            if reply_text and more_to_come:
+                tool_log.append(f"(What you told the user just now: {reply_text[:2000]})")  # each round starts fresh: keep its plan
             for call in calls[:20]:
+                _report_step({"tool": str(call.get("tool") or ""), "path": str(call.get("path") or call.get("to") or call.get("name") or ""), "state": "running"})
                 try:
+                    if call.get("tool") == "generate":
+                        units = max(1, int(call.get("count") or 1))
+                        if spent_jobs + units > MAX_GENERATIONS_PER_TURN:
+                            raise ValueError(
+                                f"Not started: this chat message already started {spent_jobs} generations and the limit is {MAX_GENERATIONS_PER_TURN} "
+                                "per message, so a mistake can't spend a lot of credits. Tell the user what is left and ask them to confirm, then continue in the next message.")
+                        spent_jobs += units
                     if call.get("tool") in SLOW_TOOLS:
                         outcome = await asyncio.to_thread(self.run_tool, project, call)
                     else:
@@ -705,6 +796,7 @@ class WorkspaceAgent:
                     outcome = {"tool": call.get("tool"), "path": call.get("path") or call.get("id"), "ok": False, "summary": f"{call.get('tool')} failed: {exc}"}
                 result_text = outcome.pop("result", None)
                 performed.append(outcome)
+                _report_step_done(str(outcome.get("summary") or ""), bool(outcome.get("ok")))
                 tool_log.append(f"{json.dumps(call)[:300]}\n→ {result_text if result_text is not None else outcome['summary']}"[: MAX_FILE_CHARS + 400])
                 if call.get("tool") in ("list", "read", "import_game", "service_tools", "service_tool_info", "service_call", "models", "skill") and outcome.get("ok"):
                     needs_results = True
