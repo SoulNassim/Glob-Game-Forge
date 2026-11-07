@@ -2258,6 +2258,7 @@ async def api_studio_batch(payload: dict[str, Any], project: str = "default") ->
     ws_dir = _ws_dir(project)
     wanted = [str(p) for p in payload.get("assets") or []] or _overview_call(asset_studio.missing_assets, ws_dir, str(payload.get("folder") or ""))
     count = payload.get("count")
+    background = payload.get("background")
     jobs, skipped = [], []
     for rel in wanted:
         try:
@@ -2265,8 +2266,10 @@ async def api_studio_batch(payload: dict[str, Any], project: str = "default") ->
         except (FileNotFoundError, ValueError) as exc:
             skipped.append({"asset": rel, "reason": str(exc)})
             continue
-        if count:
-            req["count"] = int(count)
+        if count and not req.get("audio"):
+            req["count"] = max(1, min(int(count), 4))
+        if background in ("cutout", "scene") and "transparent_background" in (req.get("settings") or {}):
+            req["settings"]["transparent_background"] = background == "cutout"
         jobs.append(queue_studio_job(project, req))
     _save_jobs(project)
     return {"jobs": jobs, "skipped": skipped}

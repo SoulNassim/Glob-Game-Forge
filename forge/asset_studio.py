@@ -673,7 +673,7 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
         "model": model or default_image_model(cfg),
         "settings": {"aspect_ratio": aspect, "transparent_background": cutout_background(asset, cfg)},
         "pillar_strength": strength,
-        "count": 1,  # one image per run: pick the count up in the window when you want a choice
+        "count": max(1, min(int(getattr(cfg, "image_count", 1) or 1), 4)),  # Settings → Generators; changeable per run
     }
 
 
@@ -693,7 +693,9 @@ def cutout_background(asset: dict[str, Any], cfg: Any) -> bool:
     The key art is always a whole picture."""
     if asset["meta"].get("cover"):
         return False
-    own = str(asset["meta"].get("background") or "") or kind_defaults(cfg).get(asset["kind"], {}).get("background")
+    forced = getattr(cfg, "image_background_mode", "auto")
+    own = str(asset["meta"].get("background") or "") or (forced if forced in ("cutout", "scene") else "") \
+        or kind_defaults(cfg).get(asset["kind"], {}).get("background")
     return own == "cutout" if own in ("cutout", "scene") else bool(cfg.image_remove_bg)
 
 

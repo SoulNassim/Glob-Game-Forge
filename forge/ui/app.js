@@ -1219,6 +1219,10 @@ function defaultsHTML(cfg, studio) {
       <div class="seg" role="radiogroup">${[["2d", "2D game"], ["3d", "3D game"]].map(([v, l]) => `<label><input type="radio" name="project_dimension" value="${v}" ${(dim === "hybrid" ? "3d" : dim) === v ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></div>` : ""}
     <div class="set-row"><div><strong>Images are made with</strong><small>Every Generate window starts here and can switch for one run.</small></div>${imageSel}</div>
     <div class="set-row"><div><strong>3D models are made with</strong><small>Turns an asset's picked image into a 3D model.</small></div>${meshSel}</div>
+    <div class="set-row"><div><strong>Images per Generate</strong><small>How many pictures Generate 2D and Generate missing make by default.</small></div>
+      <select name="image_count" aria-label="Images per Generate">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${Number(cfg.image_count || 1) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+    <div class="set-row"><div><strong>Background</strong><small>Applies to every new image unless an asset sets its own.</small></div>
+      <select name="image_background_mode" aria-label="Background for new images">${[["auto", "Per kind (table below)"], ["cutout", "Always removed"], ["scene", "Always kept"]].map(([v, l]) => `<option value="${v}" ${(cfg.image_background_mode || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     <div class="st-label">Each kind of asset</div>
     <div class="kind-table">${Object.entries(studio.kind_defaults || {}).map(([kind, k]) => `<div class="kind-row">
       <span class="kind-name">${kindArt(kind, "")}<strong>${esc(KIND_PLURAL[kind] || humanize(kind))}</strong></span>
@@ -1230,6 +1234,8 @@ function defaultsHTML(cfg, studio) {
 function readDefaults(form) {
   const mesh = form.default_3d?.value || "";
   const out = { kind_defaults: Object.fromEntries([...form.querySelectorAll("[data-kind-aspect]")].map((el) => [el.dataset.kindAspect, { aspect: el.value, background: form.querySelector(`[data-kind-bg="${el.dataset.kindAspect}"]`)?.value || "cutout" }])) };
+  if (form.image_count) out.image_count = Number(form.image_count.value) || 1;
+  if (form.image_background_mode) out.image_background_mode = form.image_background_mode.value;
   if (form.default_image_model) Object.assign(out, { default_image_model: form.default_image_model.value, user_locked_image_model: true });
   if (mesh.startsWith("keys:")) Object.assign(out, { default_3d_provider: mesh.slice(5), default_3d_service_model: "" });
   else if (mesh) out.default_3d_service_model = mesh;
@@ -5146,6 +5152,8 @@ async function batchDialog(folder) {
     <p>Candidates for every asset in <b>${esc(where)}</b> that has nothing to pick from yet. Each uses its own prompt and pillars; two run at a time. Nothing is picked for you.</p>
     <div class="batch-list">${plan.assets.map((a) => `<label><input type="checkbox" name="asset" value="${esc(a.asset)}" checked><span>${esc(humanize(a.asset.split("/").pop()))}</span><small>${esc(dirOf(a.asset) || "root")} · ${a.count} ${a.audio ? "take" : "image"}${a.count === 1 ? "" : "s"}</small></label>`).join("")}</div>
     <p class="st-note">${[images.length ? `${plural(count(images), "image")}${state.agentCfg?.demo_mode ? "" : price ? ` · ≈ $${price.toFixed(2)}` : viaService ? " · paid in your signed-in service's credits" : ""}` : "", sounds.length ? plural(count(sounds), "sound") : ""].filter(Boolean).join(" · ")}${state.agentCfg?.demo_mode ? " · demo mode: placeholders, no cost" : ""}</p>
+    ${images.length ? `<div class="row"><label class="inline">Images each <select name="count">${[1, 2, 3, 4].map((n) => `<option ${n === (images[0].count || 1) ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label class="inline">Background <select name="bg"><option value="">Default</option><option value="cutout">Removed</option><option value="scene">Kept</option></select></label></div>` : ""}
     <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">${icon("sparkle")} Generate</button></div></form>`);
   $("#batchForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -5153,7 +5161,8 @@ async function batchDialog(folder) {
     if (!assets.length) return toast("Tick at least one asset.", true);
     event.submitter && (event.submitter.disabled = true);
     try {
-      const res = await api("/api/studio/batch", { method: "POST", body: { assets } });
+      const f = event.target;
+      const res = await api("/api/studio/batch", { method: "POST", body: { assets, count: f.count ? Number(f.count.value) : undefined, background: f.bg?.value || undefined } });
       res.jobs.forEach((j) => { state.jobs[j.id] ||= j; });
       closeDialog();
       state.dockOpen = true;

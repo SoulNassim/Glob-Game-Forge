@@ -109,6 +109,10 @@ class ForgeConfig(BaseModel):
     # Default generation settings
     image_aspect_ratio: str = "1:1"
     image_remove_bg: bool = True
+    # Images made per Generate 2D / Generate missing run (each asset can still change it in its window).
+    image_count: int = 1
+    # "auto" follows each kind's background below; "cutout" / "scene" force one for every asset (key art stays whole).
+    image_background_mode: str = "auto"
     # Shape and background per kind of asset, over the built-in ones (asset_studio.KIND_DEFAULTS):
     # {"character": {"aspect": "3:4", "background": "cutout" | "scene"}}. An asset's own `aspect:` still wins.
     kind_defaults: dict[str, dict[str, str]] = Field(default_factory=dict)
