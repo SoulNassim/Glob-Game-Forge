@@ -6,6 +6,7 @@ import os
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from forge import asset_index, asset_studio, model_inbox
@@ -118,3 +119,118 @@ def test_settings_switch_it_on_and_off(tmp_path: Path) -> None:
 
     assert client.put("/api/model-inbox", json={"enabled": False}).json()["enabled"] is False
     assert load_config().model_inbox_dir == ""
+
+
+def waiting_asset(ws: Path, name: str, kind: str = "prop", folder: str = "props") -> str:
+    candidates = ws / folder / name / "candidates"
+    candidates.mkdir(parents=True)
+    (candidates / "a.png").write_bytes(b"\x89PNG")
+    (ws / folder / f"{name}.md").write_text(f"---\nkind: {kind}\nwinner: {folder}/{name}/candidates/a.png\n---\n# {name}\n", encoding="utf-8")
+    return f"{folder}/{name}.md"
+
+
+def test_a_download_named_like_a_waiting_asset_goes_onto_it(tmp_path: Path) -> None:
+    downloads, ws = dirs(tmp_path)
+    rel = waiting_asset(ws, "treasure-chest")
+    (downloads / "treasure chest 3d model.glb").write_bytes(GLB)
+    box = inbox()
+    box.scan(ws, downloads, 0)
+    assert box.scan(ws, downloads, 0) == [rel]
+    assert asset_studio.describe_asset(ws, rel)["outputs"]["3d"][0]["path"] == "props/treasure-chest/3d/treasure-chest.glb"
+    assert not (ws / "studio-downloads").exists()
+    assert model_inbox.waiting_assets(ws) == []
+
+
+def test_a_near_match_is_offered_not_assumed(tmp_path: Path) -> None:
+    downloads, ws = dirs(tmp_path)
+    rel = waiting_asset(ws, "treasure-chest")
+    waiting_asset(ws, "stone-wall")
+    (downloads / "wooden treasure chest 3d model.glb").write_bytes(GLB)
+    box = inbox()
+    box.scan(ws, downloads, 0)
+    assert box.scan(ws, downloads, 0) == ["studio-downloads/wooden-treasure-chest.md"]
+    assert asset_studio.describe_asset(ws, rel)["outputs"]["3d"] == []
+    assert model_inbox.pairing(ws)["models"][0]["suggested"] == rel
+
+
+def test_two_assets_with_the_same_name_are_not_guessed_between(tmp_path: Path) -> None:
+    downloads, ws = dirs(tmp_path)
+    waiting_asset(ws, "chest", folder="props")
+    waiting_asset(ws, "chest", folder="items")
+    (downloads / "chest.glb").write_bytes(GLB)
+    box = inbox()
+    box.scan(ws, downloads, 0)
+    assert box.scan(ws, downloads, 0) == ["studio-downloads/chest.md"]
+
+
+def test_pairing_moves_the_model_and_a_redownload_stays_out(tmp_path: Path) -> None:
+    downloads, ws = dirs(tmp_path)
+    rel = waiting_asset(ws, "treasure-chest")
+    (downloads / "gold box.glb").write_bytes(GLB)
+    box = inbox()
+    box.scan(ws, downloads, 0)
+    source = box.scan(ws, downloads, 0)[0]
+    thumb = ws / "studio-downloads" / "gold-box" / "3d" / "gold-box_thumb.png"
+    thumb.write_bytes(b"\x89PNG")
+
+    model_inbox.pair(ws, source, rel)
+
+    output = asset_studio.describe_asset(ws, rel)["outputs"]["3d"][0]
+    assert output["path"] == "props/treasure-chest/3d/treasure-chest.glb"
+    assert output["thumb"] == "props/treasure-chest/3d/treasure-chest_thumb.png"
+    assert not (ws / source).exists() and not (ws / "studio-downloads" / "gold-box").exists()
+    assert list((ws / ".trash").iterdir())  # the old asset can be restored
+    assert model_inbox.pairing(ws)["models"] == []
+
+    (downloads / "gold box (1).glb").write_bytes(GLB)
+    fresh = inbox()
+    fresh.scan(ws, downloads, 0)
+    assert fresh.scan(ws, downloads, 0) == []
+
+
+def test_pairing_refuses_anything_but_a_download_and_a_waiting_asset(tmp_path: Path) -> None:
+    downloads, ws = dirs(tmp_path)
+    rel = waiting_asset(ws, "treasure-chest")
+    other = waiting_asset(ws, "stone-wall")
+    (downloads / "gold box.glb").write_bytes(GLB)
+    box = inbox()
+    box.scan(ws, downloads, 0)
+    source = box.scan(ws, downloads, 0)[0]
+    for bad_source, bad_target in ((other, rel), (source, "props/nope.md"), (source, "../outside.md")):
+        with pytest.raises(ValueError):
+            model_inbox.pair(ws, bad_source, bad_target)
+
+
+def test_keep_separate_stops_offering_it(tmp_path: Path) -> None:
+    downloads, ws = dirs(tmp_path)
+    waiting_asset(ws, "treasure-chest")
+    (downloads / "gold box.glb").write_bytes(GLB)
+    box = inbox()
+    box.scan(ws, downloads, 0)
+    source = box.scan(ws, downloads, 0)[0]
+    model_inbox.keep_separate(ws, source)
+    assert model_inbox.pairing(ws)["models"] == []
+    assert (ws / source).is_file()
+
+
+def test_batches_hold_thirty_readable_images_of_waiting_assets_only(tmp_path: Path) -> None:
+    _, ws = dirs(tmp_path)
+    for number in range(31):
+        waiting_asset(ws, f"crate-{number:02d}")
+    waiting_asset(ws, "crate-00", folder="items")  # same name in another section
+    waiting_asset(ws, "boom", kind="sfx")
+    waiting_asset(ws, "made")
+    (ws / "props" / "made" / "3d").mkdir()
+    (ws / "props" / "made" / "3d" / "made.glb").write_bytes(GLB)
+
+    result = model_inbox.export_batches(ws)
+
+    assert result["total"] == 32 and result["batches"] == {"batch-01": 30, "batch-02": 2}
+    names = [p.name for p in (ws / ".tripo-batch").rglob("*.png")]
+    assert len(names) == len(set(names)) == 32
+    assert "crate-00.png" in names and "crate-00-2.png" in names
+    assert "boom.png" not in names and "made.png" not in names
+
+    (ws / "props" / "crate-00.md").unlink()  # exporting again replaces the last export
+    assert model_inbox.export_batches(ws)["total"] == 31
+    assert len(list((ws / ".tripo-batch").rglob("*.png"))) == 31

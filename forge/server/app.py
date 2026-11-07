@@ -2560,15 +2560,47 @@ async def api_studio_animations(search: str = "", engine: str = "") -> dict[str,
 
 # --- Watched folder: models downloaded from a website (Tripo Studio) become assets; nothing is spent ---
 
-def _model_inbox_status() -> dict[str, Any]:
+def _model_inbox_status(project: str = "") -> dict[str, Any]:
     cfg = load_config()
-    return {"enabled": bool(cfg.model_inbox_dir), "folder": cfg.model_inbox_dir, "project": cfg.model_inbox_project,
-            "default_folder": str(model_inbox.default_folder()), "recent": model_inbox_service.recent, "error": model_inbox_service.error}
+    status = {"enabled": bool(cfg.model_inbox_dir), "folder": cfg.model_inbox_dir, "project": cfg.model_inbox_project,
+              "default_folder": str(model_inbox.default_folder()), "recent": model_inbox_service.recent, "error": model_inbox_service.error}
+    if project:
+        ws = _ws_dir(project)
+        status |= {"waiting": len(model_inbox.waiting_assets(ws)), "unpaired": len(model_inbox.pairing(ws)["models"])}
+    return status
 
 
 @app.get("/api/model-inbox")
-def api_model_inbox() -> dict[str, Any]:
-    return _model_inbox_status()
+def api_model_inbox(project: str = "default") -> dict[str, Any]:
+    return _model_inbox_status(project)
+
+
+@app.post("/api/model-inbox/batches")
+def api_model_inbox_batches(project: str = "default") -> dict[str, Any]:
+    """The picked images of assets without a model, named after them, in folders of 30 for Tripo Studio's batch."""
+    return model_inbox.export_batches(_ws_dir(project))
+
+
+@app.get("/api/model-inbox/pairing")
+def api_model_inbox_pairing(project: str = "default") -> dict[str, Any]:
+    return model_inbox.pairing(_ws_dir(project))
+
+
+@app.post("/api/model-inbox/pair")
+async def api_model_inbox_pair(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    """Put a downloaded model on a waiting asset; with no `target`, keep it as its own asset."""
+    source, target = str(payload.get("model") or ""), str(payload.get("target") or "")
+    try:
+        if target:
+            model_inbox.pair(_ws_dir(project), source, target)
+        else:
+            model_inbox.keep_separate(_ws_dir(project), source)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await workspace_changed(project)
+    return model_inbox.pairing(_ws_dir(project))
 
 
 @app.put("/api/model-inbox")
@@ -2577,7 +2609,7 @@ def api_set_model_inbox(payload: dict[str, Any]) -> dict[str, Any]:
     model_inbox_service.reset()
     if not payload.get("enabled"):
         save_config({"model_inbox_dir": "", "model_inbox_project": "", "model_inbox_since": 0.0})
-        return _model_inbox_status()
+        return _model_inbox_status(str(payload.get("project") or ""))
     folder = Path(str(payload.get("folder") or model_inbox.default_folder())).expanduser()
     if not folder.is_dir():
         raise HTTPException(status_code=400, detail=f"Can't find the folder {folder}.")
@@ -2585,7 +2617,7 @@ def api_set_model_inbox(payload: dict[str, Any]) -> dict[str, Any]:
     if project not in list_all_projects(actions.root_dir):
         raise HTTPException(status_code=400, detail="Open a project first: models need a project to go to.")
     save_config({"model_inbox_dir": str(folder), "model_inbox_project": project, "model_inbox_since": time.time()})
-    return _model_inbox_status()
+    return _model_inbox_status(project)
 
 
 # --- Tripo: connect with an API key (Tripo has no OAuth), balance, and its model tools ---

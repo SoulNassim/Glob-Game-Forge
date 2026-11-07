@@ -1202,7 +1202,10 @@ function modelInboxCard() {
       <small>Made a model in Tripo Studio or on another site? Download it as GLB, FBX or OBJ and it becomes an asset here. GLB keeps its textures in one file. Glob only copies new files and spends no credits.</small>
       ${status}
       ${box.enabled ? `<div class="path-row"><code>${esc(box.folder)}</code></div>`
-        : `<form class="model-inbox-form path-row"><input name="folder" value="${esc(box.default_folder)}" autocomplete="off" aria-label="Folder to watch" spellcheck="false"></form>`}</div>
+        : `<form class="model-inbox-form path-row"><input name="folder" value="${esc(box.default_folder)}" autocomplete="off" aria-label="Folder to watch" spellcheck="false"></form>`}
+      <div class="row wrap model-inbox-tools">
+        <button class="ghost" data-inbox-batches ${box.waiting ? "" : "disabled"}>Prepare Tripo batches${box.waiting ? ` (${plural(box.waiting, "image")})` : ""}</button>
+        ${box.unpaired ? `<button class="primary" data-inbox-pair>Pair ${plural(box.unpaired, "model")}</button>` : ""}</div></div>
     <div class="acct-act">${box.enabled ? `${other ? `<button class="primary" data-inbox-here>Send to ${esc(humanize(state.project))}</button>` : ""}<button class="ghost" data-inbox-off>Turn off</button>`
       : `<button class="primary" data-inbox-on ${state.project ? "" : "disabled"}>Turn on</button>`}</div></div>`;
 }
@@ -1223,8 +1226,61 @@ $("#settingsView").addEventListener("submit", (event) => {
 
 $("#settingsView").addEventListener("click", (event) => {
   if (event.target.closest("[data-inbox-on]")) setModelInbox({ enabled: true, folder: $("#settingsView .model-inbox-form input").value.trim(), project: state.project });
-  if (event.target.closest("[data-inbox-off]")) setModelInbox({ enabled: false });
+  if (event.target.closest("[data-inbox-off]")) setModelInbox({ enabled: false, project: state.project });
+  if (event.target.closest("[data-inbox-batches]")) prepareTripoBatches();
+  if (event.target.closest("[data-inbox-pair]")) openModelPairing();
   if (event.target.closest("[data-inbox-here]")) setModelInbox({ enabled: true, folder: state.modelInbox.folder, project: state.project });
+});
+
+async function prepareTripoBatches() {
+  try {
+    const res = await api("/api/model-inbox/batches", { method: "POST" });
+    if (!res.total) return toast("No assets are waiting for a model");
+    await api("/api/storage/open", { method: "POST", body: { target: "workspace", path: res.folder } });
+    toast(`${plural(res.total, "image")} in ${plural(Object.keys(res.batches).length, "folder")}. In Tripo's picker, open a folder and press Ctrl+A.`);
+  } catch (err) { toast(err.message, true); }
+}
+
+// Studio names a download after what the model looks like, so a person pairs what the names can't.
+async function openModelPairing() {
+  try { state.modelPairing = await api("/api/model-inbox/pairing"); } catch (err) { return toast(err.message, true); }
+  drawModelPairing();
+}
+
+function drawModelPairing() {
+  const { models, waiting } = state.modelPairing;
+  if (!models.length) { if ($("#dialog").open) closeDialog(); toast("All paired"); return renderSettings(); }
+  const picture = (rel, alt) => (rel ? `<img src="${esc(projectFileUrl(state.project, rel))}" alt="${esc(alt)}" loading="lazy">` : `<span class="pair-none">${icon("cube")}</span>`);
+  const pickFor = (m) => waiting.find((a) => a.path === m.suggested)?.winner || "";
+  const body = `<div class="dlg model-pairing"><h2>${icon("cube")} Pair ${plural(models.length, "model")}</h2>
+    <p>Choose the asset each downloaded model belongs to. Only assets still waiting for a model are listed.</p>
+    <div class="pair-list">${models.map((m, i) => `<div class="pair-row" data-pair-row="${i}">
+      <figure>${picture(m.thumb, m.title)}<figcaption>${esc(m.title)}</figcaption></figure>
+      <figure data-pair-picture>${picture(pickFor(m), "")}</figure>
+      <div class="pair-act"><select data-pair-target aria-label="Asset for ${esc(m.title)}"><option value="">Choose an asset…</option>${waiting.map((a) => `<option value="${esc(a.path)}" ${a.path === m.suggested ? "selected" : ""}>${esc(a.title)}</option>`).join("")}</select>
+        <div class="row"><button class="primary" data-pair-attach ${m.suggested ? "" : "disabled"}>Attach</button><button class="ghost" data-pair-keep>Keep separate</button></div></div></div>`).join("")}</div>
+    <div class="row"><button type="button" class="ghost" data-close>Done</button></div></div>`;
+  if ($("#dialog").open) $("#dialog").innerHTML = body; else openDialog(body);
+}
+
+$("#dialog").addEventListener("change", (event) => {
+  const select = event.target.closest("[data-pair-target]");
+  if (!select) return;
+  const row = select.closest(".pair-row"), asset = state.modelPairing.waiting.find((a) => a.path === select.value);
+  row.querySelector("[data-pair-attach]").disabled = !asset;
+  row.querySelector("[data-pair-picture]").innerHTML = asset ? `<img src="${esc(projectFileUrl(state.project, asset.winner))}" alt="">` : `<span class="pair-none">${icon("cube")}</span>`;
+});
+
+$("#dialog").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-pair-attach],[data-pair-keep]");
+  if (!button) return;
+  const row = button.closest(".pair-row"), model = state.modelPairing.models[Number(row.dataset.pairRow)];
+  const target = button.matches("[data-pair-attach]") ? row.querySelector("[data-pair-target]").value : "";
+  button.disabled = true;
+  try {
+    state.modelPairing = await api("/api/model-inbox/pair", { method: "POST", body: { model: model.path, target } });
+    drawModelPairing();
+  } catch (err) { toast(err.message, true); button.disabled = false; }
 });
 
 // Previews for 3D models that have none yet, rendered here in the browser and saved beside the model.

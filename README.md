@@ -189,7 +189,7 @@ Already have a game? **Projects → Import game** takes a Godot, Unity or Unreal
 | Meshy | 3D models, rigging, animation, images (sign in, or paste a key) |
 | fal, Higgsfield | Many image, video and 3D models (sign in) |
 | Google Gemini | Images (key) |
-| Tripo | 3D models (v3.1, v3.0, v2.5 and the low-poly P1/P2), rigs, preset animations, retopo, re-texture and format conversion. Tripo has no sign-in for apps, so Glob checks your API key with Tripo and shows your credits. Tripo Studio plan credits don't work with the API: download those models instead, and **Settings → Accounts → Watched folder** adds them as assets |
+| Tripo | 3D models (v3.1, v3.0, v2.5 and the low-poly P1/P2), rigs, preset animations, retopo, re-texture and format conversion. Tripo has no sign-in for apps, so Glob checks your API key with Tripo and shows your credits. Tripo Studio plan credits don't work with the API: **Settings → Accounts → Watched folder** prepares your images as batches of 30 for Studio, and puts the models you download onto their assets |
 | Stability AI | Music and loops (key) |
 
 Sound takes live in `<asset>/audio/`. For a voice, the prompt is the line to speak. Drop an MP3/WAV on an asset to add a take. A generator that isn't set up is refused with a message; it never saves a silent placeholder.
@@ -293,7 +293,7 @@ uv run --with pyinstaller python scripts/build_desktop.py   # standalone app
 | `forge/tripo.py` | Tripo v3 client: key check and balance, generation settings, rig, retarget, retopo, re-texture, convert |
 | `forge/mcp/` | MCP server (stdio, forwards to the app when it runs) |
 | `forge/game_import.py` | Importing Godot / Unity / Unreal projects |
-| `forge/model_inbox.py` | Watched folder: 3D models downloaded from a website become assets |
+| `forge/model_inbox.py` | Watched folder: 3D models downloaded from a website go onto their assets; batches of images for Tripo Studio |
 | `forge/ui/` | The web UI (plain HTML/CSS/JS) |
 | `docs/` | Website, live demo (`docs/demo/`, rebuild with `scripts/build_demo.py`), screenshots and diagrams |
 
