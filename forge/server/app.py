@@ -2085,7 +2085,9 @@ def queue_studio_job(project: str, request: dict[str, Any]) -> dict[str, Any]:
 
 async def _run_queued(project: str, job: dict[str, Any], request: dict[str, Any]) -> None:
     await ws_manager.broadcast({"type": "studio_job", "project": project, "job": dict(job)})
-    async with _batch_slots.setdefault(project, asyncio.Semaphore(2)):
+    # 3D jobs wait on the provider rather than on this machine, so more of them run side by side.
+    slot_key, slots = (f"{project}:3d", 4) if job.get("action") == "make_3d" else (project, 2)
+    async with _batch_slots.setdefault(slot_key, asyncio.Semaphore(slots)):
         if job["status"] == "cancelled":
             return
         job.update(status="running", started_at=time.time())
@@ -2259,12 +2261,19 @@ async def api_studio_batch(payload: dict[str, Any], project: str = "default") ->
     wanted = [str(p) for p in payload.get("assets") or []] or _overview_call(asset_studio.missing_assets, ws_dir, str(payload.get("folder") or ""))
     count = payload.get("count")
     background = payload.get("background")
+    # "make_3d" runs the same 3D settings on every picked asset's winner image; anything else is candidates.
+    action = "make_3d" if payload.get("action") == "make_3d" else "candidates"
+    overrides = payload.get("settings") if isinstance(payload.get("settings"), dict) and action == "make_3d" else {}
     jobs, skipped = [], []
     for rel in wanted:
         try:
-            req = asset_studio.build_request(ws_dir, rel, "candidates")
+            req = asset_studio.build_request(ws_dir, rel, action)
         except (FileNotFoundError, ValueError) as exc:
-            skipped.append({"asset": rel, "reason": str(exc)})
+            skipped.append({"asset": rel, "reason": f"{Path(rel).stem.replace('-', ' ').replace('_', ' ')}: {exc}"})
+            continue
+        if action == "make_3d":
+            req["settings"] = {**(req.get("settings") or {}), **{k: v for k, v in overrides.items() if k in (req.get("settings") or {})}}
+            jobs.append(queue_studio_job(project, req))
             continue
         if count and not req.get("audio"):
             req["count"] = max(1, min(int(count), 4))

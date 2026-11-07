@@ -1910,3 +1910,12 @@ a.ghost.btn { display: inline-flex; align-items: center; text-decoration: none; 
 .proto-pick img { width: 100%; aspect-ratio: 1; object-fit: contain; }
 .proto-pick input { position: absolute; top: 6px; left: 6px; }
 .proto-pick:has(input:checked) { border-color: var(--sakura); background: rgba(255, 122, 156, .12); }
+
+/* multi-select on a folder page */
+.asset-tile[data-select-tile] .asset-img { cursor: pointer; }
+.asset-tile[data-select-tile] .asset-img::after { content: ""; position: absolute; top: 8px; right: 8px; width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--line-strong); background: rgba(9, 9, 11, .7); }
+.asset-tile.selected .asset-img { border-color: var(--accent, #ff7eb6); box-shadow: 0 0 0 2px var(--accent, #ff7eb6); }
+.asset-tile.selected .asset-img::after { background: var(--accent, #ff7eb6) center / 14px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3L13 4.5' fill='none' stroke='%23111' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); border-color: var(--accent, #ff7eb6); }
+.select-bar { position: sticky; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 10px; margin-top: 20px; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel, #18181b); box-shadow: 0 8px 30px rgba(0, 0, 0, .45); }
+.select-bar .grow { flex: 1; }
+.ghost.on, .mini.on { border-color: var(--accent, #ff7eb6); color: var(--accent, #ff7eb6); }

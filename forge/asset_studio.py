@@ -714,6 +714,48 @@ def list_audio_models() -> list[dict[str, Any]]:
             for m in AUDIO_MODELS]
 
 
+_LOOP_WORDS = re.compile(r"\b(ambien\w*|loop\w*|drone|hum(ming)?|idle|engine|wind|rain|storm|waterfall|crackl\w*|atmospher\w*|background|rumbl\w*|bed|machinery|reactor|swamp|cave|dungeon|wash)\b", re.I)
+_ONE_SHOT_WORDS = re.compile(r"\b(hit|impact|slam|click|pop|snap|clang|thud|stab|swing|swish|whoosh|splash|footsteps?|step|bang|shot|jump|land\w*|pickup|coin|blip|beep|bonk|punch|kick|slash|clink|knock|ping)\b", re.I)
+_STINGER_WORDS = re.compile(r"\b(stinger|jingle|fanfare|victory|defeat|game ?over|level ?up|sting|win|lose|cue)\b", re.I)
+_SECONDS = re.compile(r"\b(\d{1,3})\s*(?:s|sec|secs|second|seconds)\b", re.I)
+
+
+def infer_sound_settings(kind: str, name: str, text: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A sensible length and loop for a sound, decided from what it is, so Generate missing never runs on "auto".
+
+    The asset's own `duration:` / `loop:` (set when the draft was made) win; then a length written in the prompt
+    ("10 seconds"); then the words: ambience and engines loop for ~15 s, one-shots (hits, clicks, steps) are a
+    second or two, stingers and fanfares a few seconds, music a 30 s loop unless it is a jingle."""
+    meta = meta or {}
+    words = f"{name} {text}"
+    stinger = bool(_STINGER_WORDS.search(words))
+    one_shot = bool(_ONE_SHOT_WORDS.search(words))
+    loop = bool(_LOOP_WORDS.search(words)) and not stinger and not (one_shot and kind == "sfx" and not re.search(r"\b(loop\w*|ambien\w*)\b", words, re.I))
+    if kind == "music":
+        loop = not stinger
+        duration = 8 if stinger else 30
+    elif loop:
+        duration = 15
+    elif stinger:
+        duration = 4
+    elif one_shot:
+        duration = 1 if re.search(r"\b(click|pop|blip|beep|ping|clink|snap|knock|step|footsteps?|coin|pickup)\b", words, re.I) else 2
+    else:
+        duration = 3
+    written = _SECONDS.search(text)
+    if written:
+        duration = int(written.group(1))
+    if meta.get("duration") not in (None, ""):
+        try:
+            duration = float(meta["duration"])
+        except (TypeError, ValueError):
+            pass
+    if "loop" in meta:
+        loop = str(meta["loop"]).strip().lower() in ("1", "true", "yes", "on")
+    duration = max(0.5, min(float(duration), 30.0 if kind == "sfx" else 180.0))
+    return {"duration": int(duration) if float(duration).is_integer() else duration, "loop": loop}
+
+
 def _audio_request(asset: dict[str, Any], action: str, model: str) -> dict[str, Any]:
     kind = asset["kind"]
     if action != "candidates":
@@ -722,11 +764,12 @@ def _audio_request(asset: dict[str, Any], action: str, model: str) -> dict[str, 
     choices = [m for m in list_audio_models() if kind in m["kinds"]]
     picked = (next((m for m in choices if m["id"] == model), None) or next((m for m in choices if m["available"]), None)
               or next((m for m in choices if "service" not in m), choices[0]))
-    settings: dict[str, Any] = {"duration": 0, "loop": False, "prompt_influence": 0.3} if kind == "sfx" else {}
+    name = Path(asset["path"]).stem.replace("-", " ").replace("_", " ")
+    settings: dict[str, Any] = {**infer_sound_settings(kind, name, text, asset["meta"]), "prompt_influence": 0.3} if kind == "sfx" else {}
     if kind == "voice":
         settings = {"voice_id": str(asset["meta"].get("voice") or ""), "model_id": "eleven_multilingual_v2"}
     if kind == "music":
-        settings = {"duration": 30, "loop": True}
+        settings = infer_sound_settings(kind, name, text, asset["meta"])
     return {
         "action": action,
         "asset": asset["path"],

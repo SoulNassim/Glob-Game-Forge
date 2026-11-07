@@ -153,3 +153,32 @@ def test_running_out_of_credits_is_remembered() -> None:
     server._note_credits({"action": "make_3d"}, "meshy", "Insufficient Meshy credits (402).", 402)
     server._note_credits({"model": "gemini-x"}, "gemini", "Bad prompt", 400)
     assert set(server.credit_alerts) == {"higgsfield", "meshy"}
+
+
+def test_sound_settings_are_decided_per_sound() -> None:
+    infer = asset_studio.infer_sound_settings
+    assert infer("sfx", "cave ambience", "Dripping water and a low wind in a cave") == {"duration": 15, "loop": True}
+    assert infer("sfx", "sword hit", "A sword hits armor") == {"duration": 2, "loop": False}
+    assert infer("sfx", "menu click", "Soft UI click") == {"duration": 1, "loop": False}
+    assert infer("sfx", "door", "A heavy door creaks, 6 seconds") == {"duration": 6, "loop": False}
+    assert infer("music", "victory fanfare", "Short brass fanfare") == {"duration": 8, "loop": False}
+    assert infer("music", "forest theme", "Calm flute") == {"duration": 30, "loop": True}
+    # What the draft wrote in the header wins over the guess.
+    assert infer("sfx", "cave ambience", "wind", {"duration": 10, "loop": False}) == {"duration": 10, "loop": False}
+
+
+def test_audio_request_uses_the_decided_settings(client: TestClient) -> None:
+    ws = _project(client, "sounds-test")
+    _asset(ws, "sounds/engine-hum.md", kind="sfx", prompt="A steady engine hum")
+    req = asset_studio.build_request(ws, "sounds/engine-hum.md", "candidates")
+    assert req["settings"]["loop"] is True and req["settings"]["duration"] == 15
+
+
+def test_batch_runs_make_3d_with_one_set_of_settings(client: TestClient) -> None:
+    project = client.post("/api/projects", json={"name": "batch-3d-test", "unique": True}).json()["project"]
+    ws = Path(client.get("/api/storage", params={"project": project}).json()["workspace_dir"])
+    _asset(ws, "props/crate.md", kind="prop", prompt="a crate")  # no winner yet: skipped, not an error
+    res = client.post("/api/studio/batch", params={"project": project}, json={"assets": ["props/crate.md"], "action": "make_3d"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["jobs"] == [] and "winner" in body["skipped"][0]["reason"]

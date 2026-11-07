@@ -1672,13 +1672,58 @@ function folderCards(folders, numbered) {
   }).join("")}</div>`;
 }
 
+// Multi-select on a folder page: tick assets, then run one action (Make 3D) on all of them with the same settings.
+const selecting = (folderPath) => Boolean(state.select?.on && state.select.folder === folderPath);
+
+function selectBar(folderPath) {
+  const n = state.select.paths.size;
+  return `<div class="select-bar" id="selectBar"><strong>${n} selected</strong><span class="grow"></span>
+    <button type="button" class="ghost" data-select-all>Select all</button>
+    <button type="button" class="primary" data-select-3d ${n ? "" : "disabled"}>${icon("cube")} Make 3D</button>
+    <button type="button" class="ghost" data-select-toggle="${esc(folderPath)}">Done</button></div>`;
+}
+
+function syncSelection() {
+  const bar = $("#selectBar");
+  if (!bar || !state.select) return;
+  document.querySelectorAll("[data-select-tile]").forEach((t) => t.classList.toggle("selected", state.select.paths.has(t.dataset.selectTile)));
+  bar.querySelector("strong").textContent = `${state.select.paths.size} selected`;
+  bar.querySelector("[data-select-3d]").disabled = !state.select.paths.size;
+}
+
+async function makeSelected3D() {
+  const paths = [...state.select.paths];
+  if (!paths.length) return;
+  let model = "";
+  try { model = (await api("/api/studio/preview", { method: "POST", body: { path: paths[0], action: "make_3d" } })).model || ""; } catch { /* the first asset may have no winner yet */ }
+  openDialog(`<form class="dlg" id="mesh3dForm"><h2>${icon("cube")} Make 3D for ${plural(paths.length, "asset")}</h2>
+    <p>Every winner image becomes a model with the same settings${model ? ` (<b>${esc(model)}</b>)` : ""} you get on a single Make 3D, set in Settings → Generators. They run side by side. Assets without a winner image are skipped.</p>
+    <div class="batch-list">${paths.map((p) => `<label><span>${esc(humanize(p.split("/").pop()))}</span><small>${esc(dirOf(p) || "root")}</small></label>`).join("")}</div>
+    <div class="row"><button type="button" class="ghost" data-close>Cancel</button><button class="primary">${icon("cube")} Make ${plural(paths.length, "model")}</button></div></form>`);
+  $("#mesh3dForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    event.submitter && (event.submitter.disabled = true);
+    try {
+      const res = await api("/api/studio/batch", { method: "POST", body: { assets: paths, action: "make_3d" } });
+      res.jobs.forEach((j) => { state.jobs[j.id] ||= j; });
+      closeDialog();
+      state.select = null;
+      state.dockOpen = true;
+      renderJobDock();
+      renderView();
+      toast(res.jobs.length ? `Making ${plural(res.jobs.length, "model")}${res.skipped.length ? ` · ${res.skipped.length} skipped: ${res.skipped[0].reason}` : ""}` : `Nothing started: ${res.skipped[0]?.reason || "no assets"}`, Boolean(res.skipped.length));
+    } catch (err) { toast(err.message, true); event.submitter && (event.submitter.disabled = false); }
+  });
+}
+
 function assetTiles(assets, folderPath) {
+  const pick = selecting(folderPath);
   return `<div class="asset-grid">${assets.map((f) => `
-    <button class="asset-tile" data-open="${esc(f.path)}"${f.audio ? ` data-hover-audio="${esc(f.audio)}"` : ""}${f.model ? ` data-hover-model="${esc(f.model)}"` : ""}>
+    <button class="asset-tile${pick && state.select.paths.has(f.path) ? " selected" : ""}" ${pick ? `data-select-tile="${esc(f.path)}"` : `data-open="${esc(f.path)}"`}${f.audio ? ` data-hover-audio="${esc(f.audio)}"` : ""}${f.model ? ` data-hover-model="${esc(f.model)}"` : ""}>
       <span class="asset-img">${f.thumb ? `<img src="${esc(fileUrl(f.thumb))}" alt="" loading="lazy">` : f.audio ? `<span class="asset-sound"><span class="wave" aria-hidden="true">${"<i></i>".repeat(14)}</span><small>Hover to listen</small></span>` : kindArt(f.asset_kind)}<span class="kind-tag">${esc(f.asset_kind)}</span>${f.model ? `<span class="tile-3d">${icon("cube")}3D</span>` : ""}${f.thumb ? `<span class="tile-pillar" role="button" tabindex="0" data-make-pillar="${esc(f.thumb)}" title="Make this image a pillar: a style reference for a whole folder">${icon("layers")}</span>` : ""}</span>
       <strong>${esc(f.title)}</strong>
     </button>`).join("")}
-    ${folderPath !== undefined ? `<button class="asset-tile add" data-new-asset="${esc(folderPath)}"><span class="asset-img"><span class="plus">+</span></span><strong>New asset</strong></button>` : ""}</div>`;
+    ${folderPath !== undefined && !pick ? `<button class="asset-tile add" data-new-asset="${esc(folderPath)}"><span class="asset-img"><span class="plus">+</span></span><strong>New asset</strong></button>` : ""}</div>${pick ? selectBar(folderPath) : ""}`;
 }
 
 function fileBlocks(files) {
@@ -1974,7 +2019,7 @@ async function renderViewBody() {
     const assets = folder.files.filter((f) => f.kind === "asset");
     const others = folder.files.filter((f) => f.kind !== "asset");
     content.innerHTML = `
-      <div class="doc-bar"><span class="path"><bdi>${esc(folder.page || folder.path)}</bdi></span><div>${folder.page ? `<button class="ghost" data-edit>Edit page</button> ` : ""}<button class="ghost" data-new-folder="${esc(folder.path)}">+ New folder</button> <button class="ghost" data-new-asset="${esc(folder.path)}">+ New asset</button> ${assets.length || folder.folders.length ? `<button class="ghost" data-batch="${esc(folder.path)}" title="Generate candidates for every asset in here that has none yet">${icon("sparkle")} Generate missing</button> ` : ""}<button class="ghost" data-export="${esc(folder.path)}">Export</button></div></div>
+      <div class="doc-bar"><span class="path"><bdi>${esc(folder.page || folder.path)}</bdi></span><div>${folder.page ? `<button class="ghost" data-edit>Edit page</button> ` : ""}<button class="ghost" data-new-folder="${esc(folder.path)}">+ New folder</button> <button class="ghost" data-new-asset="${esc(folder.path)}">+ New asset</button> ${assets.length || folder.folders.length ? `<button class="ghost" data-batch="${esc(folder.path)}" title="Generate candidates for every asset in here that has none yet">${icon("sparkle")} Generate missing</button> ` : ""}${assets.length ? `<button class="ghost${selecting(folder.path) ? " on" : ""}" data-select-toggle="${esc(folder.path)}" title="Tick several assets, then Make 3D for all of them at once">${selecting(folder.path) ? "Done selecting" : "Select"}</button> ` : ""}<button class="ghost" data-export="${esc(folder.path)}">Export</button></div></div>
       <div class="kicker">Section / ${esc(humanize(view.path.split("/")[0]))}</div>
       <h1 class="title">${esc(folder.title)}</h1>
       ${folder.excerpt ? `<p class="lede">${esc(folder.excerpt)}</p>` : ""}
@@ -2601,7 +2646,7 @@ async function renderAudioSheet() {
         <textarea id="pvPrompt" class="final-prompt" rows="4">${esc(p.prompt)}</textarea>
       </section><section class="audio-opts">
         ${p.kind === "voice" ? `<label>Voice<select id="auVoice">${voices.map((v) => `<option value="${esc(v.id)}" ${v.id === s.voice_id ? "selected" : ""}>${esc(v.name)}${v.category ? ` · ${esc(v.category)}` : ""}</option>`).join("") || `<option value="">${model?.available ? "Loading voices failed" : "Sign in to ElevenLabs or add a key first"}</option>`}</select></label>` : ""}
-        ${p.kind !== "voice" ? `<label>Length<select id="auDuration">${(p.kind === "music" ? [15, 30, 60, 90, 120, 180] : [0, 1, 2, 3, 5, 8, 12, 20, 30]).map((d) => `<option value="${d}" ${Number(s.duration) === d ? "selected" : ""}>${d ? `${d} s` : "Automatic"}</option>`).join("")}</select></label>
+        ${p.kind !== "voice" ? `<label>Length<select id="auDuration">${[...new Set([...(p.kind === "music" ? [8, 15, 30, 60, 90, 120, 180] : [0, 1, 2, 3, 4, 5, 8, 10, 12, 15, 20, 30]), Number(s.duration) || 0])].sort((x, y) => x - y).map((d) => `<option value="${d}" ${Number(s.duration) === d ? "selected" : ""}>${d ? `${d} s` : "Automatic"}</option>`).join("")}</select></label>
           <label class="mesh-toggle"><span class="switch"><input type="checkbox" id="auLoop" ${s.loop ? "checked" : ""}><span></span></span><span>Seamless loop<small>For ambience, engines, music beds</small></span></label>` : ""}
       </section></div>
       <footer class="sheet-foot">
@@ -5309,22 +5354,30 @@ async function usePrompt(path) {
 // ---------- sound tools: waveform, selection, loop check, trimmed take ----------
 
 let wave = null;
+let waveCtx = null; // one shared AudioContext: browsers allow only a handful, and a new one per page leaked them
+let seam = null; // the running "Loop check" source, if any
+
+function stopSeam() {
+  if (seam) { try { seam.stop(); } catch { /* already stopped */ } seam.disconnect?.(); seam = null; }
+  document.querySelectorAll("[data-wave-loop]").forEach((b) => { b.classList.remove("on"); b.lastChild.textContent = "Loop check"; });
+}
 
 async function mountWave() {
   const host = $("#content [data-wave-src]");
-  if (!host) { wave = null; return; }
+  if (!host) { stopSeam(); wave = null; return; }
   const src = host.dataset.waveSrc;
   const canvas = host.querySelector("canvas");
   if (wave?.src === src && wave.buffer) { drawWave(canvas); return; }
-  wave = { src, buffer: null, sel: null };
+  stopSeam();
+  const mine = wave = { src, buffer: null, sel: null };
   try {
-    const ctx = wave.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const data = await (await fetch(fileUrl(src))).arrayBuffer();
-    const buffer = await ctx.decodeAudioData(data);
-    if (wave?.src !== src) return;
+    waveCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    const data = await (await fetch(fileUrl(src), { cache: "no-cache" })).arrayBuffer();
+    const buffer = await waveCtx.decodeAudioData(data);
+    if (wave !== mine) return;
     wave.buffer = buffer;
     drawWave($("#content [data-wave-src] canvas"));
-  } catch { /* the plain player still works */ }
+  } catch { if (wave === mine) mine.failed = true; /* the plain player still works */ }
 }
 
 function drawWave(canvas) {
@@ -5381,16 +5434,22 @@ document.addEventListener("pointerdown", (event) => {
   window.addEventListener("pointerup", up, { once: true });
 });
 
-function playLoopSeam() {
-  if (!wave?.buffer) return toast("The sound is still loading.", true);
-  const ctx = wave.ctx;
-  ctx.resume?.();
+// Loop check: the sound repeats from 2 seconds before its end, so the seam (end into start) comes round
+// every few seconds. Press again to stop. Starting any player stops it too.
+async function playLoopSeam(button) {
+  if (seam) return stopSeam();
+  if (!wave?.buffer) return toast(wave?.failed ? "This sound couldn't be decoded here. Use the player above." : "The sound is still loading.", true);
+  try { await waveCtx.resume(); } catch { /* resume is best effort */ }
+  document.querySelectorAll("audio").forEach((a) => a.pause());
   const d = wave.buffer.duration;
-  const tail = Math.min(2, d / 2);
-  const play = (offset, at, len) => { const n = ctx.createBufferSource(); n.buffer = wave.buffer; n.connect(ctx.destination); n.start(ctx.currentTime + at, offset, len); };
-  play(d - tail, 0, tail);
-  play(0, tail, tail);
-  toast("Playing the end into the start: listen for a click or a jump at the seam.");
+  const src = waveCtx.createBufferSource();
+  src.buffer = wave.buffer;
+  src.loop = true;
+  src.connect(waveCtx.destination);
+  src.onended = () => { if (seam === src) stopSeam(); };
+  src.start(0, Math.max(0, d - Math.min(2, d / 2)));
+  seam = src;
+  if (button) { button.classList.add("on"); button.lastChild.textContent = "Stop loop check"; }
 }
 
 // 16-bit PCM WAV of a stretch of the decoded sound.
@@ -5438,6 +5497,7 @@ document.addEventListener("click", () => stopHover(), true);
 document.addEventListener("play", (event) => {
   if (event.target === hoverAudio) return;
   stopHover();
+  stopSeam();
   document.querySelectorAll("audio").forEach((a) => { if (a !== event.target && !a.paused) a.pause(); });
 }, true);
 
@@ -5548,9 +5608,23 @@ async function openPalette() {
 // ---------- events for the tools above ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-board],[data-board-zoom],[data-lineup],[data-batch],[data-press-kit],[data-key-art],[data-install-sample],[data-job-cancel],[data-dock-toggle],[data-lightbox],[data-lb-close],[data-lb-step],[data-lb-pick],[data-use-prompt],[data-wave-loop],[data-wave-trim],[data-viewer-export],[data-height-save],#galleryBtn,#paletteBtn");
+  const t = event.target.closest("[data-board],[data-board-zoom],[data-lineup],[data-batch],[data-press-kit],[data-key-art],[data-install-sample],[data-job-cancel],[data-dock-toggle],[data-lightbox],[data-lb-close],[data-lb-step],[data-lb-pick],[data-use-prompt],[data-wave-loop],[data-wave-trim],[data-viewer-export],[data-height-save],[data-select-toggle],[data-select-tile],[data-select-all],[data-select-3d],#galleryBtn,#paletteBtn");
   if (!t) return;
   const d = t.dataset;
+  if (d.selectToggle !== undefined) {
+    state.select = selecting(d.selectToggle) ? null : { on: true, folder: d.selectToggle, paths: new Set() };
+    return renderView();
+  }
+  if (d.selectTile) {
+    state.select.paths[state.select.paths.has(d.selectTile) ? "delete" : "add"](d.selectTile);
+    return syncSelection();
+  }
+  if (d.selectAll !== undefined) {
+    const all = [...document.querySelectorAll("[data-select-tile]")].map((x) => x.dataset.selectTile);
+    state.select.paths = state.select.paths.size === all.length ? new Set() : new Set(all);
+    return syncSelection();
+  }
+  if (d.select3d !== undefined) return makeSelected3D();
   if (d.lightbox) {
     if (event.metaKey || event.ctrlKey || event.shiftKey) return; // still opens in a new tab
     event.preventDefault();
@@ -5568,7 +5642,7 @@ document.addEventListener("click", async (event) => {
   if (d.lbStep) { state.lb.index = Math.max(0, Math.min(state.lb.list.length - 1, state.lb.index + Number(d.lbStep))); return renderLightbox(); }
   if (d.lbPick !== undefined) return pickWinner(state.lb.list[state.lb.index]);
   if (d.usePrompt) return usePrompt(d.usePrompt);
-  if (d.waveLoop !== undefined) return playLoopSeam();
+  if (d.waveLoop !== undefined) return playLoopSeam(t);
   if (d.waveTrim !== undefined) return saveTrim();
   if (t.id === "galleryBtn") return setGallery(!document.body.classList.contains("gallery-mode"));
   if (t.id === "paletteBtn") return openPalette();

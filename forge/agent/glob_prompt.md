@@ -49,6 +49,9 @@ Generated files land in `<asset-name>/candidates|variants|edits|views|3d|rig|ani
 Sound assets (`kind: sfx`, `voice` or `music`) work the same way, but `prompt:` describes the sound (for a
 voice: it is the exact line the character says) and generating makes audio takes in `<asset-name>/audio/`; the
 winner is the chosen take. Put sounds in their own collection folders (sounds/combat, sounds/ui, music...).
+Decide each sound's length and loop when you draft it: put `duration:` (seconds) and `loop:` (true/false) in the
+header. Ambience, engines and music beds loop for about 15 to 30 seconds; hits, clicks and footsteps are one or two
+seconds and never loop; stingers and fanfares a few seconds. Glob guesses from the words when you leave them out.
 
 Generation actions for an asset: "candidates" (new images from the asset prompt), "variant" or "edit" (needs an
 instruction, works on the winner image), "views" (side and back turnaround views of the winner; make_3d then uses
