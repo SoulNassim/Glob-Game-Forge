@@ -27,7 +27,9 @@ def test_project_url_names_the_project(projects: Path) -> None:
 
 
 def test_open_glob_uses_a_running_studio(projects: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(launcher, "_health", lambda base: {"projects_dir": str(projects)})
+    from forge import __version__
+
+    monkeypatch.setattr(launcher, "_health", lambda base: {"projects_dir": str(projects), "version": __version__})
     monkeypatch.setattr(launcher, "_spawn", lambda *a: pytest.fail("must not start a second Glob"))
     opened: list[str] = []
     monkeypatch.setattr(launcher, "open_window", lambda url: opened.append(url) or True)
@@ -45,6 +47,38 @@ def test_open_glob_starts_the_studio_when_it_is_closed(projects: Path, monkeypat
     monkeypatch.setattr(launcher, "open_window", lambda url: True)
     assert launcher.open_glob("demo")["started"] is True
     assert spawned == [(9, "demo")]
+
+
+def test_a_studio_from_before_an_update_is_replaced(projects: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """After an update the old background studio still holds the port; the launcher quits it and starts the new one."""
+    old = {"projects_dir": str(projects), "version": "3.4.0", "background": True}
+    # ensure_running sees the old studio, _stop_stale sees it again, then it is gone for the wait and the final check
+    answers = iter([old, old, None, None])
+    quit_requests: list[str] = []
+
+    class FakeResponse:
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_urlopen(request, timeout: float = 0) -> FakeResponse:
+        quit_requests.append(f"{request.get_method()} {request.full_url}")
+        return FakeResponse()
+
+    spawned: list[tuple[int, str]] = []
+    monkeypatch.setattr(launcher, "_health", lambda base: next(answers, None))
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(launcher, "_spawn", lambda port, project: spawned.append((port, project)))
+    monkeypatch.setattr(launcher, "is_running", lambda base=None: True)
+    monkeypatch.setattr(launcher.time, "sleep", lambda s: None)
+    assert launcher.ensure_running("demo") is True
+    assert quit_requests == ["POST http://127.0.0.1:9/api/quit"] and spawned == [(9, "demo")]
+
+
+def test_an_older_window_glob_is_not_killed(projects: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(launcher, "_health", lambda base: {"projects_dir": str(projects), "version": "3.4.0", "background": False})
+    monkeypatch.setattr(launcher, "_spawn", lambda *a: pytest.fail("the old one is still up"))
+    with pytest.raises(RuntimeError, match="older Glob"):
+        launcher.ensure_running("demo")
 
 
 def test_another_glob_on_the_port_is_reported(projects: Path, monkeypatch: pytest.MonkeyPatch) -> None:

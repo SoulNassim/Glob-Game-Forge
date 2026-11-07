@@ -257,7 +257,9 @@ class UrlIngestRequest(BaseModel):
 @app.get("/api/health")
 def api_health() -> dict[str, Any]:
     # The MCP bridge checks projects_dir so it only forwards to a Glob app that serves the same projects.
-    return {"ok": True, "projects_dir": str((actions.root_dir or get_projects_root()).resolve()), "background": _background()}
+    from forge import __version__
+
+    return {"ok": True, "version": __version__, "projects_dir": str((actions.root_dir or get_projects_root()).resolve()), "background": _background()}
 
 
 def _background() -> bool:
@@ -2981,4 +2983,11 @@ def serve_index() -> HTMLResponse:
         response = HTMLResponse(idx.read_text(encoding="utf-8"))
         response.headers["Cache-Control"] = "no-cache"
         return response
-    return HTMLResponse("<h1>Forge UI loading...</h1>")
+    # Not "loading": the page files are gone, so the app can't show itself. Usually a partial or interrupted install.
+    return HTMLResponse(
+        "<!doctype html><meta charset=\"utf-8\"><title>Glob</title>"
+        "<h1>Glob's app files are missing</h1>"
+        "<p>This copy of Glob is incomplete (its <code>ui</code> folder is not there). Quit Glob, then reinstall it "
+        "from the latest release on GitHub.</p>",
+        status_code=503,
+    )

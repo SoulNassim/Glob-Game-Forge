@@ -90,8 +90,10 @@ async def check(force: bool = False) -> dict[str, Any]:
     info: dict[str, Any] = {"current": __version__, "kind": kind, "available": False, "state": dict(state)}
     try:
         release = await latest_release(force)
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPError as exc:
         return {**info, "error": f"Couldn't reach GitHub: {exc}"}
+    except Exception as exc:  # noqa: BLE001 — a broken install (missing certificates, files) must still say why
+        return {**info, "error": f"Glob couldn't check for updates: {type(exc).__name__}: {exc}. Reinstall Glob from the latest release if this keeps happening."}
     if not release or not release.get("version"):
         return info
     newer = parse_version(release["version"]) > parse_version(__version__)

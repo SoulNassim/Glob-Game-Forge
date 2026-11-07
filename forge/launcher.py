@@ -84,13 +84,36 @@ def _spawn(port: int, project: str) -> None:
     subprocess.Popen(command, **kwargs)
 
 
+def _stop_stale(base: str) -> None:
+    """A Glob from before an update still holds the port: ask it to quit so the new one can start.
+
+    Only a background studio (started by the launcher, with no window) can be asked; a window or terminal
+    has to be closed by the user."""
+    health = _health(base) or {}
+    if not health.get("background"):
+        raise RuntimeError(f"An older Glob ({health.get('version') or 'before 3.5'}) is still running at {base}. Quit it (its window, tray icon or terminal), then open Glob again.")
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"{base}/api/quit", method="POST"), timeout=2.0).read()
+    except (OSError, ValueError):
+        pass
+    deadline = time.time() + 10
+    while _health(base) and time.time() < deadline:
+        time.sleep(0.25)
+    if _health(base):
+        raise RuntimeError(f"The older Glob at {base} did not quit. Quit it, then open Glob again.")
+
+
 def ensure_running(project: str = "", timeout: float = START_TIMEOUT) -> bool:
     """Start the studio if it isn't up. Returns True when this call started it."""
+    from forge import __version__
+
     base = app_url()
     health = _health(base)
     if health and _same_projects(health):
-        return False
-    if health:
+        if health.get("version") == __version__:
+            return False
+        _stop_stale(base)  # an update replaced the app; the old studio still serves the old files
+    elif health:
         raise RuntimeError(f"Another Glob is running at {base} with a different projects folder ({health.get('projects_dir')}). Close it, or open that one.")
     port = urllib.parse.urlsplit(base).port or 8420
     _spawn(port, project)

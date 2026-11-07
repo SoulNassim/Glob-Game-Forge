@@ -33,5 +33,14 @@ async def test_check_reports_a_newer_release(monkeypatch: pytest.MonkeyPatch) ->
     assert not (await updater.check())["available"]
 
 
+async def test_a_broken_install_reports_why_instead_of_failing(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def broken(force: bool = False) -> dict:
+        raise FileNotFoundError("certifi/cacert.pem")
+
+    monkeypatch.setattr(updater, "latest_release", broken)
+    info = await updater.check(force=True)
+    assert info["available"] is False and "certifi/cacert.pem" in info["error"]
+
+
 def test_a_dev_checkout_is_not_an_app() -> None:
     assert updater.install_kind() == "source"
