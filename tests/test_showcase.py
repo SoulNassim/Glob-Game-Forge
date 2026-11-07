@@ -182,3 +182,12 @@ def test_batch_runs_make_3d_with_one_set_of_settings(client: TestClient) -> None
     assert res.status_code == 200
     body = res.json()
     assert body["jobs"] == [] and "winner" in body["skipped"][0]["reason"]
+
+
+def test_ui_data_attributes_read_back_through_dataset() -> None:
+    """`data-foo-3d` is `dataset["foo-3d"]`, never `dataset.foo3d`: a button named that way silently did nothing."""
+    import re
+
+    js = (Path(__file__).resolve().parent.parent / "forge" / "ui" / "app.js").read_text(encoding="utf-8")
+    assert not re.findall(r"data-select-3d|d\.select3d", js)
+    assert 'form.classList.contains("tripo-connect-form")' in js  # the generic key-save handler must leave Tripo's form alone

@@ -1354,7 +1354,7 @@ $("#settingsView").addEventListener("change", async (event) => {
 
 $("#settingsView").addEventListener("submit", async (event) => {
   const form = event.target.closest(".acct-key-form");
-  if (!form) return;
+  if (!form || form.classList.contains("tripo-connect-form")) return; // Tripo's own handler checks the key first
   event.preventDefault();
   const input = form.querySelector("input");
   if (!input.value.trim()) return input.focus();
@@ -1679,7 +1679,7 @@ function selectBar(folderPath) {
   const n = state.select.paths.size;
   return `<div class="select-bar" id="selectBar"><strong>${n} selected</strong><span class="grow"></span>
     <button type="button" class="ghost" data-select-all>Select all</button>
-    <button type="button" class="primary" data-select-3d ${n ? "" : "disabled"}>${icon("cube")} Make 3D</button>
+    <button type="button" class="primary" data-select-run ${n ? "" : "disabled"}>${icon("cube")} Make 3D</button>
     <button type="button" class="ghost" data-select-toggle="${esc(folderPath)}">Done</button></div>`;
 }
 
@@ -1688,7 +1688,7 @@ function syncSelection() {
   if (!bar || !state.select) return;
   document.querySelectorAll("[data-select-tile]").forEach((t) => t.classList.toggle("selected", state.select.paths.has(t.dataset.selectTile)));
   bar.querySelector("strong").textContent = `${state.select.paths.size} selected`;
-  bar.querySelector("[data-select-3d]").disabled = !state.select.paths.size;
+  bar.querySelector("[data-select-run]").disabled = !state.select.paths.size;
 }
 
 async function makeSelected3D() {
@@ -5608,7 +5608,7 @@ async function openPalette() {
 // ---------- events for the tools above ----------
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-board],[data-board-zoom],[data-lineup],[data-batch],[data-press-kit],[data-key-art],[data-install-sample],[data-job-cancel],[data-dock-toggle],[data-lightbox],[data-lb-close],[data-lb-step],[data-lb-pick],[data-use-prompt],[data-wave-loop],[data-wave-trim],[data-viewer-export],[data-height-save],[data-select-toggle],[data-select-tile],[data-select-all],[data-select-3d],#galleryBtn,#paletteBtn");
+  const t = event.target.closest("[data-board],[data-board-zoom],[data-lineup],[data-batch],[data-press-kit],[data-key-art],[data-install-sample],[data-job-cancel],[data-dock-toggle],[data-lightbox],[data-lb-close],[data-lb-step],[data-lb-pick],[data-use-prompt],[data-wave-loop],[data-wave-trim],[data-viewer-export],[data-height-save],[data-select-toggle],[data-select-tile],[data-select-all],[data-select-run],#galleryBtn,#paletteBtn");
   if (!t) return;
   const d = t.dataset;
   if (d.selectToggle !== undefined) {
@@ -5624,7 +5624,7 @@ document.addEventListener("click", async (event) => {
     state.select.paths = state.select.paths.size === all.length ? new Set() : new Set(all);
     return syncSelection();
   }
-  if (d.select3d !== undefined) return makeSelected3D();
+  if (d.selectRun !== undefined) return makeSelected3D();
   if (d.lightbox) {
     if (event.metaKey || event.ctrlKey || event.shiftKey) return; // still opens in a new tab
     event.preventDefault();
