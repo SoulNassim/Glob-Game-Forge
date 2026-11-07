@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from forge import tripo
 from forge.blueprint_contract import serialize_frontmatter, split_frontmatter
 from forge.config import load_config
 from forge.models import AssetType
@@ -570,13 +571,22 @@ def build_request(ws_dir: Path, rel: str, action: str, *, source: str = "", inst
             raise FileNotFoundError(f"No image '{source}'.")
 
     if action == "make_3d":
+        use_tripo = cfg.default_3d_provider == "tripo" and not cfg.default_3d_service_model
+        references = [{"path": source, "source": "Winner image", "role": "source"}] \
+            + [{"path": view["path"], "source": "Turnaround view", "role": "view"} for view in asset["outputs"]["views"] if view["type"] == "image"][:3]
+        if use_tripo:
+            settings = tripo.settings_from_config(cfg)
+            return {
+                "action": action, "asset": asset["path"], "prompt": "", "parts": [], "references": references, "engine": "tripo",
+                "model": f"tripo:{settings['model']}", "settings": settings, "choices": tripo.TRIPO_CHOICES, "count": 1,
+            }
         return {
             "action": action,
             "asset": asset["path"],
             "prompt": "",
             "parts": [],
-            "references": [{"path": source, "source": "Winner image", "role": "source"}]
-            + [{"path": view["path"], "source": "Turnaround view", "role": "view"} for view in asset["outputs"]["views"] if view["type"] == "image"][:3],
+            "references": references,
+            "engine": "meshy",
             "model": cfg.default_3d_service_model or f"{cfg.default_3d_provider}:{cfg.default_3d_model}",
             "settings": mesh_settings(cfg),
             "choices": {**MESH_CHOICES, "polycount_presets": list(POLYCOUNT_PRESETS)},
@@ -760,17 +770,26 @@ def _rig_request(ws_dir: Path, asset: dict[str, Any], action: str, source: str) 
             raise ValueError("Make or drop a GLB model first, then rig it.")
         refs = [{"path": model, "source": "3D model", "role": "source"}]
         thumb = next((o.get("thumb") for o in asset["outputs"]["3d"] if o["path"] == model), "")
+        if game_tools.rig_engine() == "tripo":
+            credits = tripo.CREDITS["rig"]
+            return {
+                "action": action, "asset": asset["path"], "prompt": "", "parts": [], "references": refs, "thumb": thumb or "", "engine": "tripo",
+                "model": "tripo:rigging", "settings": {"rig_type": "biped", "spec": "tripo"}, "choices": {"rig_type": list(tripo.RIG_TYPES), "spec": list(tripo.RIG_SPECS)},
+                "count": 1, "credits": credits, "cost_usd": credits * tripo.USD_PER_CREDIT,
+            }
         return {
-            "action": action, "asset": asset["path"], "prompt": "", "parts": [], "references": refs, "thumb": thumb or "",
+            "action": action, "asset": asset["path"], "prompt": "", "parts": [], "references": refs, "thumb": thumb or "", "engine": "meshy",
             "model": "meshy:rigging", "settings": {"height_meters": 1.7}, "count": 1,
             "credits": game_tools.RIG_CREDITS, "cost_usd": game_tools.RIG_CREDITS / 100,
         }
     if not asset["meta"].get("rig_task"):
         raise ValueError("Rig the 3D model first, then add animations.")
+    engine = asset["meta"].get("rig_provider") or "meshy"  # animations must come from whoever made the rig
     return {
-        "action": action, "asset": asset["path"], "prompt": "", "parts": [], "references": [],
-        "model": "meshy:animation", "settings": {"fps": 30}, "count": 1, "action_ids": [], "names": [],
-        "credits_each": game_tools.ANIMATION_CREDITS, "cost_usd": 0.0, "rig_model": asset["meta"].get("rig_model") or "",
+        "action": action, "asset": asset["path"], "prompt": "", "parts": [], "references": [], "engine": engine,
+        "model": f"{engine}:animation", "settings": {"in_place": False} if engine == "tripo" else {"fps": 30}, "count": 1, "action_ids": [], "names": [],
+        "credits_each": tripo.CREDITS["retarget"] if engine == "tripo" else game_tools.ANIMATION_CREDITS,
+        "credit_unit": "Tripo" if engine == "tripo" else "Meshy", "cost_usd": 0.0, "rig_model": asset["meta"].get("rig_model") or "",
     }
 
 
@@ -909,8 +928,11 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
 
         if action == "rig":
             model = next((ref["path"] for ref in request.get("references") or [] if ref.get("role") == "source"), "")
-            return await game_tools.rig_model(ws_dir, asset_rel, model, float((request.get("settings") or {}).get("height_meters") or 1.7))
-        return await game_tools.animate(ws_dir, asset_rel, list(request.get("action_ids") or []), list(request.get("names") or []), int((request.get("settings") or {}).get("fps") or 30))
+            settings = request.get("settings") or {}
+            return await game_tools.rig_model(ws_dir, asset_rel, model, float(settings.get("height_meters") or 1.7), settings)
+        settings = request.get("settings") or {}
+        return await game_tools.animate(ws_dir, asset_rel, list(request.get("action_ids") or []), list(request.get("names") or []),
+                                        int(settings.get("fps") or 30), bool(settings.get("in_place")))
 
     if request.get("audio"):
         model_id = str(request.get("model") or "")
@@ -965,9 +987,16 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
         if not refs:
             raise ValueError("Make 3D needs a source image.")
         service_model = str(request.get("model") or "")
+        provider_3d = "service" if service_model.startswith("svc:") else cfg.default_3d_provider or "meshy"
+        if service_model.startswith("svc:"):
+            mesh_params: dict[str, Any] = {"model": service_model}
+        elif provider_3d == "tripo":
+            mesh_params = tripo.settings_from_config(cfg, request.get("settings"))
+        else:
+            mesh_params = mesh_settings(cfg, request.get("settings"))
         stored = await executor._generate_single_asset(
             # A signed-in service's 3D model when one was picked, else the 3D provider from Settings.
-            provider_id="service" if service_model.startswith("svc:") else cfg.default_3d_provider or "meshy",
+            provider_id=provider_3d,
             # Several pictures (winner + turnaround views) give Meshy the back and sides too.
             capability=ProviderCapability.MULTI_IMAGE_TO_3D if len(refs) > 1 else ProviderCapability.IMAGE_TO_3D,
             name=f"{title} (3D)",
@@ -978,7 +1007,7 @@ async def run_action(actions: Any, project: str, request: dict[str, Any]) -> lis
             prompt_full=title,
             parent_ids=parent_ids,
             reference_files=refs[:4],
-            params={"model": service_model} if service_model.startswith("svc:") else mesh_settings(cfg, request.get("settings")),
+            params=mesh_params,
             tags=["3d", f"asset:{asset_rel}"],
             force_uncached=True,
             bible=bible,

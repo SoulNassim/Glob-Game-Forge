@@ -118,7 +118,9 @@ def _build_kit(ws_dir: Path, level_path: Path) -> str:
     if not rel:
         path.parent.mkdir(parents=True, exist_ok=True)
         title = f"{level_path.stem.replace('-', ' ').title()} kit"
-        path.write_text(serialize_frontmatter({"kind": "kit", "title": title, "prompt": f"Modular pieces for {level_path.stem}", "made_from": _ws_rel(ws_dir, level_path)}, f"# {title}\n"), encoding="utf-8")
+        level_meta = read_asset(ws_dir, _ws_rel(ws_dir, level_path))[1]
+        sizes = {key: level_meta[key] for key in ("kit_cell", "kit_height", "kit_thickness", "kit_relief") if key in level_meta}  # a game's grid, set on the level
+        path.write_text(serialize_frontmatter({"kind": "kit", "title": title, "prompt": f"Modular pieces for {level_path.stem}", "made_from": _ws_rel(ws_dir, level_path), **sizes}, f"# {title}\n"), encoding="utf-8")
         rel = _ws_rel(ws_dir, path)
     fields: dict[str, Any] = {"kit_props": _ws_rel(ws_dir, level_path.parent / f"{level_path.stem}-props"), "kit_trim": _ws_rel(ws_dir, pack_dir(level_path) / "trim")}
     for surface in SURFACES:

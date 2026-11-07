@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from forge import access, asset_studio, game_import, game_tools, level_pack, modular, overview as project_overview, showcase, updater, vault
 from forge.agent.action_layer import ForgeActionLayer
 from forge.agent.autonomous import execute_agent_brief
-from forge.agent import cli_models, endpoints as model_endpoints
+from forge.agent import cli_models, cli_runner, endpoints as model_endpoints
 from forge.agent.llm import call_agent_model, list_agent_models
 from forge.agent.workspace_agent import WorkspaceAgent
 from forge.server.security import LocalOnlyGuard
@@ -60,6 +60,7 @@ from forge.models import StylePack
 from forge.watcher.folder_watcher import WatchFolderService
 from forge.watcher.workspace_watcher import WorkspaceWatcher
 from forge import game_link, service_gen, services
+from forge import tripo as tripo_client
 from forge.agent import connect as connect_agent
 
 
@@ -2133,7 +2134,7 @@ async def api_studio_run(payload: dict[str, Any], project: str = "default") -> d
 @app.get("/api/studio/options")
 def api_studio_options() -> dict[str, Any]:
     return {"models": asset_studio.list_image_models(), "audio_models": asset_studio.list_audio_models(), "selected": asset_studio.default_image_model(load_config()), "selected_3d": load_config().default_3d_service_model, "kinds": list(asset_studio.ASSET_KINDS),
-            "kind_defaults": asset_studio.kind_defaults(load_config())}
+            "kind_defaults": asset_studio.kind_defaults(load_config()), "tripo_connected": bool(load_config().get_key("tripo"))}
 
 
 @app.get("/api/studio/voices")
@@ -2202,7 +2203,19 @@ async def api_studio_credits() -> dict[str, Any]:
                     _credit_balance_cache["meshy"] = (time.time(), _key_fingerprint(key), balance)
             except (httpx.HTTPError, ValueError):
                 pass
-    return {"alerts": fresh, "meshy_balance": balance}
+    tripo_balance = None
+    tripo_key = load_config().get_key("tripo")
+    if tripo_key:
+        cached = _credit_balance_cache.get("tripo")
+        if cached and cached[1] == _key_fingerprint(tripo_key) and time.time() - cached[0] < CREDIT_CACHE_SECONDS:
+            tripo_balance = cached[2]
+        else:
+            try:
+                tripo_balance = (await tripo_client.balance(tripo_key))["balance"]
+                _credit_balance_cache["tripo"] = (time.time(), _key_fingerprint(tripo_key), tripo_balance)
+            except (ProviderError, httpx.HTTPError):
+                pass
+    return {"alerts": fresh, "meshy_balance": balance, "tripo_balance": tripo_balance}
 
 
 # Meshy's balance, kept per provider for a minute: the generate sheet asks for it every time it opens.
@@ -2513,11 +2526,67 @@ async def api_studio_sprite(payload: dict[str, Any], project: str = "default") -
 
 
 @app.get("/api/studio/animations")
-async def api_studio_animations(search: str = "") -> dict[str, Any]:
+async def api_studio_animations(search: str = "", engine: str = "") -> dict[str, Any]:
     try:
-        return {"animations": await game_tools.animation_library(search)}
+        return {"animations": await game_tools.animation_library(search, engine)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# --- Tripo: connect with an API key (Tripo has no OAuth), balance, and its model tools ---
+
+def _tripo_status(balance: dict[str, float] | None = None, error: str = "") -> dict[str, Any]:
+    cfg = load_config()
+    key = cfg.get_key("tripo")
+    return {"connected": bool(key), "balance": balance, "error": error, "model": cfg.tripo_model,
+            "is_default": cfg.default_3d_provider == "tripo", "models": tripo_client.MODELS, "animations": tripo_client.ANIMATIONS}
+
+
+@app.get("/api/tripo")
+async def api_tripo_status() -> dict[str, Any]:
+    """Whether a Tripo key is saved, and the credits left on it."""
+    key = load_config().get_key("tripo")
+    if not key:
+        return _tripo_status()
+    try:
+        return _tripo_status(await tripo_client.balance(key))
+    except ProviderError as exc:
+        return _tripo_status(error=exc.message)
+
+
+@app.post("/api/tripo/connect")
+async def api_tripo_connect(payload: dict[str, Any]) -> dict[str, Any]:
+    """Check a pasted key with Tripo, and only then save it. Makes Tripo the 3D engine when `make_default` is set."""
+    key = str(payload.get("api_key") or "").strip()
+    try:
+        balance = await tripo_client.connect(key)
+    except ProviderError as exc:
+        raise HTTPException(status_code=exc.status_code if 400 <= exc.status_code < 500 else 400, detail=exc.message) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach Tripo: {exc}") from exc
+    updates: dict[str, Any] = {"tripo_api_key": key}
+    if payload.get("make_default"):
+        updates |= {"default_3d_provider": "tripo", "default_3d_service_model": ""}
+    save_config(updates)
+    return _tripo_status(balance)
+
+
+@app.delete("/api/tripo")
+def api_tripo_disconnect() -> dict[str, Any]:
+    cfg = save_config({"tripo_api_key": "", **({"default_3d_provider": "meshy"} if load_config().default_3d_provider == "tripo" else {})})
+    return _tripo_status() | {"connected": bool(cfg.get_key("tripo"))}  # still true when the key comes from the environment
+
+
+@app.post("/api/tripo/process")
+async def api_tripo_process(payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+    """Retopo, re-texture or convert a GLB with Tripo. The result is saved with the asset's 3D models."""
+    try:
+        created = await game_tools.tripo_process(_ws_dir(project), str(payload.get("asset") or ""), str(payload.get("model") or ""),
+                                                 str(payload.get("op") or ""), payload.get("options") or {})
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await workspace_changed(project)
+    return {"created": created}
 
 
 @app.get("/api/studio/export")
@@ -2682,7 +2751,7 @@ def api_agent_delete_session(session_id: str, project: str = "default") -> dict[
 
 
 @app.post("/api/agent/sessions/{session_id}/messages")
-async def api_agent_send(session_id: str, payload: dict[str, Any], project: str = "default") -> dict[str, Any]:
+async def api_agent_send(session_id: str, payload: dict[str, Any], project: str = "default", request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     # While the model works, tell the chat what it is doing (thinking, or writing and how much), so the wait isn't blind.
     loop = asyncio.get_running_loop()
     started = time.time()
@@ -2702,7 +2771,10 @@ async def api_agent_send(session_id: str, payload: dict[str, Any], project: str 
         if step:
             steps.append(dict(step))
         if step_done and steps:
-            steps[-1].update(step_done)
+            # Several tools can run at once; an id says which one finished.
+            done_id = step_done.get("id")
+            target = next((s for s in reversed(steps) if s.get("id") == done_id), steps[-1]) if done_id else steps[-1]
+            target.update(step_done)
         latest.update(info)
         message = {"type": "agent_progress", "project": project, "session": session_id, "started": started, **latest, "steps": [dict(s) for s in steps[-40:]]}
         asyncio.run_coroutine_threadsafe(deliver(message), loop)
@@ -2718,6 +2790,7 @@ async def api_agent_send(session_id: str, payload: dict[str, Any], project: str 
             page=payload.get("page") or {},
             model=payload.get("model") or None,
             effort=payload.get("effort") or None,
+            mcp_base=str(request.base_url) if request else "",
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc).strip("'\"")) from exc
@@ -2730,6 +2803,18 @@ async def api_agent_send(session_id: str, payload: dict[str, Any], project: str 
     if any(action.get("changed") for action in session["messages"][-1].get("actions") or []):
         await workspace_changed(project)
     return session
+
+
+@app.post("/api/agent/sessions/{session_id}/stop")
+def api_agent_stop(session_id: str) -> dict[str, Any]:
+    return {"stopped": workspace_agent.stop_run(session_id)}
+
+
+@app.post("/api/agent/mcp")
+async def api_agent_mcp(rpc: dict[str, Any], project: str = "default", session: str = "") -> Any:
+    """Glob's own tools for a chat running as the real CLI (forge.agent.cli_runner)."""
+    reply = await cli_runner.handle_rpc(workspace_agent, project, session, rpc)
+    return reply if reply is not None else Response(status_code=202)
 
 
 @app.post("/api/agent/sessions/{session_id}/compact")

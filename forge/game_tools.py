@@ -21,10 +21,12 @@ from typing import Any
 import httpx
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+from forge import tripo
 from forge.asset_studio import ASSET_KINDS, _ws_rel, output_dir, read_asset, update_asset
 from forge.blueprint_contract import serialize_frontmatter, split_frontmatter
 from forge.config import load_config
 from forge.overview import IMAGE_SUFFIXES, MODEL_SUFFIXES, resolve_rel, slugify
+from forge.providers.base import ProviderError
 
 MESHY_BASE_URL = "https://api.meshy.ai"
 MAX_MODEL_BYTES = 200 * 1024 * 1024
@@ -481,9 +483,44 @@ def glb_triangles(path: Path) -> int | None:
     return total
 
 
-async def rig_model(ws_dir: Path, asset_rel: str, model_rel: str, height_m: float = 1.7) -> list[str]:
-    """Auto-rig a humanoid GLB with Meshy. Saves the rigged GLB/FBX in ``rig/`` and the free walk/run
-    clips in ``animations/``; remembers the rig task in the asset header for later animations."""
+def rig_engine() -> str:
+    """Who rigs and animates: Tripo when it is the 3D engine in Settings (or the only account), else Meshy."""
+    cfg = load_config()
+    has_tripo = bool(cfg.get_key("tripo"))
+    if has_tripo and (cfg.default_3d_provider == "tripo" or not cfg.get_key("meshy")):
+        return "tripo"
+    return "meshy"
+
+
+def _tripo_key() -> str:
+    key = load_config().get_key("tripo")
+    if not key:
+        raise ValueError("Connect Tripo in Settings → Accounts first.")
+    return key
+
+
+async def _tripo_call(coro: Any) -> Any:
+    """Run a Tripo client call; its errors become the plain ValueErrors the routes show."""
+    try:
+        return await coro
+    except ProviderError as exc:
+        raise ValueError(exc.message) from exc
+
+
+def _glb_source(ws_dir: Path, model_rel: str, limit_mb: int = 100) -> Path:
+    model = resolve_rel(ws_dir, model_rel)
+    if model.suffix.lower() != ".glb" or not model.is_file():
+        raise ValueError("This needs a GLB model.")
+    if model.stat().st_size > limit_mb * 1024 * 1024:
+        raise ValueError(f"The model is over {limit_mb} MB; remesh it to fewer polygons first.")
+    return model
+
+
+async def rig_model(ws_dir: Path, asset_rel: str, model_rel: str, height_m: float = 1.7, settings: dict[str, Any] | None = None) -> list[str]:
+    """Auto-rig a GLB with Tripo or Meshy (see ``rig_engine``). Saves the rigged model in ``rig/``; Meshy also
+    gives free walk/run clips in ``animations/``. Remembers the rig task in the asset header for later animations."""
+    if rig_engine() == "tripo":
+        return await _tripo_rig(ws_dir, asset_rel, model_rel, settings or {})
     asset_path, meta, body = read_asset(ws_dir, asset_rel)
     model = resolve_rel(ws_dir, model_rel)
     if model.suffix.lower() != ".glb" or not model.is_file():
@@ -517,13 +554,95 @@ async def rig_model(ws_dir: Path, asset_rel: str, model_rel: str, height_m: floa
                     await _download(client, url, anim_dir / f"{asset_path.stem}-{clip}-{stamp}.{fmt}")
                     if fmt == "glb":
                         created.append(_ws_rel(ws_dir, anim_dir / f"{asset_path.stem}-{clip}-{stamp}.glb"))
-    meta = {**meta, "rig_task": task.get("id") or "", "rig_model": created[0] if created else ""}
+    meta = {**meta, "rig_task": task.get("id") or "", "rig_model": created[0] if created else "", "rig_provider": "meshy"}
     asset_path.write_text(serialize_frontmatter(meta, body), encoding="utf-8")
     return created
 
 
-async def animation_library(search: str = "") -> list[dict[str, Any]]:
-    """Meshy's preset animations (free to list), normalised to id / name / category / preview."""
+async def _tripo_rig(ws_dir: Path, asset_rel: str, model_rel: str, settings: dict[str, Any]) -> list[str]:
+    asset_path, meta, body = read_asset(ws_dir, asset_rel)
+    model = _glb_source(ws_dir, model_rel, 150)
+    key = _tripo_key()
+    stem = f"{asset_path.stem}-rigged-{time.strftime('%Y%m%d-%H%M%S')}"
+    rig_dir = output_dir(asset_path) / "rig"
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+        token = await _tripo_call(tripo.upload(client, key, model))
+        task_id, data = await _tripo_call(tripo.rig(client, key, token, str(settings.get("rig_type") or "biped"), str(settings.get("spec") or "tripo")))
+        rig_dir.mkdir(parents=True, exist_ok=True)
+        (rig_dir / f"{stem}.glb").write_bytes(await _tripo_call(tripo.download(client, tripo.model_url(data))))
+    thumb = model.with_name(f"{model.stem}_thumb.png")
+    if thumb.is_file():
+        (rig_dir / f"{stem}_thumb.png").write_bytes(thumb.read_bytes())
+    created = [_ws_rel(ws_dir, rig_dir / f"{stem}.glb")]
+    meta = {**meta, "rig_task": task_id, "rig_model": created[0], "rig_provider": "tripo", "rig_type": str(settings.get("rig_type") or "biped")}
+    asset_path.write_text(serialize_frontmatter(meta, body), encoding="utf-8")
+    return created
+
+
+async def _tripo_animate(ws_dir: Path, asset_rel: str, presets: list[str], names: list[str], in_place: bool) -> list[str]:
+    """Tripo's animation presets on the asset's rig: one GLB with a clip per preset, five presets to a task."""
+    asset_path, meta, _ = read_asset(ws_dir, asset_rel)
+    known = {a["id"] for a in tripo.ANIMATIONS}
+    clips = [p for p in dict.fromkeys(str(p) for p in presets) if p in known]
+    if not clips:
+        raise ValueError("Pick at least one animation.")
+    key = _tripo_key()
+    folder = output_dir(asset_path) / "animations"
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    created: list[str] = []
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+        for index in range(0, len(clips), tripo.MAX_ANIMATIONS):
+            batch = clips[index:index + tripo.MAX_ANIMATIONS]
+            label = slugify("-".join(c.split(":")[-1] for c in batch[:3])) or "anim"
+            _, data = await _tripo_call(tripo.retarget(client, key, str(meta["rig_task"]), batch, in_place=in_place))
+            target = folder / f"{asset_path.stem}-{label}-{stamp}.glb"
+            target.write_bytes(await _tripo_call(tripo.download(client, tripo.model_url(data))))
+            created.append(_ws_rel(ws_dir, target))
+    return created
+
+
+async def tripo_process(ws_dir: Path, asset_rel: str, model_rel: str, op: str, options: dict[str, Any] | None = None) -> list[str]:
+    """Tripo's model tools on a GLB: ``retopo`` (fewer, cleaner polygons), ``retexture`` (new textures, from a prompt)
+    and ``convert`` (FBX, OBJ, USDZ, STL, 3MF). The result lands in the asset's 3D outputs next to the original."""
+    options = options or {}
+    asset_path, _, _ = read_asset(ws_dir, asset_rel)
+    model = _glb_source(ws_dir, model_rel, 150)
+    key = _tripo_key()
+    folder = output_dir(asset_path) / "3d"
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+        source = await _tripo_call(tripo.upload(client, key, model))
+        if op == "retopo":
+            faces = max(100, min(500_000, int(options.get("face_limit") or 10_000)))
+            _, data = await _tripo_call(tripo.decimate(client, key, source, faces, bool(options.get("quad"))))
+            name, suffix = f"{model.stem}-retopo-{faces // 1000}k-{stamp}", "fbx" if options.get("quad") else "glb"
+        elif op == "retexture":
+            _, data = await _tripo_call(tripo.retexture(client, key, source, str(options.get("prompt") or ""), str(options.get("quality") or "standard")))
+            name, suffix = f"{model.stem}-retextured-{stamp}", "glb"
+        elif op == "convert":
+            fmt = str(options.get("format") or "FBX").upper()
+            if fmt not in ("FBX", "OBJ", "USDZ", "STL"):
+                raise ValueError(f"Tripo can't convert to {fmt}.")
+            _, data = await _tripo_call(tripo.convert(client, key, source, fmt))
+            name, suffix = f"{model.stem}-{fmt.lower()}-{stamp}", fmt.lower()
+        else:
+            raise ValueError(f"Unknown Tripo tool '{op}'.")
+        url = tripo.model_url(data)
+        blob = await _tripo_call(tripo.download(client, url))
+        found = url.split("?")[0].rsplit(".", 1)[-1].lower()  # trust the file Tripo really made (quads come as FBX)
+        suffix = found if found in ("glb", "fbx", "obj", "usdz", "stl") else suffix
+        target = _unique(folder / f"{name}.{suffix}")
+        target.write_bytes(blob)
+    return [_ws_rel(ws_dir, target)]
+
+
+async def animation_library(search: str = "", engine: str = "") -> list[dict[str, Any]]:
+    """Preset animations, normalised to id / name / category / preview: Tripo's short list, or Meshy's (free to list)."""
+    if (engine or rig_engine()) == "tripo":
+        words = search.lower().split()
+        return [{**a, "preview": ""} for a in tripo.ANIMATIONS if all(w in f"{a['name']} {a['category']} {a['sub_category']}".lower() for w in words)]
     key = _meshy_key()
     params = {"search": search} if search else {}
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -549,12 +668,14 @@ async def animation_library(search: str = "") -> list[dict[str, Any]]:
     return out
 
 
-async def animate(ws_dir: Path, asset_rel: str, action_ids: list[int], names: list[str] | None = None, fps: int = 30) -> list[str]:
-    """Apply 1-10 Meshy preset animations to the asset's rig; one GLB/FBX with a clip per action."""
+async def animate(ws_dir: Path, asset_rel: str, action_ids: list[Any], names: list[str] | None = None, fps: int = 30, in_place: bool = False) -> list[str]:
+    """Apply preset animations to the asset's rig (Meshy: 1-10 by id; Tripo: preset names); one file with a clip per action."""
     asset_path, meta, _ = read_asset(ws_dir, asset_rel)
     rig_task = str(meta.get("rig_task") or "")
     if not rig_task:
         raise ValueError("Rig the 3D model first.")
+    if meta.get("rig_provider") == "tripo":
+        return await _tripo_animate(ws_dir, asset_rel, [str(a) for a in action_ids], list(names or []), bool(in_place))
     ids = list(dict.fromkeys(int(a) for a in action_ids))[:10]
     if not ids:
         raise ValueError("Pick at least one animation.")

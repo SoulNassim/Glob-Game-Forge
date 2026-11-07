@@ -1,13 +1,8 @@
-"""Tripo 3D Provider Adapter.
+"""Tripo 3D Provider Adapter (Tripo v3 API, see `forge/tripo.py`).
 
 Flow: upload image(s) -> create task -> poll task -> download the GLB server-side.
-- Base URL: `https://api.tripo3d.ai/v2/openapi`
-- Upload: `POST /upload` (multipart `file`) -> `data.image_token` (older name) / `data.file_token`
-- Create: `POST /task` with `type` = `image_to_model` | `multiview_to_model` | `text_to_model`
-- Poll: `GET /task/{task_id}` -> `data.status`, `data.progress`, `data.output.{pbr_model,model,rendered_image}`
-- Statuses: queued, running, success; failed, cancelled, unknown, banned, expired (terminal errors).
-Note: platform.tripo3d.ai is a JS app, so these were confirmed from the community SDK/ComfyUI node and
-guides rather than the official reference; the upload response and `consumed_credit` are best-effort.
+- Text, image and multi-view generation; H series (v3.1, v3.0, v2.5) and P series (P1, P2, low-poly) models.
+- `quad` output is an FBX on Tripo's side, so Glob asks for a GLB conversion of it and keeps the FBX next to it.
 """
 
 from __future__ import annotations
@@ -18,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from forge import tripo
 from forge.config import load_config
 from forge.providers.base import (
     CostEstimate,
@@ -30,26 +26,13 @@ from forge.providers.base import (
 from forge.storage.demo_assets import generate_demo_image
 from forge.storage.glb_generator import generate_demo_glb
 
-TRIPO_BASE_URL = "https://api.tripo3d.ai/v2/openapi"
-DEFAULT_MODEL_VERSION = "v2.5-20250123"
-TASK_TYPES = {
-    ProviderCapability.IMAGE_TO_3D: "image_to_model",
-    ProviderCapability.MULTI_IMAGE_TO_3D: "multiview_to_model",
-    ProviderCapability.TEXT_TO_3D: "text_to_model",
+KIND = {
+    ProviderCapability.IMAGE_TO_3D: "image",
+    ProviderCapability.MULTI_IMAGE_TO_3D: "multiview",
+    ProviderCapability.TEXT_TO_3D: "text",
 }
-# Approximate credits per task (textured); ~$0.01 per Tripo credit.
-CREDITS = {
-    ProviderCapability.TEXT_TO_3D: 30.0,
-    ProviderCapability.IMAGE_TO_3D: 40.0,
-    ProviderCapability.MULTI_IMAGE_TO_3D: 70.0,
-}
-USD_PER_CREDIT = 0.01
-FAILED_STATUSES = {"failed", "cancelled", "unknown", "banned", "expired"}
-
-
-def _image_type(path: Path) -> str:
-    ext = path.suffix.lower().lstrip(".")
-    return "jpeg" if ext == "jpg" else (ext or "png")
+DEFAULT_MODEL_VERSION = tripo.DEFAULT_MODEL
+USD_PER_CREDIT = tripo.USD_PER_CREDIT
 
 
 class Tripo3DAdapter(ProviderAdapter):
@@ -80,24 +63,30 @@ class Tripo3DAdapter(ProviderAdapter):
         return {
             "type": "object",
             "properties": {
-                "model_version": {"type": "string", "default": DEFAULT_MODEL_VERSION},
+                "model": {"type": "string", "default": DEFAULT_MODEL_VERSION, "enum": list(tripo.MODELS)},
                 "texture": {"type": "boolean", "default": True},
                 "pbr": {"type": "boolean", "default": True},
                 "face_limit": {"type": "integer", "minimum": 1, "description": "Max triangle count (omit for auto)"},
                 "quad": {"type": "boolean", "default": False},
-                "texture_quality": {"type": "string", "default": "standard", "enum": ["standard", "detailed"]},
+                "smart_low_poly": {"type": "boolean", "default": False},
+                "auto_size": {"type": "boolean", "default": False, "description": "Scale the model to real-world metres"},
+                "texture_quality": {"type": "string", "default": "standard", "enum": list(tripo.TEXTURE_QUALITIES)},
+                "geometry_quality": {"type": "string", "default": "standard", "enum": list(tripo.GEOMETRY_QUALITIES)},
                 "negative_prompt": {"type": "string", "description": "Text-to-3D only"},
             },
         }
 
+    @staticmethod
+    def _model(params: dict[str, Any]) -> str:
+        model = str(params.get("model") or params.get("model_version") or load_config().tripo_model or DEFAULT_MODEL_VERSION)
+        return model if model[:1] in "vVpP" and not model.startswith(("svc:", "meshy")) else DEFAULT_MODEL_VERSION
+
     def estimate_cost(self, capability: ProviderCapability, params: dict[str, Any]) -> CostEstimate:
-        credits = CREDITS.get(capability, 40.0)
-        if params.get("texture", True) is False:
-            credits = max(10.0, credits - 10.0)
+        credits = tripo.estimate_credits(KIND.get(capability, "image"), params)
         usd = round(credits * USD_PER_CREDIT, 3)
         return CostEstimate(
             provider=self.provider_id,
-            model=params.get("model_version") or DEFAULT_MODEL_VERSION,
+            model=self._model(params),
             estimated_usd=usd,
             credits=credits,
             unit_description=f"~{int(credits)} Tripo credits (~${usd:.2f})",
@@ -113,9 +102,9 @@ class Tripo3DAdapter(ProviderAdapter):
         params: dict[str, Any] | None = None,
         progress_cb: ProgressCallback | None = None,
     ) -> ProviderResult:
-        params = params or {}
+        params = {**tripo.settings_from_config(load_config()), **(params or {})}
         key, is_demo = self._get_key_and_mode()
-        model_version = str(params.get("model_version") or DEFAULT_MODEL_VERSION)
+        model = self._model(params)
         est = self.estimate_cost(capability, params)
         out_glb = output_dir / f"{filename_stem}.glb"
 
@@ -125,7 +114,7 @@ class Tripo3DAdapter(ProviderAdapter):
                 if hasattr(res, "__await__"):
                     await res
 
-        if capability not in TASK_TYPES:
+        if capability not in KIND:
             raise ProviderError(
                 f"Tripo does not support {capability.value}.",
                 provider=self.provider_id,
@@ -150,7 +139,7 @@ class Tripo3DAdapter(ProviderAdapter):
                 thumb_rel = f"assets/{thumb_path.name}"
             return ProviderResult(
                 provider="demo",
-                model=model_version,
+                model=model,
                 file_path=f"assets/{out_glb.name}",
                 thumbnail_path=thumb_rel,
                 cost_usd=est.estimated_usd,
@@ -160,11 +149,7 @@ class Tripo3DAdapter(ProviderAdapter):
 
         refs = [p for p in (reference_files or []) if p.exists()]
         if capability == ProviderCapability.IMAGE_TO_3D and not refs:
-            raise ProviderError(
-                "Image-to-3D requires a source reference image.",
-                provider=self.provider_id,
-                status_code=400,
-            )
+            raise ProviderError("Image-to-3D requires a source reference image.", provider=self.provider_id, status_code=400)
         if capability == ProviderCapability.MULTI_IMAGE_TO_3D and len(refs) < 2:
             raise ProviderError(
                 "Multi-view 3D needs at least 2 images (front first, then left, back, right).",
@@ -172,169 +157,70 @@ class Tripo3DAdapter(ProviderAdapter):
                 status_code=400,
             )
 
-        auth = {"Authorization": f"Bearer {key}"}
-
-        def _raise_for_status(resp: httpx.Response, what: str) -> None:
-            if resp.status_code == 401:
-                raise ProviderError(
-                    "Tripo API key is unauthorized (401).",
-                    provider=self.provider_id,
-                    status_code=401,
-                    how_to_fix="Set a valid TRIPO_API_KEY in Settings.",
-                )
-            if resp.status_code in (402, 403):
-                raise ProviderError(
-                    f"Tripo refused the {what} request ({resp.status_code}): insufficient credits or not allowed.",
-                    provider=self.provider_id,
-                    status_code=resp.status_code,
-                    how_to_fix="Top up your Tripo credits or switch to Demo Mode.",
-                )
-            if resp.status_code == 429 or resp.status_code >= 500:
-                raise ProviderError(
-                    f"Tripo rate limit or server error ({resp.status_code}).",
-                    provider=self.provider_id,
-                    status_code=resp.status_code,
-                    retryable=True,
-                )
-            if resp.status_code >= 400:
-                raise ProviderError(
-                    f"Tripo rejected the {what} request ({resp.status_code}): {resp.text[:240]}",
-                    provider=self.provider_id,
-                    status_code=resp.status_code,
-                )
+        notify = _notify
+        poll_interval = float(params.get("poll_interval", 2.5))
+        max_polls = int(params.get("max_polls", 360))
+        text = capability == ProviderCapability.TEXT_TO_3D
 
         async with httpx.AsyncClient(timeout=120.0) as client:
-            async def _upload(path: Path) -> dict[str, str]:
-                async def _do() -> dict[str, str]:
-                    resp = await client.post(
-                        f"{TRIPO_BASE_URL}/upload",
-                        headers=auth,
-                        files={"file": (path.name, path.read_bytes(), f"image/{_image_type(path)}")},
-                    )
-                    _raise_for_status(resp, "upload")
-                    data = resp.json().get("data") or {}
-                    token = data.get("image_token") or data.get("file_token")
-                    if not token:
-                        raise ProviderError("Tripo upload returned no token.", provider=self.provider_id)
-                    return {"type": _image_type(path), "file_token": token}
+            async def _upload(path: Path) -> str:
+                return await self.with_retries(lambda: tripo.upload(client, key, path))
 
-                return await self.with_retries(_do)
-
-            body: dict[str, Any] = {"type": TASK_TYPES[capability], "model_version": model_version}
-            if capability == ProviderCapability.TEXT_TO_3D:
+            body: dict[str, Any] = {"model": model}
+            if text:
                 body["prompt"] = prompt[:1024]
-                if params.get("negative_prompt"):
-                    body["negative_prompt"] = str(params["negative_prompt"])[:255]
             elif capability == ProviderCapability.IMAGE_TO_3D:
                 await _notify(5, "Uploading reference image...")
-                body["file"] = await _upload(refs[0])
+                body["input"] = await _upload(refs[0])
             else:
                 await _notify(5, "Uploading reference images...")
                 tokens = [await _upload(p) for p in refs[:4]]
-                # Slot order is front, left, back, right; empty slots are `{}`.
-                body["files"] = tokens + [{}] * (4 - len(tokens))
-            for field in ("texture", "pbr", "quad"):
-                if params.get(field) is not None:
-                    body[field] = bool(params[field])
-            if params.get("face_limit"):
-                body["face_limit"] = int(params["face_limit"])
-            if params.get("texture_quality"):
-                body["texture_quality"] = str(params["texture_quality"])
+                body["inputs"] = [{view: token} for view, token in zip(tripo.VIEW_KEYS, tokens)]  # front, left, back, right
+            body.update(tripo.generation_fields(model, params, text=text))
 
-            async def _create_task() -> str:
-                resp = await client.post(f"{TRIPO_BASE_URL}/task", headers=auth, json=body)
-                _raise_for_status(resp, "task")
-                payload = resp.json()
-                task_id = (payload.get("data") or {}).get("task_id")
-                if payload.get("code", 0) != 0 or not task_id:
-                    raise ProviderError(
-                        f"Tripo did not create a task: {str(payload)[:240]}",
-                        provider=self.provider_id,
-                        status_code=502,
-                    )
-                return task_id
+            task_id = await self.with_retries(lambda: tripo.create(client, key, tripo.ENDPOINTS[KIND[capability]], body))
+            task_data = await tripo.wait(client, key, task_id, notify, poll_interval, max_polls)
 
-            task_id = await self.with_retries(_create_task)
-
-            poll_interval = float(params.get("poll_interval", 2.5))
-            max_polls = int(params.get("max_polls", 240))
-            task_data: dict[str, Any] = {}
-            for _ in range(max_polls):
-                resp = await client.get(f"{TRIPO_BASE_URL}/task/{task_id}", headers=auth)
-                if resp.status_code >= 400:
-                    await asyncio.sleep(poll_interval)
-                    continue
-                task_data = resp.json().get("data") or {}
-                status = str(task_data.get("status", "queued")).lower()
-                prog = int(task_data.get("progress") or 0)
-                await _notify(prog, f"Tripo {status} ({prog}%)")
-                if status == "success":
-                    break
-                if status in FAILED_STATUSES:
-                    raise ProviderError(
-                        f"Tripo 3D generation {status}: {task_data.get('message') or 'no details'}",
-                        provider=self.provider_id,
-                        status_code=500,
-                        retryable=status in ("failed", "unknown"),
-                        how_to_fix="Retry, or try a cleaner reference image; 'banned' means content was blocked.",
-                    )
-                await asyncio.sleep(poll_interval)
-            else:
-                raise ProviderError(
-                    "Tripo task polling timed out.",
-                    provider=self.provider_id,
-                    status_code=504,
-                    retryable=True,
-                )
-
-            # Download server-side because Tripo's signed URLs expire.
-            output = task_data.get("output") or {}
-            glb_url = output.get("pbr_model") or output.get("model") or output.get("base_model")
-            if not glb_url:
-                raise ProviderError(
-                    "Tripo task succeeded but returned no model URL.",
-                    provider=self.provider_id,
-                    status_code=500,
-                )
-            glb_resp = await client.get(glb_url)
-            if glb_resp.status_code != 200:
-                raise ProviderError(
-                    f"Tripo model download failed ({glb_resp.status_code}).",
-                    provider=self.provider_id,
-                    status_code=glb_resp.status_code,
-                    retryable=True,
-                )
+            url = tripo.model_url(task_data)
+            if not url:
+                raise ProviderError("Tripo task succeeded but returned no model URL.", provider=self.provider_id, status_code=500)
             out_glb.parent.mkdir(parents=True, exist_ok=True)
-            out_glb.write_bytes(glb_resp.content)
-
             extra_files: dict[str, str] = {}
-            # Keep the untextured base GLB alongside the PBR one when both are offered.
-            if output.get("pbr_model") and output.get("model") and output["model"] != output["pbr_model"]:
-                try:
-                    b_resp = await client.get(output["model"])
-                    if b_resp.status_code == 200:
-                        base_path = output_dir / f"{filename_stem}_base.glb"
-                        base_path.write_bytes(b_resp.content)
-                        extra_files["glb_base"] = f"assets/{base_path.name}"
-                except Exception:
-                    pass
+            data = await tripo.download(client, url)
+            if not data.startswith(b"glTF"):
+                # Quad meshes come as FBX. Keep it, and ask Tripo for the GLB the rest of Glob works with.
+                ext = url.split("?")[0].rsplit(".", 1)[-1].lower() or "fbx"
+                raw_path = output_dir / f"{filename_stem}.{ext}"
+                raw_path.write_bytes(data)
+                extra_files[ext] = f"assets/{raw_path.name}"
+                await _notify(92, "Converting to GLB...")
+                _, conv = await tripo.convert(client, key, task_id, "GLTF", {"face_limit": body.get("face_limit")} if body.get("face_limit") else None,
+                                              notify=None)
+                converted = await tripo.download(client, tripo.model_url(conv))
+                if not converted.startswith(b"glTF"):
+                    raise ProviderError("Tripo made a quad mesh but could not give it as a GLB.", provider=self.provider_id, status_code=502,
+                                        how_to_fix="Turn Quads off, or use the FBX saved next to this asset.")
+                data = converted
+                task_data["credits_consumed"] = float(task_data.get("credits_consumed") or 0) + float(conv.get("credits_consumed") or 0)
+            out_glb.write_bytes(data)
 
             thumb_rel = ""
-            if output.get("rendered_image"):
+            rendered = (task_data.get("output") or {}).get("rendered_image_url") or (task_data.get("output") or {}).get("rendered_image")
+            if rendered:
                 try:
-                    t_resp = await client.get(output["rendered_image"])
-                    if t_resp.status_code == 200:
-                        t_path = output_dir / f"{filename_stem}_thumb.webp"
-                        t_path.write_bytes(t_resp.content)
-                        thumb_rel = f"assets/{t_path.name}"
+                    thumb = await tripo.download(client, rendered)
+                    ext = "png" if thumb.startswith(b"\x89PNG") else "webp"
+                    t_path = output_dir / f"{filename_stem}_thumb.{ext}"
+                    t_path.write_bytes(thumb)
+                    thumb_rel = f"assets/{t_path.name}"
                 except Exception:
                     pass
 
-        reported = task_data.get("consumed_credit")
+        reported = task_data.get("credits_consumed")
         credits = float(reported) if reported is not None else est.credits
         return ProviderResult(
             provider=self.provider_id,
-            model=model_version,
+            model=model,
             file_path=f"assets/{out_glb.name}",
             thumbnail_path=thumb_rel,
             extra_files=extra_files,

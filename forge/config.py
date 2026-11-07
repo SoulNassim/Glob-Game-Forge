@@ -91,6 +91,16 @@ class ForgeConfig(BaseModel):
     default_image_model: str = "gemini-nano-banana-2.1"
     default_3d_provider: str = "meshy"
     default_3d_model: str = "meshy-7.1"
+    # Tripo (default_3d_provider = "tripo"): its model and the Make 3D options (see forge/tripo.py settings_from_config).
+    tripo_model: str = "v3.1-20260211"
+    tripo_texture: bool = True
+    tripo_pbr: bool = True
+    tripo_texture_quality: str = "standard"
+    tripo_geometry_quality: str = "standard"
+    tripo_face_limit: int = 0  # 0 lets Tripo choose
+    tripo_quad: bool = False
+    tripo_smart_low_poly: bool = False
+    tripo_auto_size: bool = True
     # A signed-in service's 3D model (svc:<service>/<model>) for Make 3D; empty uses default_3d_provider.
     default_3d_service_model: str = ""
     default_critic_provider: str = "gemini"
@@ -124,6 +134,8 @@ class ForgeConfig(BaseModel):
     agent_compact_at_tokens: int = 48000
     agent_keep_recent_messages: int = 6
     agent_max_tool_rounds: int = 8
+    # Claude Code models run as the real CLI with its own file tools (forge.agent.cli_runner) instead of the step-by-step chat.
+    agent_native_cli: bool = False
     # Glob chat panel in the app: "auto" (hidden while a coding agent is connected), "on" or "off".
     chat_mode: str = "auto"
     mcp_http_enabled: bool = True
@@ -154,7 +166,7 @@ class ForgeConfig(BaseModel):
         return bool(self.get_key("gemini") or self.get_key("meshy") or self.get_key("elevenlabs"))
 
     def has_live_3d_key(self) -> bool:
-        return bool(self.get_key("meshy"))
+        return bool(self.get_key("meshy") or self.get_key("tripo"))
 
     def get_key(self, provider: str, logins: bool = True) -> str:
         env_map = {

@@ -92,16 +92,16 @@ async def test_tripo_happy_path_and_failure(tmp_path: Path, monkeypatch: pytest.
 
     async def mock_post(self: Any, url: str, **kwargs: Any) -> httpx.Response:
         state["calls"].append(("POST", url, kwargs.get("json")))
-        if url.endswith("/upload"):
-            return httpx.Response(200, json={"code": 0, "data": {"image_token": "tok1"}})
+        if url.endswith("/files"):
+            return httpx.Response(200, json={"code": 0, "data": {"file_token": "tok1"}})
         return httpx.Response(200, json={"code": 0, "data": {"task_id": "t1"}})
 
     async def mock_get(self: Any, url: str, **kwargs: Any) -> httpx.Response:
         state["calls"].append(("GET", url, None))
-        if url.endswith("/task/t1"):
-            out = {"pbr_model": "https://cdn.test/m.glb", "rendered_image": "https://cdn.test/r.webp"}
+        if url.endswith("/tasks/t1"):
+            out = {"model_url": "https://cdn.test/m.glb", "rendered_image_url": "https://cdn.test/r.webp"}
             return httpx.Response(200, json={"code": 0, "data": {"status": state["status"], "progress": 100, "output": out}})
-        return httpx.Response(200, content=b"glb-bytes")
+        return httpx.Response(200, content=b"glTFglb-bytes")
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
@@ -111,10 +111,10 @@ async def test_tripo_happy_path_and_failure(tmp_path: Path, monkeypatch: pytest.
     res = await adapter.execute(
         ProviderCapability.IMAGE_TO_3D, "a chair", out, "chair", reference_files=[ref], params={"poll_interval": 0}
     )
-    task_call = [c for c in state["calls"] if c[0] == "POST" and c[1].endswith("/task")][0]
-    assert task_call[2]["type"] == "image_to_model"
-    assert task_call[2]["file"] == {"type": "png", "file_token": "tok1"}
-    assert (out / "chair.glb").read_bytes() == b"glb-bytes"
+    task_call = [c for c in state["calls"] if c[0] == "POST" and c[1].endswith("/generation/image-to-model")][0]
+    assert task_call[2]["input"] == "tok1"
+    assert task_call[2]["model"] == "v3.1-20260211"
+    assert (out / "chair.glb").read_bytes() == b"glTFglb-bytes"
     assert res.thumbnail_path == "assets/chair_thumb.webp"
     assert res.metadata["tripo_task_id"] == "t1"
 

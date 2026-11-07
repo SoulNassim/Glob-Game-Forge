@@ -238,7 +238,7 @@ class _Progress:
             return
         kind = event.get("type")
         if kind == "content_block_start":
-            self.phase = "thinking" if (event.get("content_block") or {}).get("type") == "thinking" else "writing"
+            self.phase = {"thinking": "thinking", "tool_use": "acting"}.get((event.get("content_block") or {}).get("type"), "writing")
         elif kind == "content_block_delta":
             delta = event.get("delta") or {}
             if delta.get("type") == "thinking_delta":
@@ -266,14 +266,23 @@ class _Progress:
             pass
 
 
+def kill_tree(proc: subprocess.Popen[str]) -> None:
+    """End a CLI and what it started: on Windows `claude` can be a .cmd, and killing that leaves the real program running."""
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    proc.kill()
+
+
 def _run_streaming(cmd: list[str], stdin_text: str, cwd: str, env: dict[str, str], timeout: int, on_line: Callable[[str], None],
-                   max_total: float = MAX_CALL_SECONDS) -> subprocess.CompletedProcess[str]:
+                   max_total: float = MAX_CALL_SECONDS, on_start: Callable[[subprocess.Popen[str]], None] | None = None) -> subprocess.CompletedProcess[str]:
     """subprocess.run, but each line of output is handed to `on_line` as it arrives.
 
     `timeout` counts silence, so a model that is still streaming isn't killed mid-answer; `max_total` caps the whole call.
     """
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, env=env, text=True,
                             encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if on_start:
+        on_start(proc)
     out: list[str] = []
     err: list[str] = []
     expired = threading.Event()
@@ -286,7 +295,7 @@ def _run_streaming(cmd: list[str], stdin_text: str, cwd: str, env: dict[str, str
             now = time.monotonic()
             if now - last_output[0] > timeout or now - started > max_total:
                 expired.set()
-                proc.kill()
+                kill_tree(proc)
                 return
 
     threading.Thread(target=watch, daemon=True).start()

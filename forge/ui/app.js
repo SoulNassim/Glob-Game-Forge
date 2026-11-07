@@ -685,7 +685,7 @@ function renderMessages() {
     return;
   }
   const running = state.sending || state.progress?.session === state.sessionId;
-  const thinking = running ? `<div class="msg agent thinking"><img class="avatar forge" src="/ui/glob-forge.svg" alt=""><div class="bubble"><div class="who">Glob</div><div id="liveStatus">${liveStatusHtml()}</div></div></div>` : "";
+  const thinking = running ? `<div class="msg agent thinking"><img class="avatar forge" src="/ui/glob-forge.svg" alt=""><div class="bubble"><div class="who">Glob</div><div id="liveStatus">${liveStatusHtml()}</div><button type="button" class="ghost" id="chatStop" data-chat-stop hidden>Stop</button></div></div>` : "";
   // Only messages that are new since the last draw animate in; redraws of the same chat stay still.
   const seen = state.drawn?.session === state.sessionId ? state.drawn.count : messages.length;
   state.drawn = { session: state.sessionId, count: messages.length };
@@ -809,6 +809,8 @@ function updateLiveStatus() {
   const box = $("#messages");
   const following = box.scrollHeight - box.scrollTop - box.clientHeight < 160;  // don't pull the view down if they scrolled up to read
   el.innerHTML = liveStatusHtml();
+  const stop = $("#chatStop");  // outside the status, which is redrawn every second: a click must land on the same button it started on
+  if (stop) stop.hidden = !(state.progress?.stoppable && state.progress.session === state.sessionId);
   if (following) box.scrollTo({ top: box.scrollHeight, behavior: "instant" });
 }
 
@@ -1097,7 +1099,73 @@ function imageVia() {
   return own ? `your ${own.label.split(" · ")[0]} key` : "ready";
 }
 
+// Tripo has no "sign in with Tripo" for apps, only API keys. So Glob checks the key with Tripo before saving it,
+// and shows the credits that are left.
+function tripoAccountCard(cfg) {
+  const t = state.tripo, keyed = !!cfg.tripo_configured;
+  const credits = t?.balance ? `${Math.round(t.balance.balance).toLocaleString()} credits` : "";
+  const status = !keyed ? "Not connected" : t?.error ? `Key saved, but Tripo says: ${t.error}` : credits ? `Connected · ${credits}${t.balance.frozen ? ` (${Math.round(t.balance.frozen)} in use)` : ""}` : "Connected · checking credits…";
+  const isDefault = cfg.default_3d_provider === "tripo" && !cfg.default_3d_service_model;
+  const sel = (key, entries) => `<select data-tripo-cfg="${key}" aria-label="${esc(key)}">${entries.map(([v, l]) => `<option value="${esc(v)}" ${v === cfg[key] ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+  const tog = (key, label, hint) => `<label class="mesh-toggle"><span class="switch"><input type="checkbox" data-tripo-cfg="${key}" ${cfg[key] ? "checked" : ""}><span></span></span><span>${label}<small>${hint}</small></span></label>`;
+  const models = t?.models || { "v3.1-20260211": "Tripo 3.1 · best detail", "v3.0-20250812": "Tripo 3.0", "v2.5-20250123": "Tripo 2.5 · fastest", "P1-20260311": "Tripo P1 · low-poly", "P2-20260801": "Tripo P2 · low-poly with quads" };
+  const form = `<details class="acct-key" ${keyed ? "" : "open"}><summary>${keyed ? "Replace the key" : "Connect with an API key"}</summary>
+      <form class="acct-key-form tripo-connect-form"><input name="api_key" type="password" autocomplete="off" placeholder="tsk_…" aria-label="Tripo API key">
+      <button class="mini">Connect</button><a href="https://platform.tripo3d.ai/api-keys" target="_blank" rel="noopener">Get a key ↗</a>
+      <label class="inline"><input type="checkbox" name="make_default" ${isDefault ? "" : "checked"}> Use Tripo for new 3D models</label></form></details>`;
+  const defaults = keyed ? `<details class="acct-key"><summary>Make 3D defaults</summary><div class="mesh-opts">
+      <div class="mesh-grid"><label>Model ${sel("tripo_model", Object.entries(models))}</label>
+        <label>Texture ${sel("tripo_texture_quality", [["fast", "Fast"], ["standard", "Standard"], ["detailed", "Detailed"], ["extreme", "Extreme 8K"]])}</label>
+        <label>Shape detail ${sel("tripo_geometry_quality", [["standard", "Standard"], ["detailed", "Detailed"]])}</label></div>
+      ${tog("tripo_auto_size", "Real-world size", "Scales models to metres")}
+      ${tog("tripo_smart_low_poly", "Smart low poly", "Game-ready topology, 500 to 20k triangles")}
+      ${tog("tripo_quad", "Quad meshes", "Also saves the FBX next to the GLB")}
+      <p class="st-note">Each Make 3D window can still change these for one run.</p></div></details>` : "";
+  return `<div class="acct${keyed && !t?.error ? " on" : ""}" data-acct="tripo">
+    <span class="acct-logo"><b>T</b></span>
+    <div class="acct-text"><strong>Tripo</strong><small>3D models, rigs, animations, retopo and re-texturing</small>
+      <span class="acct-status">${keyed && !t?.error ? "✓ " : ""}${esc(status)}</span>${form}${defaults}</div>
+    <div class="acct-act">${keyed ? `${isDefault ? `<span class="chip">3D engine</span>` : `<button class="primary" data-tripo-default>Use for 3D</button>`}
+      <a class="ghost btn" href="https://platform.tripo3d.ai/billing" target="_blank" rel="noopener">Credits ↗</a>
+      <button class="ghost" data-tripo-disconnect>Disconnect</button>` : ""}</div></div>`;
+}
+
+$("#settingsView").addEventListener("submit", async (event) => {
+  const form = event.target.closest(".tripo-connect-form");
+  if (!form) return;
+  event.preventDefault();
+  const input = form.querySelector("input[name=api_key]"), button = form.querySelector("button");
+  if (!input.value.trim()) return input.focus();
+  button.disabled = true;
+  button.textContent = "Checking…";
+  try {
+    state.tripo = await api("/api/tripo/connect", { method: "POST", body: { api_key: input.value.trim(), make_default: form.make_default.checked } });
+    state.studio = null;
+    toast(`✓ Tripo connected · ${Math.round(state.tripo.balance.balance).toLocaleString()} credits`);
+    await renderSettings();
+  } catch (err) { toast(err.message, true); button.disabled = false; button.textContent = "Connect"; }
+});
+
+$("#settingsView").addEventListener("change", async (event) => {
+  const el = event.target.closest("[data-tripo-cfg]");
+  if (!el) return;
+  event.stopImmediatePropagation();
+  try { await api("/api/config", { method: "PUT", body: { [el.dataset.tripoCfg]: el.type === "checkbox" ? el.checked : el.value } }); state.studio = null; toast("Saved"); } catch (err) { toast(err.message, true); }
+});
+
+$("#settingsView").addEventListener("click", async (event) => {
+  const t = event.target.closest("[data-tripo-default],[data-tripo-disconnect]");
+  if (!t) return;
+  try {
+    if (t.dataset.tripoDefault !== undefined) { await api("/api/config", { method: "PUT", body: { default_3d_provider: "tripo", default_3d_service_model: "" } }); toast("New 3D models are made with Tripo"); }
+    else { state.tripo = await api("/api/tripo", { method: "DELETE" }); toast("Tripo disconnected"); }
+    state.studio = null;
+    await renderSettings();
+  } catch (err) { toast(err.message, true); }
+});
+
 function accountCard(p, cfg) {
+  if (p.id === "tripo") return tripoAccountCard(cfg);
   const sv = (state.services || []).find((s) => s.id === p.id);
   const signedIn = !!sv?.connected, keyed = !!(p.key && cfg[`${p.key}_configured`]);
   const waiting = state.serviceWaiting === p.id;
@@ -1215,6 +1283,8 @@ function chatBody(info, cfg) {
           <select name="agent_keep_recent_messages">${opt([2, 4, 6, 8, 12, 16], cfg.agent_keep_recent_messages)}</select></div>
         <div class="set-row"><div><strong>Steps per message</strong><small>How many rounds the chat may take for one message.</small></div>
           <select name="agent_max_tool_rounds">${opt([4, 8, 12, 16, 24], cfg.agent_max_tool_rounds)}</select></div>
+        <div class="set-row"><div><strong>Claude Code works directly</strong><small>Claude Code models use their own file tools, with no step limit. Generations stay limited to 8 per message.</small></div>
+          <label class="switch"><input type="checkbox" name="agent_native_cli" ${cfg.agent_native_cli ? "checked" : ""}><span></span></label></div>
       </form>
     </details>`;
 }
@@ -1246,6 +1316,8 @@ async function renderSettings() {
       : `<h1>New art</h1><p class="st-lede">How Glob makes new art: which service, and what each kind of asset looks like. One asset can still change this in its Generate window.</p><form id="defaultsForm" class="gen-defaults">${defaultsHTML(cfg, state.studio)}</form>`);
     draw(body());
     if (state.serviceModels?.loading) state.serviceModelsReady.then(() => draw(body()));
+    // Tripo's credits come from Tripo itself, so they fill in after the page is up.
+    if (tab === "accounts" && cfg.tripo_configured) api("/api/tripo").then((t) => { state.tripo = t; draw(body()); }).catch(() => {});
   } else if (tab === "models") {
     const [cfg] = await Promise.all([api("/api/config"), state.modelInfo ? null : loadModels()]);
     draw(chatBody(state.modelInfo || { presets: {}, clis: [] }, cfg));
@@ -1268,6 +1340,7 @@ $("#settingsView").addEventListener("change", async (event) => {
     agent_compact_at_tokens: Number(form.agent_compact_at_tokens.value),
     agent_keep_recent_messages: Number(form.agent_keep_recent_messages.value),
     agent_max_tool_rounds: Number(form.agent_max_tool_rounds.value),
+    agent_native_cli: form.agent_native_cli.checked,
     chat_mode: form.chat_mode.value,
   };
   try { await api("/api/config", { method: "PUT", body: updates }); state.agentCfg = { ...state.agentCfg, ...updates }; toast("Saved"); syncComposer(); applyChatMode(); } catch (err) { toast(err.message, true); }
@@ -2651,13 +2724,16 @@ function renderPreview() {
   const on = p.references.filter((r) => r.on).length;
   const source = modelSource(is3d ? p.model3d : p.model);
   const serviceLabel = (state.serviceModels?.[is3d ? "3d" : "image"] || []).find((m) => m.service === source)?.label.split(" · ")[0] || source;
+  const tripo = is3d && source === "keys" && p.engine === "tripo";
+  const unit = tripo ? "Tripo" : "Meshy";
+  const need = tripo ? tripoCredits(p.settings) : p.settings?.should_texture ? 30 : 20;
+  const credits3d = state.credits?.[tripo ? "tripo_balance" : "meshy_balance"];
   const cost = source !== "keys" ? ` · paid in your ${serviceLabel} credits`
-    : is3d ? ` · ≈ $${(p.settings.should_texture ? 0.3 : 0.2).toFixed(2)} (${p.settings.should_texture ? 30 : 20} Meshy credits)` : model ? ` · ≈ $${(model.price * (p.count || 1)).toFixed(2)}` : "";
-  const alert = creditAlert(source !== "keys" ? source : is3d ? "meshy" : (p.model || "").split(":")[0]);
-  const balance = is3d && source === "keys" && state.credits?.meshy_balance != null ? ` · ${state.credits.meshy_balance} Meshy credits left` : "";
-  // Not enough Meshy credits for this model: say so and don't let it start a run that will fail.
-  const need = p.settings?.should_texture ? 30 : 20;
-  const short = is3d && source === "keys" && state.credits?.meshy_balance != null && state.credits.meshy_balance < need;
+    : is3d ? ` · ≈ $${(need / 100).toFixed(2)} (${need} ${unit} credits)` : model ? ` · ≈ $${(model.price * (p.count || 1)).toFixed(2)}` : "";
+  const alert = creditAlert(source !== "keys" ? source : is3d ? unit.toLowerCase() : (p.model || "").split(":")[0]);
+  const balance = is3d && source === "keys" && credits3d != null ? ` · ${credits3d} ${unit} credits left` : "";
+  // Not enough credits for this model: say so and don't let it start a run that will fail.
+  const short = is3d && source === "keys" && credits3d != null && credits3d < need;
   const refs = p.references.map((r, i) => `
     <label class="ref role-${esc(r.role)}${r.on ? "" : " off"}"><input type="checkbox" data-ref="${i}" ${r.on ? "checked" : ""}>
       <img src="${esc(fileUrl(r.path))}" alt=""><span title="${esc(refLabel(r))}">${esc(refLabel(r).split(" · ")[0])}</span></label>`).join("");
@@ -2682,7 +2758,7 @@ function renderPreview() {
       ${needsInstruction ? `<div class="sheet-instruction"><label>${p.action === "prop_sheet" ? "Which props? (optional: leave empty for everything in the picture)" : "What should change?"}<textarea id="pvInstruction" rows="2" placeholder="${p.action === "variant" ? "Frost-themed armour, icy blue trim" : p.action === "prop_sheet" ? "barrel, torch, broken pillar, chest, bones" : "Remove the shield"}"></textarea></label>
         <button class="ghost" data-rebuild>Update prompt</button></div>` : ""}
       <div class="sheet-body${is3d ? " mesh-body" : ""}">
-        ${is3d ? (source === "keys" ? meshOptions(p) : `<section class="mesh-opts"><p class="hint-line">${esc(serviceLabel)} makes the model from the ticked image${p.references.length > 1 ? "s" : ""}, with its own settings. The GLB lands here like any other output.</p></section>`) : `<section>
+        ${is3d ? (source === "keys" ? (p.engine === "tripo" ? tripoOptions(p) : meshOptions(p)) : `<section class="mesh-opts"><p class="hint-line">${esc(serviceLabel)} makes the model from the ticked image${p.references.length > 1 ? "s" : ""}, with its own settings. The GLB lands here like any other output.</p></section>`) : `<section>
           ${p.action === "views" ? `<p class="hint-line">One image per view: ${esc(p.settings.views || "")}. <code>{view}</code> is replaced for each image.</p>` : bibleSwitch(p)}
           <label class="field-label" for="pvPrompt">Prompt <em>exactly what is sent</em></label>
           <textarea id="pvPrompt" class="final-prompt" rows="6">${esc(p.prompt)}</textarea>
@@ -2700,7 +2776,7 @@ function renderPreview() {
       </div>
       <footer class="sheet-foot">
         ${is3d ? "" : `<label class="inline">Images <select id="pvCount">${[1, 2, 3, 4].map((n) => `<option ${n === p.count ? "selected" : ""}>${n}</option>`).join("")}</select></label>`}
-        <span class="cost">${on} image${on === 1 ? "" : "s"} attached${cost}${balance}${short ? `<b class="short">You need ${need - state.credits.meshy_balance} more Meshy credits. <a href="https://www.meshy.ai/settings/subscription" target="_blank" rel="noopener">Top up ↗</a></b>` : ""}</span>
+        <span class="cost">${on} image${on === 1 ? "" : "s"} attached${cost}${balance}${short ? `<b class="short">You need ${Math.ceil(need - credits3d)} more ${unit} credits. <a href="${tripo ? "https://platform.tripo3d.ai/billing" : "https://www.meshy.ai/settings/subscription"}" target="_blank" rel="noopener">Top up ↗</a></b>` : ""}</span>
         <span class="grow"></span>
         ${is3d ? "" : `<button type="button" class="ghost copy-req" data-copy-request title="Copy this prompt and the ticked images, to paste into ChatGPT, Gemini or another tool yourself (no API cost)">${icon("copy")}Copy prompt + images</button>`}
         <button type="button" class="ghost" data-close>Cancel</button><button type="button" class="run-btn" data-run ${short ? "disabled" : ""}>${icon(theme.icon)}${esc(ACTION_LABEL[p.action])}</button>
@@ -2712,8 +2788,62 @@ function renderPreview() {
   $("#pvModel3d")?.addEventListener("change", () => { syncPreviewFields(); renderPreview(); });
   $("#pvSource")?.addEventListener("change", () => { syncPreviewFields(); onSourceChange(is3d ? "3d" : "image"); });
   $("#pvCount")?.addEventListener("change", () => { syncPreviewFields(); renderPreview(); });
-  document.querySelectorAll("#dialog [data-mesh], #dialog [data-fmt]").forEach((el) => el.addEventListener("change", () => { syncMesh(); renderPreview(); }));
+  document.querySelectorAll("#dialog [data-mesh], #dialog [data-fmt], #dialog [data-tripo]").forEach((el) => el.addEventListener("change", () => { syncMesh(); renderPreview(); }));
 }
+
+// Make 3D settings for Tripo: model, texture, polygons and mesh style. Each field is a Tripo API field of the same name.
+const tripoCredits = (s) => (s.texture ? 40 : 30) + ({ detailed: 10, extreme: 30 }[s.texture_quality] || 0) + (s.geometry_quality === "detailed" ? 20 : 0);
+const isPSeries = (m) => /^p/i.test(m || "");
+const versionAtLeast3 = (m) => isPSeries(m) || !/^v2\./i.test(m || "");
+
+function tripoOptions(p) {
+  const s = p.settings, c = p.choices || {};
+  const pSeries = isPSeries(s.model), modern = versionAtLeast3(s.model);
+  const select = (key, entries, disabled = false) => `<select data-tripo="${key}"${disabled ? " disabled" : ""}>${entries.map(([v, label]) => `<option value="${esc(v)}" ${v === s[key] ? "selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
+  const toggle = (key, label, hint, disabled = false) => `<label class="mesh-toggle${disabled ? " off" : ""}"><span class="switch"><input type="checkbox" data-tripo="${key}" ${s[key] && !disabled ? "checked" : ""}${disabled ? " disabled" : ""}><span></span></span><span>${label}<small>${hint}</small></span></label>`;
+  const quality = { fast: "Fast", standard: "Standard", detailed: "Detailed · +10 credits", extreme: "Extreme 8K · +30 credits" };
+  const quadOk = !pSeries ? modern : /^p2/i.test(s.model);
+  return `<section class="mesh-opts">
+    <div class="field-label">Generator</div>
+    <div class="mesh-grid">
+      <label>Model ${select("model", Object.entries(c.model || {}))}</label>
+      <label>Shape detail ${select("geometry_quality", (c.geometry_quality || []).map((v) => [v, v === "detailed" ? "Detailed · +20 credits" : "Standard"]), pSeries || !modern)}</label>
+    </div>
+    ${pSeries ? `<p class="hint-line">The P series is tuned for clean low-poly models.</p>` : ""}
+    <div class="field-label">Polygons</div>
+    <div class="poly-row">
+      <input type="number" data-tripo="face_limit" min="0" max="2000000" step="500" value="${s.face_limit || ""}" placeholder="Automatic">
+      <span class="poly-presets">${(c.face_presets || []).map((n) => `<button type="button" class="${n === s.face_limit ? "on" : ""}" data-tripo-faces="${n}">${fmtCount(n)}</button>`).join("")}<button type="button" class="${s.face_limit ? "" : "on"}" data-tripo-faces="0">Auto</button></span>
+    </div>
+    ${toggle("smart_low_poly", "Smart low poly", "Clean game-ready topology, 500 to 20k triangles. Can fail on complex pictures", pSeries || !modern)}
+    ${toggle("quad", "Quad mesh", "Quads suit sculpting and animation. Glob also converts the result to GLB", !quadOk)}
+    <div class="field-label">Texture</div>
+    ${toggle("texture", "Texture the model", "Off gives a bare grey mesh and costs less")}
+    ${toggle("pbr", "PBR maps", "Metallic, roughness and normal maps", !s.texture)}
+    <div class="mesh-grid"><label>Quality ${select("texture_quality", (c.texture_quality || []).map((v) => [v, quality[v] || v]), !s.texture || !modern)}</label></div>
+    ${toggle("auto_size", "Real-world size", "Scales the model to metres, so a door is door-sized")}
+  </section>`;
+}
+
+function syncTripo() {
+  const s = state.preview.settings;
+  document.querySelectorAll("#dialog [data-tripo]").forEach((el) => {
+    if (el.disabled) return;
+    s[el.dataset.tripo] = el.type === "checkbox" ? el.checked : el.type === "number" ? Math.max(0, Math.round(Number(el.value) || 0)) : el.value;
+  });
+  if (!s.texture) { s.pbr = false; s.texture_quality = "standard"; }
+  if (s.smart_low_poly && s.face_limit > 20000) s.face_limit = 20000;
+  // A model change can switch off what it doesn't have: send only what Tripo accepts for it.
+  if (isPSeries(s.model)) Object.assign(s, { smart_low_poly: false, geometry_quality: "standard", quad: /^p2/i.test(s.model) ? s.quad : false });
+  if (!versionAtLeast3(s.model)) Object.assign(s, { smart_low_poly: false, quad: false, geometry_quality: "standard", texture_quality: "standard" });
+}
+
+document.addEventListener("click", (event) => {
+  const faces = event.target.closest("[data-tripo-faces]");
+  if (!faces || state.preview?.engine !== "tripo") return;
+  state.preview.settings.face_limit = Number(faces.dataset.tripoFaces);
+  renderPreview();
+});
 
 const MESH_MODEL_LABEL = { "meshy-7.1": "Meshy 7.1 · best detail", "meshy-6": "Meshy 6", "meshy-6-lite": "Meshy 6 Lite · fast", "meshy-t2.5": "Meshy T2.5 · game topology", "meshy-t2": "Meshy T2 · game topology" };
 const fmtCount = (n) => (n >= 1000 ? `${+(n / 1000).toFixed(1)}k` : String(n));
@@ -2757,6 +2887,7 @@ function meshOptions(p) {
 function syncMesh() {
   const p = state.preview;
   if (p?.action !== "make_3d") return;
+  if (p.engine === "tripo") return syncTripo();
   const s = p.settings;
   document.querySelectorAll("#dialog [data-mesh]").forEach((el) => {
     if (el.disabled) return;
@@ -3230,10 +3361,71 @@ function gameTools(a) {
   return `<div class="tool-row"><div class="field-label">Game tools</div><div class="tool-btns">
     ${three ? `${tool(`data-action="rig"`, "bones", "Rig", glb, glb ? "Add a skeleton to the GLB model. Works on textured humanoid characters facing forward" : "Make a GLB model, or drop one on this page, first")}
     ${tool(`data-action="animate"`, "play", "Animate", rigged, rigged ? "Preset animations for the rigged model" : "Rig the model first")}` : ""}
+    ${three && state.studio?.tripo_connected ? tool(`data-tripo-tools="${esc(JSON.stringify(a.outputs["3d"].filter((o) => /\.glb$/i.test(o.path)).map((o) => o.path)))}" data-asset="${esc(a.path)}"`, "cube", "Tripo", glb, glb ? "Retopo, re-texture or convert the model with Tripo" : "Make a GLB model first") : ""}
     ${tool(`data-icons="${winner}"`, "grid", "Icons", a.winner, a.winner ? "Square inventory icons from the winner" : "Pick a winner first")}
     ${tool(`data-export="${esc(a.path)}"`, "box", "Export", true, "ZIP for Godot, Unity or Unreal")}
   </div></div>`;
 }
+
+// Tripo's model tools: retopo (fewer, cleaner polygons), re-texture and convert. The result is saved beside the original.
+const TRIPO_TOOLS = {
+  retopo: { label: "Retopo", credits: (o) => (o.quad ? 40 : 35), blurb: "Rebuilds the model with fewer, cleaner polygons and bakes the texture across." },
+  retexture: { label: "Re-texture", credits: (o) => 20 + ({ detailed: 10, extreme: 30 }[o.quality] || 0), blurb: "New textures on the same shape. Describe the look, or leave it empty to redo them." },
+  convert: { label: "Convert", credits: () => 10, blurb: "The same model as FBX, OBJ, USDZ or STL, for engines and tools that don't take GLB." },
+};
+
+function tripoToolsDialog(models, asset) {
+  const name = humanize(asset.split("/").pop());
+  const st = { op: "retopo", options: { face_limit: 10000, quad: false, quality: "standard", prompt: "", format: "FBX" }, model: models[0], busy: false };
+  const draw = () => {
+    const o = st.options, tool = TRIPO_TOOLS[st.op];
+    const fields = st.op === "retopo" ? `<div class="poly-row"><input type="number" id="ttFaces" min="100" max="500000" step="500" value="${o.face_limit}"> <span class="poly-presets">${[3000, 10000, 30000, 100000].map((n) => `<button type="button" class="${n === o.face_limit ? "on" : ""}" data-tt-faces="${n}">${fmtCount(n)}</button>`).join("")}</span></div>
+        <label class="mesh-toggle"><span class="switch"><input type="checkbox" id="ttQuad" ${o.quad ? "checked" : ""}><span></span></span><span>Quad mesh<small>Saved as FBX</small></span></label>`
+      : st.op === "retexture" ? `<label class="sheet-instruction">Look <textarea id="ttPrompt" rows="2" placeholder="mossy stone, hand-painted, rusty metal…">${esc(o.prompt)}</textarea></label>
+        <div class="mesh-grid"><label>Quality <select id="ttQuality">${[["standard", "Standard"], ["detailed", "Detailed · +10"], ["extreme", "Extreme 8K · +30"]].map(([v, l]) => `<option value="${v}" ${v === o.quality ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>`
+      : `<div class="mesh-grid"><label>Format <select id="ttFormat">${["FBX", "OBJ", "USDZ", "STL"].map((f) => `<option ${f === o.format ? "selected" : ""}>${f}</option>`).join("")}</select></label></div>`;
+    openDialog(`<div class="dlg sheet tone-sky">
+      <header class="sheet-head"><span class="sheet-icon">${icon("cube")}</span><div><h2>Tripo <span>· ${esc(name)}</span></h2><p>${esc(tool.blurb)} The original stays.</p></div></header>
+      <div class="sheet-model"><label class="model-pick">Model <select id="ttModel">${models.map((m) => `<option value="${esc(m)}" ${m === st.model ? "selected" : ""}>${esc(m.split("/").pop())}</option>`).join("")}</select></label>
+        <div class="seg" role="radiogroup">${Object.entries(TRIPO_TOOLS).map(([id, t]) => `<label><input type="radio" name="ttOp" value="${id}" ${id === st.op ? "checked" : ""}><span>${t.label}</span></label>`).join("")}</div></div>
+      <div class="sheet-body only-refs"><section class="mesh-opts">${fields}</section></div>
+      <footer class="sheet-foot"><span class="cost">≈ ${tool.credits(o)} Tripo credits · ≈ $${(tool.credits(o) / 100).toFixed(2)}</span><span class="grow"></span>
+        <button type="button" class="ghost" data-close>Cancel</button><button type="button" class="run-btn" id="ttRun">${icon("cube")}${st.busy ? "Working…" : tool.label}</button></footer></div>`);
+    const read = () => {
+      st.model = $("#ttModel").value;
+      if ($("#ttFaces")) st.options.face_limit = Math.max(100, Number($("#ttFaces").value) || 10000);
+      if ($("#ttQuad")) st.options.quad = $("#ttQuad").checked;
+      if ($("#ttPrompt")) st.options.prompt = $("#ttPrompt").value;
+      if ($("#ttQuality")) st.options.quality = $("#ttQuality").value;
+      if ($("#ttFormat")) st.options.format = $("#ttFormat").value;
+    };
+    $("#ttModel").addEventListener("change", read);
+    document.querySelectorAll("#dialog [name=ttOp]").forEach((r) => r.addEventListener("change", () => { read(); st.op = r.value; draw(); }));
+    document.querySelectorAll("#dialog [data-tt-faces]").forEach((b) => b.addEventListener("click", () => { read(); st.options.face_limit = Number(b.dataset.ttFaces); draw(); }));
+    document.querySelectorAll("#ttQuad, #ttQuality").forEach((el) => el.addEventListener("change", () => { read(); draw(); }));
+    $("#ttRun").addEventListener("click", async () => {
+      if (st.busy) return;
+      read();
+      st.busy = true;
+      $("#ttRun").disabled = true;
+      $("#ttRun").lastChild.textContent = "Working…";
+      toast("Tripo is working. This takes a minute or two.");
+      try {
+        await api("/api/tripo/process", { method: "POST", body: { asset, model: st.model, op: st.op, options: st.options } });
+        closeDialog();
+        toast(`✓ ${TRIPO_TOOLS[st.op].label} done. It's in the 3D models.`);
+        renderView();
+      } catch (err) { st.busy = false; toast(err.message, true); draw(); }
+    });
+  };
+  draw();
+}
+
+document.addEventListener("click", (event) => {
+  const t = event.target.closest("[data-tripo-tools]");
+  if (!t || t.disabled) return;
+  try { tripoToolsDialog(JSON.parse(t.dataset.tripoTools), t.dataset.asset); } catch (err) { toast(err.message, true); }
+});
 
 function sheetFrame(action, assetName, body, foot) {
   const theme = ACTION_THEME[action];
@@ -3249,23 +3441,35 @@ function renderRigSheet() {
   const p = state.preview;
   p.references = p.references.map((r) => ({ ...r, on: true }));
   const model = p.references[0]?.path || "";
+  const tripoRig = p.engine === "tripo";
+  const RIG_NAME = { biped: "Humanoid (two legs)", quadruped: "Four legs", hexapod: "Six legs", octopod: "Eight legs", avian: "Bird", serpentine: "Snake or worm", aquatic: "Fish or swimmer", others: "Something else" };
+  const SPEC_NAME = { tripo: "Tripo's own", mixamo: "Mixamo", actorcore: "ActorCore", unity: "Unity Humanoid", unreal: "Unreal Mannequin", vrm: "VRM" };
+  const options = (list, names, current) => list.map((v) => `<option value="${esc(v)}" ${v === current ? "selected" : ""}>${esc(names[v] || v)}</option>`).join("");
+  const engineFields = tripoRig
+    ? `<label class="field-label" for="rigType">What is it?</label>
+       <select id="rigType">${options(p.choices.rig_type, RIG_NAME, p.settings.rig_type)}</select>
+       <label class="field-label" for="rigSpec">Skeleton</label>
+       <select id="rigSpec">${options(p.choices.spec, SPEC_NAME, p.settings.spec)}</select>
+       <p class="hint-line">Pick the skeleton your engine expects; it only applies to two-legged characters. Animations come from the presets next.</p>`
+    : `<label class="field-label" for="rigHeight">Character height</label>
+       <div class="rig-height"><input id="rigHeight" type="number" min="0.2" max="20" step="0.05" value="${esc(p.settings.height_meters)}"> <span>metres</span></div>
+       <p class="hint-line">Works on humanoid models that face forward, up to 380k triangles. You also get a walk and a run clip.</p>`;
   openDialog(sheetFrame("rig", humanize(p.asset.split("/").pop()), `
     <div class="sheet-body only-refs">
       <section class="rig-pick">
         <div class="rig-thumb">${p.thumb ? `<img src="${esc(fileUrl(p.thumb))}" alt="">` : icon("cube")}</div>
-        <div class="rig-info"><strong>${esc(model.split("/").pop())}</strong>
-          <label class="field-label" for="rigHeight">Character height</label>
-          <div class="rig-height"><input id="rigHeight" type="number" min="0.2" max="20" step="0.05" value="${esc(p.settings.height_meters)}"> <span>metres</span></div>
-          <p class="hint-line">Works on humanoid models that face forward, up to 380k triangles. You also get a walk and a run clip.</p></div>
+        <div class="rig-info"><strong>${esc(model.split("/").pop())}</strong>${engineFields}</div>
       </section>
-    </div>`, `<span class="cost">${p.credits} Meshy credits · ≈ $${p.cost_usd.toFixed(2)}</span>`));
+    </div>`, `<span class="cost">${p.credits} ${tripoRig ? "Tripo" : "Meshy"} credits · ≈ $${p.cost_usd.toFixed(2)}</span>`));
 }
 
 async function renderAnimateSheet() {
   const p = state.preview;
+  const tripoRig = p.engine === "tripo", who = tripoRig ? "Tripo" : "Meshy";
+  if (state.animLibEngine !== p.engine) { state.animLib = null; state.animLibEngine = p.engine; } // the two services list different animations
   if (!state.animLib) {
-    openDialog(sheetFrame("animate", humanize(p.asset.split("/").pop()), `<div class="sheet-body only-refs"><p class="hint-line">Loading Meshy's animation list…</p></div>`, ""));
-    try { state.animLib = (await api("/api/studio/animations")).animations; } catch (err) { state.animLib = null; p.error = err.message; }
+    openDialog(sheetFrame("animate", humanize(p.asset.split("/").pop()), `<div class="sheet-body only-refs"><p class="hint-line">Loading ${who}'s animation list…</p></div>`, ""));
+    try { state.animLib = (await api(`/api/studio/animations?engine=${encodeURIComponent(p.engine || "")}`)).animations; } catch (err) { state.animLib = null; p.error = err.message; }
   }
   const lib = state.animLib || [];
   const q = (p.search || "").toLowerCase();
@@ -3274,7 +3478,8 @@ async function renderAnimateSheet() {
   const credits = p.picked.length * p.credits_each;
   openDialog(sheetFrame("animate", humanize(p.asset.split("/").pop()), `
     <div class="sheet-model"><label class="model-pick">Search<input id="animSearch" type="search" value="${esc(p.search)}" placeholder="idle, attack, death…"></label>
-      <label class="model-pick">FPS<select id="animFps">${[24, 25, 30, 60].map((f) => `<option ${f === Number(p.settings.fps) ? "selected" : ""}>${f}</option>`).join("")}</select></label>
+      ${tripoRig ? `<label class="mesh-toggle"><span class="switch"><input type="checkbox" id="animInPlace" ${p.settings.in_place ? "checked" : ""}><span></span></span><span>Stay in place<small>No travel: for a game that moves the character itself</small></span></label>`
+        : `<label class="model-pick">FPS<select id="animFps">${[24, 25, 30, 60].map((f) => `<option ${f === Number(p.settings.fps) ? "selected" : ""}>${f}</option>`).join("")}</select></label>`}
       <span class="chip">Picked <b>${p.picked.length} / 10</b></span></div>
     <div class="sheet-body only-refs"><section>
       ${p.error ? `<p class="hint-line">${esc(p.error)}</p>` : ""}
@@ -3282,7 +3487,8 @@ async function renderAnimateSheet() {
         ${/\.(gif|png|jpe?g|webp)(\?|$)/i.test(a.preview) ? `<img src="${esc(a.preview)}" alt="" loading="lazy">` : `<span class="anim-icon">${icon("play")}</span>`}
         <strong>${esc(a.name)}</strong><small>${esc([a.category, a.sub_category].filter(Boolean).join(" · "))}</small></button>`).join("")}</div>
       ${!shown.length && !p.error ? `<p class="hint-line">No animations match.</p>` : ""}
-    </section></div>`, `<span class="cost">${p.picked.length ? `${credits} Meshy credits · ≈ $${(credits / 100).toFixed(2)} · one file with a clip per animation` : "Pick up to 10 animations"}</span>`));
+    </section></div>`, `<span class="cost">${p.picked.length ? `${credits} ${who} credits · ≈ $${(credits / 100).toFixed(2)} · ${tripoRig ? "a file with a clip per animation, five to a task" : "one file with a clip per animation"}` : "Pick up to 10 animations"}</span>`));
+  $("#animInPlace")?.addEventListener("change", (e) => { p.settings.in_place = e.target.checked; });
   const search = $("#animSearch");
   search?.addEventListener("input", () => { p.search = search.value; clearTimeout(state.animTimer); state.animTimer = setTimeout(() => renderAnimateSheet().then(() => { const s = $("#animSearch"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }), 200); });
   $("#animFps")?.addEventListener("change", (e) => { p.settings.fps = Number(e.target.value); });
@@ -3291,7 +3497,9 @@ async function renderAnimateSheet() {
 function prepareGameRun() {
   const p = state.preview;
   if (!p) return true;
-  if (p.action === "rig") {
+  if (p.action === "rig" && p.engine === "tripo") {
+    p.settings = { ...p.settings, rig_type: $("#rigType")?.value || "biped", spec: $("#rigSpec")?.value || "tripo" };
+  } else if (p.action === "rig") {
     const h = Number($("#rigHeight")?.value);
     if (!(h > 0)) { toast("Enter the character height in metres.", true); return false; }
     p.settings = { ...p.settings, height_meters: h };
@@ -3718,7 +3926,7 @@ document.addEventListener("click", (event) => {
   if (t.dataset.export !== undefined) return exportDialog(t.dataset.export);
   if (t.dataset.anim) {
     const p = state.preview;
-    const id = Number(t.dataset.anim);
+    const id = p.engine === "tripo" ? t.dataset.anim : Number(t.dataset.anim); // Tripo's are named presets, Meshy's are numbered
     if (p.picked.includes(id)) p.picked = p.picked.filter((x) => x !== id);
     else if (p.picked.length < 10) p.picked.push(id);
     else toast("Up to 10 animations per run.", true);
@@ -3776,6 +3984,7 @@ document.addEventListener("click", async (event) => {
   const t = event.target.closest("[data-ob-cancel],[data-compact-now],[data-pick-winner-file],[data-scroll-candidates],[data-bible-toggle],[data-bible-view],[data-fav-model],[data-model-tab],[data-service-connect],[data-service-disconnect],[data-pick-model],[data-pick-effort],[data-close-settings],[data-settings-tab],[data-add-preset],[data-cancel-add],[data-probe],[data-save-endpoint],[data-pick-check],[data-test-model],[data-remove-endpoint],[data-cli-logout],[data-cli-login],[data-new-project],[data-delete-project],[data-open-project],[data-ob-skip],[data-ob-game],[data-ob-path],[data-ob-nogame],[data-ob-hasgame],[data-ob-home],[data-ob-home-reset],[data-ob-blank],[data-ob-restart],[data-ob-next],[data-ob-back],[data-ob-forge],[data-ob-enter],[data-ob-dim],[data-ob-chip],[data-make-pillar],[data-style-text],[data-remove-style],[data-remove-pillar],[data-toc],[data-upload],[data-new-asset],[data-new-folder],[data-to-folder],[data-make-asset],[data-action],[data-winner],[data-ref],[data-add-ref],[data-pick-ref],[data-upload-ref],[data-close-picker],[data-rebuild],[data-run],[data-open],[data-folder],[data-home],[data-vault],[data-levels],[data-prototype],[data-proto-new],[data-proto-surprise],[data-proto-open],[data-proto-back],[data-proto-restart],[data-proto-full],[data-proto-del],[data-proto-quick],[data-proto-assets],[data-proto-tweak],[data-vault-filter],[data-vault-zip],[data-vault-folder],[data-poly],[data-session],[data-delete],[data-suggest],[data-unattach],[data-settings],[data-close],[data-edit],[data-cancel-edit],[data-save],#newChatBtn,[data-show]");
   if (!t || event.target.closest("[data-st-export],[data-imp-use],[data-key-art]")) return;
   if (t.dataset.delete) { event.stopPropagation(); return deleteChat(t.dataset.delete); }
+  if (t.dataset.chatStop !== undefined) return api(`/api/agent/sessions/${state.sessionId}/stop`, { method: "POST" }).catch((err) => toast(err.message, true));
   if (t.dataset.upload) return uploadTo(t.dataset.upload);
   if (t.dataset.newAsset !== undefined) return newAssetDialog(t.dataset.newAsset);
   if (t.dataset.toc) { event.preventDefault(); return document.getElementById(t.dataset.toc)?.scrollIntoView({ behavior: "smooth", block: "start" }); }

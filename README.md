@@ -189,7 +189,7 @@ Already have a game? **Projects → Import game** takes a Godot, Unity or Unreal
 | Meshy | 3D models, rigging, animation, images (sign in, or paste a key) |
 | fal, Higgsfield | Many image, video and 3D models (sign in) |
 | Google Gemini | Images (key) |
-| Tripo | 3D models (key) |
+| Tripo | 3D models (v3.1, v3.0, v2.5 and the low-poly P1/P2), rigs, preset animations, retopo, re-texture and format conversion. Tripo has no sign-in for apps, so Glob checks your API key with Tripo and shows your credits |
 | Stability AI | Music and loops (key) |
 
 Sound takes live in `<asset>/audio/`. For a voice, the prompt is the line to speak. Drop an MP3/WAV on an asset to add a take. A generator that isn't set up is refused with a message; it never saves a silent placeholder.
@@ -290,6 +290,7 @@ uv run --with pyinstaller python scripts/build_desktop.py   # standalone app
 | `forge/appwindow.py`, `forge/tray.py` | Glob's app window and its tray icon |
 | `forge/launcher.py` | Starting Glob in the background |
 | `forge/providers/` | Gemini, Meshy, Tripo, ElevenLabs and Stability clients |
+| `forge/tripo.py` | Tripo v3 client: key check and balance, generation settings, rig, retarget, retopo, re-texture, convert |
 | `forge/mcp/` | MCP server (stdio, forwards to the app when it runs) |
 | `forge/game_import.py` | Importing Godot / Unity / Unreal projects |
 | `forge/ui/` | The web UI (plain HTML/CSS/JS) |

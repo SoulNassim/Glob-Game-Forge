@@ -13,14 +13,17 @@ import base64
 import json
 import shutil
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from urllib.parse import quote
 
 from forge.models import new_id
 import httpx
 
 from forge import access, asset_studio, game_import, meshy_login, service_gen, services
+from forge.agent import cli_models, cli_runner, llm
 from forge.agent.cli_models import progress_hook
 from forge.blueprint_contract import split_frontmatter
 from forge.config import load_config
@@ -32,8 +35,14 @@ CHATS_DIR = Path("inbox") / "chats"
 ATTACHMENTS_DIR = Path("inbox") / "attachments"
 HANDOFFS_DIR = Path("inbox") / "handoffs"
 MAX_TOOL_ROUNDS = 8
-# Most generations (images, sounds, 3D) one chat message may start. A wrong guess can't drain the user's credits.
+# Most generations (images, sounds, 3D) an agent may start per project before the user says something again, so a
+# wrong guess can't drain their credits. A chat message starts a new count; agents outside the chat get a new one
+# after SPEND_WINDOW_SECONDS. Only this is limited: pages, folders and other free work are not. The app's own
+# buttons don't pass through here: pressing one is the user's say-so.
 MAX_GENERATIONS_PER_TURN = 8
+SPEND_WINDOW_SECONDS = 600
+# A service tool with one of these words in its name only looks something up (polling a job included), unless it also says "generate".
+FREE_SERVICE_WORDS = {"get", "list", "status", "wait", "search", "read", "fetch", "poll", "describe", "info", "check", "find", "show"}
 MAX_FILE_CHARS = 8000
 MAX_COPY_BYTES = 2 * 1024 * 1024 * 1024
 MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024
@@ -122,7 +131,7 @@ Tools (paths relative to the workspace):
 - {"tool": "move", "from": "old.md", "to": "new/old.md"}     also renames folders
 - {"tool": "delete", "path": "notes/old.md"}                  moves a file or folder to .trash/ (recoverable)
 - {"tool": "generate", "path": "02-characters/knight.md", "action": "candidates", "count": 2, "model": "svc:elevenlabs/gpt-image-2.5-sunburst"}
-      action: candidates | variant | edit (both need "instruction") | views | prop_sheet (a level kit: every prop of the
+      action: candidates | variant | edit (both need "instruction") | views | prop_sheet (a level: every prop of the
         level picture on one sheet; "instruction" may list the props) | make_3d | rig | animate (needs "action_ids")
       model is optional (the default image model otherwise); read the generating skill first
 - {"tool": "models", "kind": "image"}                       every image (or "3d") model and how it is reached
@@ -186,6 +195,11 @@ def _is_absolute(path: str) -> bool:
     return bool(re.match(r"^(?:[A-Za-z]:[\\/]|/|~[\\/])", path))
 
 
+def _service_call_is_free(name: str) -> bool:
+    words = set(re.split(r"[^a-z0-9]+", name.lower()))
+    return bool(words & FREE_SERVICE_WORDS) and "generate" not in words
+
+
 MAX_STRAY_REPLIES = 2
 _STRAY_TOOL_SYNTAX = re.compile(r"</?(?:\w+:)?(?:invoke|parameter|function_calls)\b")
 
@@ -247,6 +261,36 @@ class WorkspaceAgent:
         self.model_call = model_call
         # Starts an asset-studio job: (project, request) -> job. Set by the server.
         self.job_starter = job_starter
+        self._spend: dict[str, dict[str, float]] = {}  # project -> {"since", "count"}
+        self._spend_lock = threading.Lock()  # service calls run on worker threads
+        # Chats running as the real CLI: the process (for Stop) and what Glob's tools did for it so far.
+        self._runs: dict[str, dict[str, Any]] = {}
+
+    # --- the limit on generations ------------------------------------------------
+
+    def _reserve_spend(self, project: str, units: int) -> None:
+        with self._spend_lock:
+            now = _now()
+            entry = self._spend.get(project)
+            if not entry or now - entry["since"] >= SPEND_WINDOW_SECONDS:
+                entry = self._spend[project] = {"since": now, "count": 0}
+            if entry["count"] + units > MAX_GENERATIONS_PER_TURN:
+                minutes = max(1, round((SPEND_WINDOW_SECONDS - (now - entry["since"])) / 60))
+                raise ValueError(
+                    f"Not started: {int(entry['count'])} generations have started since the user's last message and the limit is "
+                    f"{MAX_GENERATIONS_PER_TURN}, so a mistake can't spend a lot of credits. Tell the user what is left and ask them to confirm, "
+                    f"then continue in the next message (an agent outside the Glob chat can continue in about {minutes} min).")
+            entry["count"] += units
+
+    def _refund_spend(self, project: str, units: int) -> None:
+        with self._spend_lock:
+            entry = self._spend.get(project)
+            if entry:
+                entry["count"] = max(0, entry["count"] - units)
+
+    def _new_spend_count(self, project: str) -> None:
+        with self._spend_lock:
+            self._spend.pop(project, None)
 
     # --- storage -----------------------------------------------------------------
 
@@ -523,13 +567,20 @@ class WorkspaceAgent:
             if call.get("count"):
                 request["count"] = int(call["count"])
             if action == "animate":
-                request["action_ids"] = [int(a) for a in call.get("action_ids") or []]
-            job = self.job_starter(project, request)
+                # Meshy animations are numbered; Tripo's are named presets such as "preset:walk".
+                request["action_ids"] = [a if isinstance(a, str) and not a.strip().isdigit() else int(a) for a in call.get("action_ids") or []]
+            units = max(1, int(call.get("count") or 1))
+            self._reserve_spend(project, units)
+            try:
+                job = self.job_starter(project, request)
+            except Exception:
+                self._refund_spend(project, units)  # nothing started
+                raise
             used = request.get("model") or ""
             if action == "make_3d" and not used.startswith(service_gen.PREFIX):
                 used_text = f"Meshy / Tripo per Settings ({load_config().default_3d_provider})"
             elif action in ("rig", "animate"):
-                used_text = "Meshy"
+                used_text = "Tripo" if request.get("engine") == "tripo" else "Meshy"
             else:
                 used_text = describe_model(used)
             return {"tool": tool, "path": path, "summary": f"Started {action.replace('_', ' ')} for {path} with {used_text}", "changed": True, "job": job["id"],
@@ -553,6 +604,8 @@ class WorkspaceAgent:
             if tool == "service_tool_info":
                 return {"tool": tool, "path": f"{service}/{name}", "summary": f"Read {service} · {name}", "result": json.dumps(services.tool_schema(service, name))[:MAX_FILE_CHARS]}
             arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+            if not _service_call_is_free(name):
+                self._reserve_spend(project, 1)  # kept even if the call fails: the service may have charged for it
             return {"tool": tool, "path": f"{service}/{name}", "summary": f"Ran {service} · {name}", "result": services.call_tool(service, name, arguments), "changed": True}
         if tool == "save_url":
             url = str(call.get("url") or "")
@@ -580,13 +633,14 @@ class WorkspaceAgent:
 
     # --- context -----------------------------------------------------------------
 
-    def _context_block(self, project: str, session: dict[str, Any], page: dict[str, Any], refs: list[dict[str, Any]]) -> tuple[str, list[tuple[str, str]]]:
+    def _context_block(self, project: str, session: dict[str, Any], page: dict[str, Any], refs: list[dict[str, Any]], *, overview: bool = True) -> tuple[str, list[tuple[str, str]]]:
         ws = self._ws(project)
         parts: list[str] = []
         front = next((ws / name for name in FRONT_PAGES if (ws / name).is_file()), None)
-        if front:
-            parts.append(f"## {front.name} (front page excerpt)\n{front.read_text(encoding='utf-8', errors='ignore')[:2500]}")
-        parts.append("## Workspace tree\n" + (self._tree(ws) or "(empty — nothing has been created yet)"))
+        if overview:
+            if front:
+                parts.append(f"## {front.name} (front page excerpt)\n{front.read_text(encoding='utf-8', errors='ignore')[:2500]}")
+            parts.append("## Workspace tree\n" + (self._tree(ws) or "(empty — nothing has been created yet)"))
         parts.append(f"## Workspace folder on disk\n{ws.resolve()}")
         grants = access.list_grants()
         parts.append("## Granted folders\n" + ("\n".join(f"- {g['path']} ({'read & write' if g['write'] else 'read'})" for g in grants) or "(none yet: use request_access)"))
@@ -644,9 +698,11 @@ class WorkspaceAgent:
     @staticmethod
     def context_tokens(session: dict[str, Any]) -> int:
         """Rough token count of what the next turn sends as conversation (4 characters ≈ 1 token)."""
+        if session.get("cli_session"):
+            return 0  # the CLI keeps and shortens its own conversation
         chars = len(session.get("summary") or "")
         for message in session.get("messages", [])[session.get("compacted", 0):]:
-            chars += min(len(str(message.get("text") or "")), 1800)
+            chars += len(str(message.get("text") or ""))
             chars += sum(len(a.get("summary", "")) for a in message.get("actions") or [])
         return chars // 4
 
@@ -682,8 +738,8 @@ class WorkspaceAgent:
             messages = messages[-limit:]
         for message in messages:
             role = "User" if message.get("role") == "user" else "Agent" if message.get("role") == "agent" else "Note"
-            text = str(message.get("text") or "")[:1800]
-            done = "; ".join(action.get("summary", "") for action in message.get("actions") or [] if action.get("summary"))
+            text = str(message.get("text") or "")
+            done ="; ".join(action.get("summary", "") for action in message.get("actions") or [] if action.get("summary"))
             lines.append(f"{role}: {text}" + (f"\n(Actions: {done})" if done else ""))
         return "\n\n".join(lines)
 
@@ -704,6 +760,85 @@ class WorkspaceAgent:
             images.append((mime, b64))
         return saved, images
 
+    # --- turns as the real CLI -------------------------------------------------------
+
+    @staticmethod
+    def _native_model(session: dict[str, Any]) -> str | None:
+        """The Claude Code model this chat runs on as the real CLI ("" is its default), or None for the step-by-step chat."""
+        if not load_config().agent_native_cli:
+            return None
+        try:
+            model_id = llm.resolve_model(session.get("model") or None)
+        except RuntimeError:
+            return None
+        return model_id.removeprefix("cli:claude/") if model_id.startswith("cli:claude/") else None
+
+    def note_tool_action(self, session_id: str, action: dict[str, Any]) -> None:
+        run = self._runs.get(session_id)
+        if run is not None:
+            run["actions"].append(action)
+
+    def stop_run(self, session_id: str) -> bool:
+        run = self._runs.get(session_id)
+        if not run or not run.get("proc"):
+            return False
+        run["stopped"] = True
+        cli_models.kill_tree(run["proc"])
+        return True
+
+    async def _send_native(self, project: str, session: dict[str, Any], model: str, text: str, images: list[tuple[str, str]],
+                           page: dict[str, Any], refs: list[dict[str, Any]], mcp_base: str) -> dict[str, Any]:
+        ws = self._ws(project).resolve()
+        session_id = session["id"]
+        resume = str(session.get("cli_session") or "")
+        system = f"{glob_prompt(project)}\n\n{cli_runner.ADDENDUM}"
+        mcp_url = f"{mcp_base.rstrip('/')}/api/agent/mcp?project={quote(project)}&session={session_id}"
+        run_state: dict[str, Any] = {"actions": [], "proc": None, "stopped": False}
+        self._runs[session_id] = run_state
+
+        def drain() -> list[dict[str, Any]]:
+            taken, run_state["actions"] = run_state["actions"], []
+            return taken
+
+        def build_prompt(resuming: bool) -> tuple[str, list[tuple[str, str]]]:
+            context, ref_images = self._context_block(project, session, page, refs, overview=not resuming)
+            earlier = ""
+            if not resuming and len(session.get("messages", [])) > 1:  # a chat that began before this run, or whose CLI conversation is gone
+                earlier = "# The chat so far\n" + self._transcript({**session, "messages": session["messages"][:-1]}) + "\n\n"
+            return f"# Context\n{context}\n\n{earlier}# Message from the user\n{text}", (images + ref_images)[:4]
+
+        def attempt(resuming: str) -> cli_runner.Events:
+            prompt, all_images = build_prompt(bool(resuming))
+            return cli_runner.run(ws, model, session.get("effort", "medium"), system, prompt, all_images, mcp_url, resuming, _report, drain,
+                                  on_start=lambda proc: run_state.update(proc=proc))
+
+        _report({"stoppable": True})
+        events: cli_runner.Events | None = None
+        reply, new_session = "", resume
+        try:
+            try:
+                events = await asyncio.to_thread(attempt, resume)
+            except cli_runner.ResumeFailed:
+                events = await asyncio.to_thread(attempt, "")
+            new_session = events.session_id or resume
+            reply = events.reply
+            if run_state["stopped"]:
+                reply = "Stopped. Anything listed below is done."
+            elif events.error:
+                reply = f"The model stopped before it finished: {events.error[:600]}\n\nAnything listed below is done; ask again to continue."
+        except RuntimeError as exc:
+            reply = "Stopped. Anything listed below is done." if run_state["stopped"] else f"{exc}"
+        finally:
+            self._runs.pop(session_id, None)
+        performed = (events.actions if events else []) + run_state["actions"]
+        if any(action.get("changed") and Path(str(action.get("path") or "")).name.upper() == "GAME.MD" for action in performed):
+            self.actions.get_workspace(project).sync_game_md_to_bible()
+        session = self.get_session(project, session_id)
+        session["cli_session"] = new_session
+        session["messages"].append({"role": "agent", "text": reply or "Done.", "actions": performed, "model": f"Claude Code{' · ' + model if model else ''}", "at": _now()})
+        session["context_tokens"] = self.context_tokens(session)
+        return self._save(project, session)
+
     # --- turns -------------------------------------------------------------------
 
     async def send(
@@ -717,6 +852,7 @@ class WorkspaceAgent:
         page: dict[str, Any] | None = None,
         model: str | None = None,
         effort: str | None = None,
+        mcp_base: str = "",
     ) -> dict[str, Any]:
         session = self.get_session(project, session_id)
         text = str(text or "").strip()
@@ -731,6 +867,14 @@ class WorkspaceAgent:
         if session.get("title") in ("", "New chat") and text:
             session["title"] = text[:48] + ("…" if len(text) > 48 else "")
         self._save(project, session)
+        self._new_spend_count(project)
+
+        native_model = self._native_model(session)
+        if native_model is not None:
+            base = mcp_base or f"http://127.0.0.1:{load_config().port or 8420}"
+            return await self._send_native(project, session, native_model, text, uploaded_images, page or {}, refs or [], base)
+        if session.pop("cli_session", None):  # this message won't be in the CLI's conversation, so it can't simply go on later
+            self._save(project, session)
 
         context, ref_images = self._context_block(project, session, page or {}, refs or [])
         images = (uploaded_images + ref_images)[:4]
@@ -741,9 +885,9 @@ class WorkspaceAgent:
         performed: list[dict[str, Any]] = []
         reply_text = ""
         used_model = ""
-        spent_jobs = 0
         stray_replies = 0
-        for _round in range(max(1, load_config().agent_max_tool_rounds or MAX_TOOL_ROUNDS)):
+        max_rounds = max(1, load_config().agent_max_tool_rounds or MAX_TOOL_ROUNDS)
+        for _round in range(max_rounds):
             prompt = f"# Context\n{context}\n\n# Conversation\n{transcript}"
             if tool_log:
                 prompt += "\n\n# Tool results\n" + "\n\n".join(tool_log)
@@ -777,16 +921,9 @@ class WorkspaceAgent:
                 _report_step({"say": reply_text[:2000]})
             if reply_text and more_to_come:
                 tool_log.append(f"(What you told the user just now: {reply_text[:2000]})")  # each round starts fresh: keep its plan
-            for call in calls[:20]:
+            for call in calls:
                 _report_step({"tool": str(call.get("tool") or ""), "path": str(call.get("path") or call.get("to") or call.get("name") or ""), "state": "running"})
                 try:
-                    if call.get("tool") == "generate":
-                        units = max(1, int(call.get("count") or 1))
-                        if spent_jobs + units > MAX_GENERATIONS_PER_TURN:
-                            raise ValueError(
-                                f"Not started: this chat message already started {spent_jobs} generations and the limit is {MAX_GENERATIONS_PER_TURN} "
-                                "per message, so a mistake can't spend a lot of credits. Tell the user what is left and ask them to confirm, then continue in the next message.")
-                        spent_jobs += units
                     if call.get("tool") in SLOW_TOOLS:
                         outcome = await asyncio.to_thread(self.run_tool, project, call)
                     else:
@@ -804,6 +941,9 @@ class WorkspaceAgent:
                     waiting = True
             if waiting or (data.get("done", True) is not False and not (needs_results and not reply_text)):
                 break
+        else:
+            # Without this, a half-done job reads as finished: the last reply was only about the step it was on.
+            reply_text = f"{reply_text}\n\nI stopped because I hit the limit of {max_rounds} steps per message, so this isn't finished. Say \"continue\" to go on, or raise Steps per message in Settings.".strip()
         session = self.get_session(project, session_id)
         session["messages"].append({"role": "agent", "text": reply_text or "Done.", "actions": performed, "model": used_model, "at": _now()})
         session["context_tokens"] = self.context_tokens(session)

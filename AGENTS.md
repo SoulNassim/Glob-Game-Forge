@@ -32,9 +32,11 @@ A coding agent works on a game with placeholders. The user runs `glob connect` o
 | `docs/agent.md` | Setup instructions a new coding agent reads from the website (the sentence on the landing page). Keep it in step with `glob connect`. |
 | `forge/mcp/server.py` | MCP server (stdio + HTTP `/api/mcp`). `advertised_tools()` is the list agents see. Forwards to the running app, else works on files. |
 | `forge/agent/glob_prompt.md` | The Glob role prompt. One source for the chat and the MCP prompt. Edit it here only. |
-| `forge/agent/workspace_agent.py` | Glob chat agent and workspace tools. |
+| `forge/agent/workspace_agent.py` | Glob chat agent and workspace tools. The limit on generations lives in `run_tool`, so every path that spends passes it. |
+| `forge/agent/cli_runner.py` | The chat as the real Claude Code (Settings: "Claude Code works directly"): `--restricted`, its own file tools, `--resume`, and Glob's other tools on `/api/agent/mcp`. Never run it without `--restricted`. |
 | `forge/asset_studio.py` | Asset generation: candidates, winner, 3D, rig, animation, audio takes. |
 | `forge/providers/` | Gemini, Meshy, Tripo, ElevenLabs (images, audio), Stability (audio). `service_mcp.py` runs signed-in services (images, 3D, sounds) via `forge/service_gen.py`. |
+| `forge/tripo.py` | Tripo v3 API client, shared by `providers/tripo_3d.py` and `game_tools.py`: key check + balance (`/api/tripo`, `/api/tripo/connect`; Tripo has no OAuth, only keys), generation settings per model, rig, retarget, retopo, re-texture, convert. `game_tools.rig_engine()` picks Tripo or Meshy for rig/animate; the asset's `rig_provider:` keeps animations with the rig's maker. |
 | `forge/game_import.py` | Game scan and import. Skips Glob's own dirs. |
 | `forge/watcher/workspace_watcher.py` | Pushes live updates when workspace files change. |
 | `forge/server/app.py` | FastAPI routes. `forge/server/security.py` is the local-only request guard. |

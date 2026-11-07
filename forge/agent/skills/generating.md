@@ -37,8 +37,8 @@ something specific always runs, and it is named in the "Generation setup" block 
 | edit | an edit of the winner | needs `instruction` |
 | views | turnaround views (front, side, back...) of the winner | good input for 3D |
 | make_3d | a 3D model (GLB) from the winner image | `model`: a `svc:` 3D model (for example `svc:higgsfield/meshy_v7_image_to_3d`), or leave it out for the Meshy / Tripo settings |
-| rig | a rigged character from the 3D model | Meshy |
-| animate | animations on the rig | needs `action_ids` |
+| rig | a rigged character from the 3D model | Tripo when it is the 3D engine in Settings (rig_type and skeleton), else Meshy |
+| animate | animations on the rig | needs `action_ids`: Meshy animation ids, or Tripo presets such as `preset:walk` |
 
 Make 3D, rig and animate need a **winner** first: use `pick_winner` once candidates exist.
 
